@@ -4,7 +4,9 @@
 //!   transfer-and-call carrying the rules; the bounty goes live once its posting check passes.
 //! - [`claims`]: a Whitehat's claim balance; a claim stores its sealed exploit as its own
 //!   OutLayer secret and requests its job at once; only OutLayer's callback delivers a verdict.
-//! - [`payout`]: a PAYS verdict pays the whole bounty to the Whitehat and closes it.
+//! - [`pauses`]: a PAYS verdict closes the bounty; a pause for every covered contract is
+//!   signed by NEAR Chain Signatures, checked and stored, and only then is it paid.
+//! - [`payout`]: the whole bounty is paid to the Whitehat.
 //! - [`outlayer`]: the exact OutLayer requests (secret, access rule, job).
 //!
 //! Deployment (R2.1): one transaction deploys the code, calls [`Contract::new`] and deletes
@@ -14,10 +16,13 @@
 use bountee_formats::{BlockRef, BountyId, Bytes, Rules, Seed, Verdict, B256};
 use near_sdk::json_types::U128;
 use near_sdk::store::LookupMap;
-use near_sdk::{env, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault};
+use near_sdk::{
+    env, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, PublicKey,
+};
 
 mod claims;
 mod outlayer;
+mod pauses;
 mod payout;
 mod posting;
 
@@ -29,6 +34,9 @@ pub struct Config {
     pub outlayer: AccountId,
     /// NEAR Chain Signatures' MPC contract (`v1.signer-prod.testnet` on testnet).
     pub mpc: AccountId,
+    /// That MPC contract's root secp256k1 key (its `public_key` view, domain 0), from which
+    /// every bounty's pause-role address is derived (D25) and checked (R7.2).
+    pub mpc_root_public_key: PublicKey,
     /// USDC's NEP-141 contract: the only token a bounty is posted and paid in.
     pub usdc: AccountId,
     /// The judge build every bounty is judged by; every posting must name it (R1.3).
@@ -78,14 +86,26 @@ pub mod gas {
     pub const STORE_SECRET: Gas = Gas::from_tgas(30);
     /// For the posting check's callback.
     pub const ON_POSTING_CHECKED: Gas = Gas::from_tgas(15);
-    /// For a claim's verdict callback, including starting the payout on PAYS.
-    pub const ON_CLAIM_JUDGED: Gas = Gas::from_tgas(60);
+    /// For a claim's verdict callback's own work; on PAYS, [`pause_signing`] more.
+    pub const ON_CLAIM_JUDGED: Gas = Gas::from_tgas(20);
     /// Kept back by a method for its own work after it schedules a job.
     pub const TAIL: Gas = Gas::from_tgas(10);
     /// For each step of the payout.
     pub const USDC_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
     pub const USDC_TRANSFER: Gas = Gas::from_tgas(15);
     pub const ON_PAID: Gas = Gas::from_tgas(10);
+    /// For each pause's `sign` on the MPC contract, which asks for at least 15 Tgas and
+    /// keeps 7 for its own yield callback (testnet config, Nov 4).
+    pub const SIGN_PAUSE: Gas = Gas::from_tgas(20);
+    /// For checking and storing the signed pauses, then the payout's three steps.
+    pub const ON_PAUSES_SIGNED: Gas = Gas::from_tgas(50);
+    /// What the claim's job is left at least, before gas is kept back to sign pauses.
+    pub const MIN_JOB: Gas = Gas::from_tgas(60);
+
+    /// Gas to sign the pauses of `n` covered contracts and pay, from the call that starts it.
+    pub const fn pause_signing(n: usize) -> Gas {
+        Gas::from_gas(SIGN_PAUSE.as_gas() * n as u64 + ON_PAUSES_SIGNED.as_gas() + TAIL.as_gas())
+    }
 }
 
 #[derive(BorshStorageKey)]
@@ -108,7 +128,10 @@ pub enum BountyState {
     Live,
     /// Its posting check failed; the USDC went back to the Protocol (R1.6).
     CheckFailed,
-    /// A PAYS verdict closed it; the payout is under way. It takes no more claims (R3.4).
+    /// A PAYS verdict closed it; its pauses are being signed, or wait for a retry, before
+    /// the payout (R2.5). It takes no more claims (R3.4).
+    Signing,
+    /// Every pause is signed and stored; the payout is under way.
     Paying,
     /// The whole bounty was paid to the winning claim (R3.2).
     Paid,
@@ -121,6 +144,12 @@ pub struct Bounty {
     pub winning_claim: Option<u64>,
     /// What is left of the posting fee for this bounty's later costs.
     pub fee_reserve: NearToken,
+    /// Every covered contract's signed pause, stored at once when all are signed (R7.3).
+    pub signed_pauses: Vec<pauses::SignedPause>,
+    /// The block height a pause-signing request started at, while it is under way, so a
+    /// retry can't run beside it. A request older than [`pauses::SIGNING_STALE_BLOCKS`] is
+    /// treated as over: its callback must have run (or died) by then.
+    pub signing_since: Option<u64>,
 }
 
 /// A bounty as its view returns it: every rule exactly as posted (R1.2).
@@ -130,6 +159,10 @@ pub struct BountyView {
     pub rules: Rules,
     pub state: BountyState,
     pub winning_claim: Option<u64>,
+    /// The signed pauses, for anyone to broadcast (R7.3); empty until all are signed.
+    pub signed_pauses: Vec<pauses::SignedPause>,
+    /// Whether pause signing is under way; a `signing` bounty that isn't waits for a retry.
+    pub signing_pauses: bool,
 }
 
 /// Where a claim is in its life.
@@ -196,6 +229,11 @@ impl Contract {
             config.seed.tokens.is_empty(),
             "the seed is native coin only"
         );
+        require!(
+            pauses::derived_key(&config.mpc_root_public_key, &env::current_account_id(), "")
+                .is_some(),
+            "the MPC root key must be a secp256k1 key"
+        );
         let me = env::current_account_id();
         payout::ext_ft::ext(config.usdc.clone())
             .with_attached_deposit(env::attached_deposit())
@@ -226,6 +264,11 @@ impl Contract {
             "secret_row_overhead_bytes": fees::SECRET_ROW_OVERHEAD_BYTES,
             "min_posting_gas": gas::MIN_POSTING,
             "min_claim_gas": gas::MIN_CLAIM,
+            "min_sign_pauses_gas_per_contract": gas::SIGN_PAUSE,
+            "min_sign_pauses_gas_base": gas::pause_signing(0),
+            "pause_gas_limit": pauses::PAUSE_GAS_LIMIT,
+            "pause_max_fee_per_gas": U128(pauses::PAUSE_MAX_FEE_PER_GAS),
+            "pause_max_priority_fee_per_gas": U128(pauses::PAUSE_MAX_PRIORITY_FEE_PER_GAS),
         })
     }
 
@@ -235,6 +278,8 @@ impl Contract {
             rules: b.rules.clone(),
             state: b.state,
             winning_claim: b.winning_claim,
+            signed_pauses: b.signed_pauses.clone(),
+            signing_pauses: b.signing_in_flight(),
         })
     }
 
