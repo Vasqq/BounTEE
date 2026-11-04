@@ -136,9 +136,9 @@ export const parseRules: (v: unknown) => Rules = object<Rules>({
   judge_build_hash: b256,
 });
 
-const parseBlockRef = object<BlockRef>({ number: safeU64, hash: b256 });
+export const parseBlockRef = object<BlockRef>({ number: safeU64, hash: b256 });
 
-const parseAccountProof = object<AccountProof>({
+export const parseAccountProof = object<AccountProof>({
   address: evmAddress,
   nonce: u64,
   balance: uint,
@@ -201,6 +201,21 @@ export const parseReplay: (v: unknown) => Replay = object<Replay>({
 });
 
 export const parseJob: (v: unknown) => Job = object<Job>({ replay: parseReplay });
+
+/**
+ * What a Whitehat seals (R5.1): the exploit with their account bound inside it (R5.4).
+ * Sealed as base64(raw DEFLATE(JSON)), the value of the secret `BOUNTEE_SEALED_EXPLOIT`
+ * (see job.rs).
+ */
+export interface SealedBundle {
+  whitehat: string;
+  exploit: Exploit;
+}
+
+export const parseSealedBundle: (v: unknown) => SealedBundle = object<SealedBundle>({
+  whitehat: accountId,
+  exploit: parseExploit,
+});
 
 const outcomeOf = (v: unknown): Outcome =>
   v === "PAYS" || v === "ZERO" || v === "INVALID" ? v : fail("outcome", v);

@@ -22,7 +22,7 @@ mod verdict;
 pub mod pause_role;
 
 pub use claim::{AccountProof, BlockRef, Claim, StorageProof};
-pub use job::{Exploit, ExploitTransaction, Job, Replay};
+pub use job::{Exploit, ExploitTransaction, Job, JudgeClaim, Replay, SealedBundle};
 pub use primitives::{
     is_account_id, is_bounty_name, AccountId, Base64, BountyName, Bytes, EvmAddress, FormatError,
     PublicKey, SafeU64, Uint, B256, MAX_SAFE_INTEGER, U64,

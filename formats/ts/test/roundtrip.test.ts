@@ -9,7 +9,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import fc from "fast-check";
 import { beforeAll, expect, test } from "vitest";
-import { isAccountId, isBountyName, pauseRole, parseBountyId, parseClaim, parseExploit, parseJob, parseRules, parseVerdict, REASONS, toJson } from "../src/index.ts";
+import { isAccountId, isBountyName, pauseRole, parseBountyId, parseClaim, parseExploit, parseJob, parseRules, parseSealedBundle, parseVerdict, REASONS, toJson } from "../src/index.ts";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
 let echoBin = "";
@@ -110,6 +110,8 @@ const claimArb = fc.record({
   sealed_exploit: fc.uint8Array({ minLength: 1, maxLength: 60 }).map((b) => Buffer.from(b).toString("base64")),
 });
 
+const sealedBundleArb = fc.record({ whitehat: accountId, exploit: exploitArb });
+
 const verdictArb = fc.constantFrom(...REASONS).map((r) => ({ outcome: r.outcome, reason: r.reason }));
 
 const formats = [
@@ -119,6 +121,7 @@ const formats = [
   ["bounty_id", bountyId, parseBountyId],
   ["exploit", exploitArb, parseExploit],
   ["job", jobArb, parseJob],
+  ["sealed_bundle", sealedBundleArb, parseSealedBundle],
 ] as const;
 
 test.each(formats.map((f) => [f[0], f]))("%s: Rust writes back exactly what TypeScript wrote", (_k, f) => {

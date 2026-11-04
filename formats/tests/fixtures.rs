@@ -1,7 +1,9 @@
 //! Ticket #6: the rules (R1.1), claim and verdict formats parse and write back unchanged,
 //! and refuse what they must. The TypeScript side runs the same cases from the same file.
 
-use bountee_formats::{from_json, to_json, BountyId, Claim, Exploit, Job, Rules, Verdict};
+use bountee_formats::{
+    from_json, to_json, BountyId, Claim, Exploit, Job, Rules, SealedBundle, Verdict,
+};
 use serde_json::Value;
 
 fn cases() -> Value {
@@ -21,6 +23,7 @@ fn round_trip(kind: &str, value: &Value) -> Result<Value, String> {
         "bounty_id" => go::<BountyId>(value),
         "exploit" => go::<Exploit>(value),
         "job" => go::<Job>(value),
+        "sealed_bundle" => go::<SealedBundle>(value),
         other => panic!("unknown kind {other}"),
     }
 }
