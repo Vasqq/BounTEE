@@ -1,0 +1,14 @@
+[package]
+name = "test-outlayer"
+version = "0.1.0"
+description = "TEST STAND-IN for OutLayer's contract, used only by the bounty contract's seam C tests"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { workspace = true }

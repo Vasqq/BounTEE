@@ -1,0 +1,39 @@
+//! BounTEE's shared formats, defined once.
+//!
+//! - [`Rules`]: a bounty's rules, every field R1.1 records.
+//! - [`Claim`]: what a Whitehat submits: the bounty, their account, the claim's block, its
+//!   header and state proofs, and the sealed exploit.
+//! - [`Verdict`]: the judge's answer, PAYS, ZERO or INVALID with one coarse reason (R5.5).
+//! - [`pause_role`]: D25, a bounty's pause-role address under NEAR Chain Signatures.
+//!
+//! The wire format is JSON. This crate is the definition; `formats/ts` is its TypeScript
+//! twin, and the round-trip tests in `formats/ts/test` hold the two to the same bytes.
+//! Shared fixtures live in `formats/fixtures`.
+
+mod claim;
+mod primitives;
+mod rules;
+mod verdict;
+
+#[cfg(feature = "pause-role")]
+pub mod pause_role;
+
+pub use claim::{AccountProof, BlockRef, Claim, StorageProof};
+pub use primitives::{
+    is_account_id, is_bounty_name, AccountId, Base64, BountyName, Bytes, EvmAddress, FormatError,
+    PublicKey, SafeU64, Uint, B256, MAX_SAFE_INTEGER, U64,
+};
+pub use rules::{
+    BountyId, CoveredContract, ListedToken, Rules, Seed, Token, TokenAmount, RECENCY_LIMIT_SECS,
+};
+pub use verdict::{Outcome, Reason, Verdict};
+
+/// Parse one of the formats from its JSON spelling, refusing unknown fields.
+pub fn from_json<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, FormatError> {
+    serde_json::from_str(json).map_err(|e| FormatError(e.to_string()))
+}
+
+/// Write one of the formats as JSON, fields in their defined order.
+pub fn to_json<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value).expect("formats always serialize")
+}

@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The same suites `pnpm test` runs locally (scripts/test-all.sh).
+        suite: [formats, j, c, t, w, e]
+    steps:
+      - uses: actions/checkout@v4
+
+      # rustup installs each toolchain on first use from rust-toolchain.toml
+      # (repo root: formats + judge; contract/: the bounty contract).
+      - name: Rust caches
+        if: contains(fromJSON('["formats","j","c"]'), matrix.suite)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            contract -> target
+
+      - name: wasmtime
+        if: matrix.suite == 'j'
+        uses: bytecodealliance/actions/wasmtime/setup@v1
+        with:
+          version: "v50.0.1"
+
+      - name: Foundry
+        if: matrix.suite == 'e'
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.0.0
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Playwright browser
+        if: matrix.suite == 'w'
+        run: pnpm --filter @bountee/web exec playwright install --with-deps chromium
+
+      - name: Test ${{ matrix.suite }}
+        run: bash scripts/test-all.sh ${{ matrix.suite }}

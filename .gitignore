@@ -1,0 +1,25 @@
+# Rust
+target/
+
+# Node
+node_modules/
+*.tsbuildinfo
+
+# Next.js
+/web/.next/
+/web/next-env.d.ts
+
+# Playwright
+/web/test-results/
+/web/playwright-report/
+
+# Foundry
+/demo/out/
+/demo/cache/
+/demo/dependencies/
+
+# Secrets never live in the repo (shared testnet secrets: ~/.bountee-testnet/)
+.env
+.env.*
+
+.DS_Store

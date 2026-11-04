@@ -1,0 +1,27 @@
+{
+  "name": "@bountee/web",
+  "version": "0.1.0",
+  "description": "BounTEE's web app (scaffold only; design is tickets #29-#32)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "playwright test",
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "dependencies": {
+    "@bountee/formats": "workspace:*",
+    "next": "16.4.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "~5.9.3"
+  }
+}

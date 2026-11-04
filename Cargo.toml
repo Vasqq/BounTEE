@@ -1,0 +1,27 @@
+# Rust workspace for the shared formats and the judge, on the toolchain in
+# ./rust-toolchain.toml (the judge's wasm32-wasip2 build needs rustc >= 1.91).
+# The bounty contract is its own workspace in contract/, on its own older toolchain
+# (NEAR contracts must build with rustc <= 1.86); see contract/rust-toolchain.toml.
+[workspace]
+resolver = "2"
+members = ["formats", "judge"]
+exclude = ["contract"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Vasqq/bountee"
+
+[workspace.dependencies]
+bountee-formats = { path = "formats", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# The judge is size- and determinism-sensitive WebAssembly.
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true

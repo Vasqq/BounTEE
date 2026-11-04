@@ -1,0 +1,45 @@
+# The bounty contract's own workspace, on contract/rust-toolchain.toml (rustc 1.86).
+# resolver 3 picks the newest dependency versions that still support rust-version 1.86.
+[workspace]
+resolver = "3"
+members = [".", "tests/stand-ins/test-outlayer", "tests/stand-ins/test-mpc"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Vasqq/bountee"
+rust-version = "1.86"
+
+[workspace.dependencies]
+near-sdk = "5"
+
+[package]
+name = "bountee-contract"
+version = "0.1.0"
+description = "BounTEE's keyless bounty contract on NEAR"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { workspace = true }
+bountee-formats = { path = "../formats", default-features = false, features = ["near"] }
+
+[dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }
+near-workspaces = { version = ">=0.18, <0.25", features = ["unstable"] }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+anyhow = "1"
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true

@@ -1,0 +1,22 @@
+[package]
+name = "bountee-judge"
+version = "0.1.0"
+description = "BounTEE's judge: one WebAssembly build, run by OutLayer in the enclave and locally by the command-line tool"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The WebAssembly target is the one line in `judge/wasm-target`; every build script,
+# test harness and CI job reads it from there.
+
+[[bin]]
+name = "bountee-judge"
+path = "src/main.rs"
+
+[dependencies]
+bountee-formats = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+bountee-formats = { workspace = true }
