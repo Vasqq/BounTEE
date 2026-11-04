@@ -1,36 +1,309 @@
-//! BounTEE's bounty contract. Scaffold only (ticket #6): it is deployed with the accounts
-//! of OutLayer and the MPC network and the judge's build hash, and reports them. Posting,
-//! claims and payouts land in the contract tickets.
+//! BounTEE's bounty contract: a keyless NEAR contract holding many bounties.
+//!
+//! - [`posting`]: the posting fee in NEAR, then the bounty amount as one USDC
+//!   transfer-and-call carrying the rules; the bounty goes live once its posting check passes.
+//! - [`claims`]: a Whitehat's claim balance; a claim stores its sealed exploit as its own
+//!   OutLayer secret and requests its job at once; only OutLayer's callback delivers a verdict.
+//! - [`payout`]: a PAYS verdict pays the whole bounty to the Whitehat and closes it.
+//! - [`outlayer`]: the exact OutLayer requests (secret, access rule, job).
+//!
+//! Deployment (R2.1): one transaction deploys the code, calls [`Contract::new`] and deletes
+//! the account's only key. Nothing in the contract adds a key, deploys code or changes the
+//! configuration afterwards.
 
-use bountee_formats::B256;
-use near_sdk::{near, AccountId, PanicOnDefault};
+use bountee_formats::{BlockRef, BountyId, Bytes, Rules, Seed, Verdict, B256};
+use near_sdk::json_types::U128;
+use near_sdk::store::LookupMap;
+use near_sdk::{env, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault};
+
+mod claims;
+mod outlayer;
+mod payout;
+mod posting;
+
+/// What the contract is pinned to at deployment and never changes (R1.3).
+#[near(serializers = [json, borsh])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Config {
+    /// OutLayer's contract: the only account whose job results become verdicts (R2.2).
+    pub outlayer: AccountId,
+    /// NEAR Chain Signatures' MPC contract (`v1.signer-prod.testnet` on testnet).
+    pub mpc: AccountId,
+    /// USDC's NEP-141 contract: the only token a bounty is posted and paid in.
+    pub usdc: AccountId,
+    /// The judge build every bounty is judged by; every posting must name it (R1.3).
+    pub judge_build_hash: B256,
+    /// Where OutLayer fetches the judge's wasm. What runs is chosen by the hash, never the URL.
+    pub judge_wasm_url: String,
+    /// The seed every bounty's replay starts fresh accounts with; set by BounTEE (R1.1, R4.7).
+    pub seed: Seed,
+}
+
+/// Costs, all in yoctoNEAR. The contract never pays any of them from its own balance (R11.4).
+pub mod fees {
+    use near_sdk::NearToken;
+
+    /// NEAR's storage price: 10^19 yoctoNEAR per byte.
+    pub const STORAGE_PRICE_PER_BYTE: u128 = 10_000_000_000_000_000_000;
+    /// Attached to every OutLayer job; covers the job's resource limits (0.00701 NEAR on
+    /// testnet, Nov 4). OutLayer refunds what the job doesn't use to its payer.
+    pub const JOB_DEPOSIT: NearToken = NearToken::from_millinear(20);
+    /// Input bytes OutLayer takes with no deposit; above this it holds 1 storage price per
+    /// byte while the job runs and refunds it to the payer at settlement.
+    pub const JOB_INPUT_FREE_BYTES: u64 = 32 * 1024;
+    /// Bytes allowed for a secret row beyond its ciphertext (accessor, profile, owner,
+    /// access rule, indexes). OutLayer refunds the excess to the contract.
+    pub const SECRET_ROW_OVERHEAD_BYTES: u64 = 1024;
+    /// Storage a bounty's record may use; a posting needing more is refused.
+    pub const BOUNTY_STORAGE_BYTES: u64 = 10_000;
+    /// Registers a winning Whitehat with USDC if needed (R2.7); the token refunds the excess.
+    pub const USDC_REGISTRATION: NearToken = NearToken::from_micronear(12_500);
+    /// The posting fee: the posting check's job, the bounty's storage, the winner's USDC
+    /// registration and the payout's yoctoNEAR, the release and publication jobs, and up to
+    /// three pause verifications per covered chain. Not refunded if the posting is refused.
+    pub const POSTING_FEE: NearToken = NearToken::from_millinear(500);
+}
+
+/// Gas floors and the gas kept for callbacks.
+pub mod gas {
+    use near_sdk::Gas;
+
+    /// `ft_on_transfer` refuses a posting with less left than this, so the token refunds the
+    /// USDC instead of keeping it with no check running (spike #4: OutLayer needs ~55 Tgas).
+    pub const MIN_POSTING: Gas = Gas::from_tgas(100);
+    /// `submit_claim` refuses a claim attached less than this.
+    pub const MIN_CLAIM: Gas = Gas::from_tgas(200);
+    /// For `store_secrets` on OutLayer.
+    pub const STORE_SECRET: Gas = Gas::from_tgas(30);
+    /// For the posting check's callback.
+    pub const ON_POSTING_CHECKED: Gas = Gas::from_tgas(15);
+    /// For a claim's verdict callback, including starting the payout on PAYS.
+    pub const ON_CLAIM_JUDGED: Gas = Gas::from_tgas(60);
+    /// Kept back by a method for its own work after it schedules a job.
+    pub const TAIL: Gas = Gas::from_tgas(10);
+    /// For each step of the payout.
+    pub const USDC_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
+    pub const USDC_TRANSFER: Gas = Gas::from_tgas(15);
+    pub const ON_PAID: Gas = Gas::from_tgas(10);
+}
+
+#[derive(BorshStorageKey)]
+#[near]
+enum Key {
+    Bounties,
+    Claims,
+    PostingFees,
+    ClaimBalances,
+}
+
+/// Where a bounty is in its life.
+#[near(serializers = [json, borsh])]
+#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BountyState {
+    /// Posted; its posting check hasn't passed yet, so it takes no claims (R3.12).
+    Checking,
+    /// Taking claims.
+    Live,
+    /// Its posting check failed; the USDC went back to the Protocol (R1.6).
+    CheckFailed,
+    /// A PAYS verdict closed it; the payout is under way. It takes no more claims (R3.4).
+    Paying,
+    /// The whole bounty was paid to the winning claim (R3.2).
+    Paid,
+}
+
+#[near(serializers = [borsh])]
+pub struct Bounty {
+    pub rules: Rules,
+    pub state: BountyState,
+    pub winning_claim: Option<u64>,
+    /// What is left of the posting fee for this bounty's later costs.
+    pub fee_reserve: NearToken,
+}
+
+/// A bounty as its view returns it: every rule exactly as posted (R1.2).
+#[near(serializers = [json])]
+pub struct BountyView {
+    pub id: BountyId,
+    pub rules: Rules,
+    pub state: BountyState,
+    pub winning_claim: Option<u64>,
+}
+
+/// Where a claim is in its life.
+#[near(serializers = [json, borsh])]
+#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClaimState {
+    /// Its sealed exploit is being stored as an OutLayer secret.
+    Storing,
+    /// The secret couldn't be stored; nothing was judged and its costs went back to the
+    /// claim balance.
+    StoreFailed,
+    /// Its job is requested and the verdict hasn't arrived.
+    Judging,
+    /// The job failed or was refused: no verdict, and nothing moved (R2.6).
+    NoVerdict,
+    /// The verdict is recorded.
+    Judged,
+}
+
+#[near(serializers = [json, borsh])]
+#[derive(Clone)]
+pub struct ClaimRecord {
+    pub bounty: BountyId,
+    /// The claiming account: the one that filed the claim and is paid on PAYS.
+    pub whitehat: AccountId,
+    pub block: BlockRef,
+    pub header: Bytes,
+    /// sha256 of the proofs exactly as submitted; the contract forwards them unparsed.
+    pub proofs_sha256: B256,
+    /// NEAR block time the contract recorded at submission (R2.8).
+    pub submitted_at_ns: near_sdk::json_types::U64,
+    /// The OutLayer secret profile holding this claim's sealed exploit; used once.
+    pub secret_profile: String,
+    pub state: ClaimState,
+    pub verdict: Option<Verdict>,
+}
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Contract {
     config: Config,
-}
-
-/// What the contract is pinned to at deployment (R1.3).
-#[near(serializers = [json, borsh])]
-#[derive(Clone, Debug, PartialEq)]
-pub struct Config {
-    /// OutLayer's contract: the only caller whose verdicts are accepted (R2.2).
-    pub outlayer: AccountId,
-    /// NEAR Chain Signatures' MPC contract (`v1.signer-prod.testnet` on testnet).
-    pub mpc: AccountId,
-    /// The judge build every bounty is judged by.
-    pub judge_build_hash: B256,
+    bounties: LookupMap<BountyId, Bounty>,
+    claims: LookupMap<u64, ClaimRecord>,
+    next_claim_id: u64,
+    /// NEAR each Protocol has prepaid toward posting fees.
+    posting_fees: LookupMap<AccountId, NearToken>,
+    /// NEAR each Whitehat has prepaid toward claims (ADR-0007).
+    claim_balances: LookupMap<AccountId, NearToken>,
 }
 
 #[near]
 impl Contract {
+    /// Pins the configuration. The attached deposit registers this contract with USDC, so
+    /// it can receive bounty amounts; the deployer pays it, never the contract.
     #[init]
+    #[payable]
     pub fn new(config: Config) -> Self {
-        Self { config }
+        require!(
+            env::attached_deposit() >= fees::USDC_REGISTRATION,
+            "attach the USDC registration deposit"
+        );
+        let me = env::current_account_id();
+        payout::ext_ft::ext(config.usdc.clone())
+            .with_attached_deposit(env::attached_deposit())
+            .with_static_gas(gas::USDC_STORAGE_DEPOSIT)
+            .storage_deposit(Some(me), Some(true))
+            .detach();
+        Self {
+            config,
+            bounties: LookupMap::new(Key::Bounties),
+            claims: LookupMap::new(Key::Claims),
+            next_claim_id: 0,
+            posting_fees: LookupMap::new(Key::PostingFees),
+            claim_balances: LookupMap::new(Key::ClaimBalances),
+        }
     }
 
     pub fn config(&self) -> Config {
         self.config.clone()
     }
+
+    /// The fixed costs, in yoctoNEAR, and the gas floors, in gas units.
+    pub fn fees(&self) -> near_sdk::serde_json::Value {
+        near_sdk::serde_json::json!({
+            "posting_fee": fees::POSTING_FEE,
+            "job_deposit": fees::JOB_DEPOSIT,
+            "job_input_free_bytes": fees::JOB_INPUT_FREE_BYTES,
+            "storage_price_per_byte": U128(fees::STORAGE_PRICE_PER_BYTE),
+            "secret_row_overhead_bytes": fees::SECRET_ROW_OVERHEAD_BYTES,
+            "min_posting_gas": gas::MIN_POSTING,
+            "min_claim_gas": gas::MIN_CLAIM,
+        })
+    }
+
+    pub fn bounty(&self, id: BountyId) -> Option<BountyView> {
+        self.bounties.get(&id).map(|b| BountyView {
+            id: id.clone(),
+            rules: b.rules.clone(),
+            state: b.state,
+            winning_claim: b.winning_claim,
+        })
+    }
+
+    pub fn claim(&self, claim_id: u64) -> Option<ClaimRecord> {
+        self.claims.get(&claim_id).cloned()
+    }
+
+    pub fn posting_fee_balance(&self, account_id: AccountId) -> NearToken {
+        self.posting_fees
+            .get(&account_id)
+            .copied()
+            .unwrap_or(NearToken::from_yoctonear(0))
+    }
+
+    pub fn claim_balance(&self, account_id: AccountId) -> NearToken {
+        self.claim_balances
+            .get(&account_id)
+            .copied()
+            .unwrap_or(NearToken::from_yoctonear(0))
+    }
+}
+
+impl Contract {
+    /// Credit an attached deposit, less the storage a new balance entry takes, so a
+    /// first deposit pays for its own entry and never the contract (R11.4).
+    fn credit_deposit(
+        map: &mut LookupMap<AccountId, NearToken>,
+        who: &AccountId,
+        amount: NearToken,
+    ) {
+        let before = env::storage_usage();
+        Self::credit(map, who, amount);
+        map.flush();
+        let entry = NearToken::from_yoctonear(
+            env::storage_usage().saturating_sub(before) as u128 * fees::STORAGE_PRICE_PER_BYTE,
+        );
+        require!(
+            amount > entry,
+            "the deposit doesn't cover the storage of its balance"
+        );
+        let have = map.get(who).copied().expect("just credited");
+        map.insert(who.clone(), have.saturating_sub(entry));
+    }
+
+    fn credit(map: &mut LookupMap<AccountId, NearToken>, who: &AccountId, amount: NearToken) {
+        let have = map
+            .get(who)
+            .copied()
+            .unwrap_or(NearToken::from_yoctonear(0));
+        map.insert(who.clone(), have.saturating_add(amount));
+    }
+
+    /// Gas left in this call after `keep` is set aside.
+    fn gas_left(keep: Gas) -> Gas {
+        env::prepaid_gas()
+            .saturating_sub(env::used_gas())
+            .saturating_sub(keep)
+    }
+}
+
+/// NEP-297 events, so tools can follow a bounty and a claim live (D23).
+pub(crate) fn emit(event: &str, data: near_sdk::serde_json::Value) {
+    env::log_str(&format!(
+        "EVENT_JSON:{}",
+        near_sdk::serde_json::json!({
+            "standard": "bountee",
+            "version": "1.0.0",
+            "event": event,
+            "data": [data],
+        })
+    ));
+}
+
+pub(crate) fn to_formats_account(id: &AccountId) -> bountee_formats::AccountId {
+    bountee_formats::AccountId::parse(id.as_str())
+        .unwrap_or_else(|_| env::panic_str("this account can't hold a bounty"))
 }
