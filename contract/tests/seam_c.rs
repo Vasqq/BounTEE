@@ -932,3 +932,57 @@ async fn a_deployment_with_an_erc20_seed_is_refused() -> anyhow::Result<()> {
     assert!(failure_text(&r).contains("native coin only"), "{r:?}");
     Ok(())
 }
+
+// ---- Ticket #15: sealing ---------------------------------------------------------------
+//
+// Seam C here: the contract's public record of a ZERO or INVALID claim, and the access rule
+// it stores (R5.7 is also asserted in
+// `a_claim_draws_from_the_claim_balance_and_requests_its_job_at_once` and
+// `the_contract_account_is_keyless`). Misses: whether real OutLayer enforces the rule (T).
+
+/// R5.5, R5.7: a ZERO or INVALID claim records publicly only its one coarse reason: the claim
+/// view and every event carry the verdict and nothing more, never the sealed exploit, even
+/// if the job's output held more than a verdict; the sealed exploit is kept only as the
+/// contract's own secret, under the rule naming the pinned build and the contract.
+#[tokio::test]
+async fn r5_5_r5_7_a_failed_claim_records_only_its_coarse_reason() -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    let leaky = r#"{"outcome":"ZERO","reason":"below_minimum_theft","gain":"99999"}"#;
+    for (output, recorded) in [
+        (ZERO, Some(ZERO)),
+        (INVALID, Some(INVALID)),
+        (leaky, None),
+    ] {
+        s.script(json!({ "output": output })).await?;
+        let r = s.submit_claim(&s.whitehat, "vault").await?;
+        let logs = r.logs().join("\n");
+        let id: u64 = r.into_result()?.json()?;
+        let claim = s.claim(id).await?;
+        let public = format!("{claim}\n{logs}");
+        assert!(!public.contains(SEALED), "the sealed exploit is not published");
+        assert!(!public.contains("99999"), "nothing beyond the coarse reason");
+        match recorded {
+            Some(verdict) => {
+                assert_eq!(claim["verdict"], serde_json::from_str::<Value>(verdict)?);
+                assert_eq!(claim["verdict"].as_object().unwrap().len(), 2);
+            }
+            None => assert_eq!(claim["state"], "no_verdict", "{claim}"),
+        }
+        let secret: Value = s
+            .test_outlayer
+            .view("secret")
+            .args_json(json!({ "owner": s.contract.id(), "profile": claim["secret_profile"] }))
+            .await?
+            .json()?;
+        let access: Value = serde_json::from_str(secret["access"].as_str().unwrap())?;
+        assert_eq!(
+            access,
+            json!({ "Logic": { "operator": "And", "conditions": [
+                { "WasmHash": { "hash": &JUDGE_BUILD_HASH[2..] } },
+                { "Predecessor": { "condition": { "Whitelist": { "accounts": [s.contract.id()] } } } },
+            ] } })
+        );
+    }
+    assert!(s.worker.view_access_keys(s.contract.id()).await?.is_empty());
+    Ok(())
+}
