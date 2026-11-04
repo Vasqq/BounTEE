@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Drainer, Token, Vault} from "../src/Fixture.sol";
+import {Drainer, Factory, Token, Vault} from "../src/Fixture.sol";
 
 /// The cheatcodes these scripts use (forge-std's `Vm`, cut down so the fixture needs no
 /// dependencies).
@@ -20,7 +20,8 @@ abstract contract Base {
 }
 
 /// Deploys the fixture state, broadcast by anvil's first account: a token, two vaults
-/// holding 1000 tokens each, and 5 ether in the first vault.
+/// holding 1000 tokens each, and 5 ether in the first vault; then a factory holding
+/// 3 ether (deployed last, so the earlier addresses don't move).
 contract Setup is Base {
     function run() external {
         vm.startBroadcast(vm.envUint("DEPLOYER_KEY"));
@@ -30,6 +31,8 @@ contract Setup is Base {
         token.transfer(address(v1), 1000);
         token.transfer(address(v2), 1000);
         payable(address(v1)).transfer(5 ether);
+        Factory factory = new Factory();
+        payable(address(factory)).transfer(3 ether);
         vm.stopBroadcast();
     }
 }
@@ -65,6 +68,22 @@ contract Exploits is Base {
         Vault v1 = Vault(payable(vm.envAddress("VAULT_1")));
         fresh();
         new Drainer(v1, 400);
+        vm.stopBroadcast();
+    }
+
+    /// The fresh account makes the factory deploy a child and send it 1 ether.
+    function spawnChild() external {
+        Factory factory = Factory(payable(vm.envAddress("FACTORY")));
+        fresh();
+        factory.spawn();
+        vm.stopBroadcast();
+    }
+
+    /// The same by CREATE2, salt 0.
+    function spawnChild2() external {
+        Factory factory = Factory(payable(vm.envAddress("FACTORY")));
+        fresh();
+        factory.spawn2(bytes32(0));
         vm.stopBroadcast();
     }
 

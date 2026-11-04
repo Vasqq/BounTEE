@@ -439,6 +439,37 @@ fn r4_5_r4_8_created_contract_needs_no_proof_and_its_holdings_count() {
     assert_verdict(&j, Reason::BelowMinimumTheft);
 }
 
+/// R4.5, R4.8: a contract created during the replay needs no proof whoever deploys it.
+/// In `spawnChild` a covered factory deploys a child, which writes a slot of its own, and
+/// sends it 1 ether; the job holds no proof of the child. The child isn't attacker
+/// holdings (no fresh account created it), so the factory's 1-ether loss is no one's gain
+/// and the claim scores ZERO, not INVALID and not PAYS.
+#[test]
+fn r4_5_r4_8_contract_a_covered_contract_creates_needs_no_proof_and_is_not_gain() {
+    let mut j = job("spawnChild");
+    let child = address("child");
+    proofs(&mut j).retain(|p| p["address"] != child.as_str());
+    cover(&mut j, &["factory"]);
+    rules(&mut j)["listed_tokens"] = json!([{ "token": "native", "price": "1" }]);
+    rules(&mut j)["minimum_theft"] = json!("1");
+    assert_verdict(&j, Reason::BelowMinimumTheft);
+}
+
+/// R4.5: a CREATE2 by a contract that existed at the claim's block can land on an address
+/// it already deployed to (a reused salt), where the chain refuses the creation; so in
+/// `spawnChild2` the child's address needs a proof of its absence, and is judged with one.
+#[test]
+fn r4_5_create2_by_an_existing_contract_needs_a_proof_of_absence() {
+    let mut j = job("spawnChild2");
+    cover(&mut j, &["factory"]);
+    rules(&mut j)["listed_tokens"] = json!([{ "token": "native", "price": "1" }]);
+    rules(&mut j)["minimum_theft"] = json!("1");
+    assert_verdict(&j, Reason::BelowMinimumTheft);
+    let child = address("child2");
+    proofs(&mut j).retain(|p| p["address"] != child.as_str());
+    assert_verdict(&j, Reason::UnprovenState);
+}
+
 // ---- R4.1, R4.7, R4.9: fresh accounts, the seed, listed tokens -----------------------------
 
 /// R4.1: a transaction sent by an account that exists at the claim's block is INVALID,

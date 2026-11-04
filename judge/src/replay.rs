@@ -19,7 +19,7 @@ use revm::context::{BlockEnv, CfgEnv, Context, ContextTr, JournalTr, TxEnv};
 use revm::database::CacheDB;
 use revm::database_interface::Database;
 use revm::inspector::Inspector;
-use revm::interpreter::{CreateInputs, CreateOutcome};
+use revm::interpreter::{CreateInputs, CreateOutcome, CreateScheme};
 use revm::primitives::hardfork::SpecId;
 use revm::primitives::{Address, TxKind, B256, U256};
 use revm::state::AccountInfo;
@@ -127,7 +127,10 @@ fn run(
         }
     }
 
-    let holdings = Rc::new(RefCell::new(senders.clone()));
+    let creations = Creations {
+        holdings: Rc::new(RefCell::new(senders.clone())),
+        created: Rc::default(),
+    };
     let outcome = execute(
         rules,
         &header,
@@ -135,13 +138,14 @@ fn run(
         &senders,
         seed_native,
         exploit,
-        &holdings,
+        &creations,
         diagnostics,
     );
 
     // R4.5: an account no proof mentions read as absent; that holds only if the replay
-    // created it. Checked first, whatever the replay did after such a read.
-    let created = holdings.borrow()[senders.len()..].to_vec();
+    // created it at an address with no prior state ([`Creations`]), whoever deployed it.
+    // Checked first, whatever the replay did after such a read.
+    let created = creations.created.borrow();
     let stray: Vec<Address> = db
         .unproven_accounts
         .borrow()
@@ -167,7 +171,7 @@ fn execute(
     senders: &[Address],
     seed_native: U256,
     exploit: &Exploit,
-    holdings: &Rc<RefCell<Vec<Address>>>,
+    creations: &Creations,
     diagnostics: &mut dyn FnMut(&dyn std::fmt::Display),
 ) -> Result<Reason, Ended> {
     // R4.7: the fresh accounts start holding exactly the seed.
@@ -187,7 +191,7 @@ fn execute(
         .with_db(cache)
         .with_block(block_env(header))
         .with_cfg(cfg(rules, header))
-        .build_mainnet_with_inspector(Creations(holdings.clone()));
+        .build_mainnet_with_inspector(creations.clone());
 
     let mut nonces: Vec<(Address, u64)> = senders.iter().map(|s| (*s, 0)).collect();
     for (i, tx) in exploit.transactions.iter().enumerate() {
@@ -231,7 +235,7 @@ fn execute(
     let end = evm.ctx.journaled_state.database.clone();
     drop(evm);
 
-    let holdings = holdings.borrow().clone();
+    let holdings = creations.holdings.borrow().clone();
     let covered = score::covered(rules)?;
     let start_value = value(rules, header, start, &holdings, &covered, diagnostics)?;
     let end_value = value(rules, header, end, &holdings, &covered, diagnostics)?;
@@ -354,9 +358,21 @@ fn value(
     Ok(Values { attacker, covered })
 }
 
-/// Tracks attacker holdings (R4.8): the fresh accounts, plus every contract an attacker
-/// holding creates during the replay.
-struct Creations(Rc<RefCell<Vec<Address>>>);
+/// Tracks the contracts the replay creates.
+#[derive(Clone)]
+struct Creations {
+    /// Attacker holdings (R4.8): the fresh accounts, plus every contract an attacker
+    /// holding creates during the replay, and nothing else.
+    holdings: Rc<RefCell<Vec<Address>>>,
+    /// Every contract the replay created, whoever deployed it, at an address that can't
+    /// have held an account before (R4.5): its prior state is empty and needs no proof.
+    /// That is any CREATE (its address comes from the deployer's proven nonce, used now
+    /// for the first time), and a CREATE2 by a fresh account or a contract created in
+    /// this replay. A CREATE2 by a contract that existed at the claim's block can land
+    /// on an address it already deployed to (a reused salt), where the chain refuses the
+    /// creation; so that address needs a proof of its absence, as any other read does.
+    created: Rc<RefCell<Vec<Address>>>,
+}
 
 impl<CTX: ContextTr> Inspector<CTX> for Creations
 where
@@ -364,10 +380,17 @@ where
 {
     fn create_end(&mut self, _: &mut CTX, inputs: &CreateInputs, outcome: &mut CreateOutcome) {
         // Only a creation that succeeded; a reverted one's address stays unproven.
-        if let (Some(created), true) = (outcome.address, outcome.result.result.is_ok()) {
-            let mut holdings = self.0.borrow_mut();
-            if holdings.contains(&inputs.caller()) && !holdings.contains(&created) {
-                holdings.push(created);
+        if let (Some(address), true) = (outcome.address, outcome.result.result.is_ok()) {
+            let deployer = inputs.caller();
+            let mut holdings = self.holdings.borrow_mut();
+            let mut created = self.created.borrow_mut();
+            let new_deployer = holdings.contains(&deployer) || created.contains(&deployer);
+            let by_nonce = matches!(inputs.scheme(), CreateScheme::Create);
+            if (new_deployer || by_nonce) && !created.contains(&address) {
+                created.push(address);
+            }
+            if holdings.contains(&deployer) && !holdings.contains(&address) {
+                holdings.push(address);
             }
         }
     }

@@ -51,3 +51,29 @@ contract Drainer {
         vault.rescue(address(this), amount);
     }
 }
+
+/// A covered contract that deploys a child during the replay and sends it 1 ether: the
+/// child needs no proof (R4.5), and it isn't attacker holdings, since no fresh account
+/// created it (R4.8). `spawn` forgets an owner check, so anyone can call it.
+contract Factory {
+    receive() external payable {}
+
+    function spawn() external returns (address) {
+        return address(new Child{value: 1 ether}());
+    }
+
+    /// The same by CREATE2 under `salt`: a reused salt lands where the factory already
+    /// deployed, so the child's address needs a proof of absence (R4.5).
+    function spawn2(bytes32 salt) external returns (address) {
+        return address(new Child{value: 1 ether, salt: salt}());
+    }
+}
+
+/// The child: it writes, and so reads, a slot of its own while being created.
+contract Child {
+    uint256 public count;
+
+    constructor() payable {
+        count = count + 1;
+    }
+}

@@ -4,7 +4,8 @@
 // tests never run this: they read the files it writes, offline (R15.3).
 //
 // 1. Start anvil and deploy the fixture chain (chain/src/Fixture.sol): a token and two
-//    buggy vaults. The claim's block is the block after setup.
+//    buggy vaults, then a factory that deploys a child. The claim's block is
+//    the block after setup.
 // 2. Dry-run each exploit script (chain/script/Fixture.s.sol) and turn its broadcast log
 //    into the judge's exploit format: exploits/<name>.json.
 // 3. Fetch, with cli/src/proofs.ts, the header and every proof each replay reads under
@@ -23,7 +24,7 @@ const url = `http://127.0.0.1:${port}`;
 // anvil's first two well-known development accounts; nothing of value.
 const deployerKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const treasury = "0x70997970c51812dc3a224c62b88e8f8de8b57a35";
-const exploits = ["drain", "viaContract", "seedOnly", "existingSender"];
+const exploits = ["drain", "viaContract", "seedOnly", "spawnChild", "spawnChild2", "existingSender"];
 
 const wasmTarget = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
 const wasm = `${repo}target/${wasmTarget}/release/bountee-judge.wasm`;
@@ -49,9 +50,16 @@ try {
     DEPLOYER_KEY: deployerKey,
   });
   const block = Number(BigInt(await rpc<string>(url, "eth_blockNumber", [])));
-  const created = (n: number) => run("cast", ["compute-address", "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", "--nonce", String(n)]).trim().split(/\s+/).pop()!.toLowerCase();
-  const [token, vault1, vault2] = [created(0), created(1), created(2)];
-  const env = { DEPLOYER_KEY: deployerKey, TOKEN: token, VAULT_1: vault1, VAULT_2: vault2, TREASURY: treasury };
+  const createdBy = (from: string, n: number) => run("cast", ["compute-address", from, "--nonce", String(n)]).trim().split(/\s+/).pop()!.toLowerCase();
+  const created = (n: number) => createdBy("0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", n);
+  const [token, vault1, vault2, factory] = [created(0), created(1), created(2), created(6)];
+  // The child the factory deploys in `spawnChild`: its first creation (a contract's nonce starts at 1).
+  const child = createdBy(factory, 1);
+  // The child `spawnChild2` deploys by CREATE2, salt 0: keccak(0xff, factory, salt, keccak(init code)).
+  const initCode = run("forge", ["inspect", "src/Fixture.sol:Child", "bytecode"]).trim();
+  const initHash = run("cast", ["keccak", initCode]).trim().slice(2);
+  const child2 = `0x${run("cast", ["keccak", `0xff${factory.slice(2)}${"00".repeat(32)}${initHash}`]).trim().slice(-40)}`;
+  const env = { DEPLOYER_KEY: deployerKey, TOKEN: token, VAULT_1: vault1, VAULT_2: vault2, FACTORY: factory, TREASURY: treasury };
 
   const rules = parseRules(JSON.parse(readFileSync(`${here}rules.json`, "utf8")));
   const proofs = new Map<string, AccountProof>();
@@ -71,7 +79,7 @@ try {
     if (name === exploits.at(-1)) {
       const state = {
         about: "Ticket #8 judge fixture, made by make-fixtures.ts on anvil: the claim's block, its RLP header, and proofs of every account and slot the fixture exploits read under rules.json.",
-        addresses: { token, vault1, vault2, treasury },
+        addresses: { token, vault1, vault2, factory, child, child2, treasury },
         block: replay.block,
         header: replay.header,
         proofs: [...proofs.values()].sort((a, b) => a.address.localeCompare(b.address)),
