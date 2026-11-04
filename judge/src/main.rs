@@ -1,23 +1,33 @@
 //! BounTEE's judge. OutLayer's convention: the job's input is JSON on stdin, the result is
 //! JSON on stdout (at most 900 bytes), secrets arrive as environment variables.
 //!
-//! The job is a [`bountee_formats::Job`]. Today the only action is a local replay (R2.9):
-//! the enclave's claim-judging action (#14 block confirmation, #15 the sealed exploit)
-//! joins it and reuses [`replay::judge`].
+//! The job is a [`bountee_formats::Job`]:
+//! - `replay`, a local run (R2.9): [`replay::judge`] against a recorded header and proofs.
+//!   stderr names each read the claim doesn't prove (one `unproven …` line each), which
+//!   `cli/src/proofs.ts` uses to fetch the missing proofs.
+//! - `judge_claim`, the enclave (#14): [`claim::judge`] confirms the block through the
+//!   pinned RPCs, then replays the sealed exploit. Nothing is written to stderr.
 //!
-//! stdout carries only the verdict. In a local replay, stderr names each read the claim
-//! doesn't prove (one `unproven …` line each), which `cli/src/proofs.ts` uses to fetch the
-//! missing proofs. A job that can't have a verdict exits non-zero with nothing on stdout.
+//! stdout carries only the verdict. A job that can't have a verdict (R2.6) exits with
+//! status 2 and nothing on stdout: OutLayer reports it as a failed job, which reaches the
+//! bounty contract's callback as `null`, so the claim stays pending with no verdict.
 
+mod claim;
+mod confirm;
 mod header;
 mod proofs;
 mod replay;
+mod rpc;
 mod score;
+mod sealed;
 mod state;
 
 use std::io::{Read, Write};
 
 use bountee_formats::{from_json, to_json, Job, Reason, Verdict};
+
+/// The exit status of a job with no verdict.
+const NO_VERDICT: i32 = 2;
 
 fn main() {
     let mut input = String::new();
@@ -26,7 +36,9 @@ fn main() {
     let verdict = match from_json::<Job>(&input) {
         // R3.11: a job that isn't well-formed carries no runnable exploit.
         Err(e) => {
-            eprintln!("malformed: {e}");
+            if !is_enclave_job(&input) {
+                eprintln!("malformed: {e}");
+            }
             Verdict::new(Reason::MalformedExploit)
         }
         Ok(Job::Replay(job)) => {
@@ -42,8 +54,16 @@ fn main() {
                 Ok(verdict) => verdict,
                 Err(why) => {
                     eprintln!("no verdict: {why:?}");
-                    std::process::exit(2);
+                    std::process::exit(NO_VERDICT);
                 }
+            }
+        }
+        Ok(Job::JudgeClaim(job)) => {
+            // A panic's message would go to stderr; the abort still fails the job.
+            std::panic::set_hook(Box::new(|_| {}));
+            match claim::judge(&job, sealed::exploit) {
+                Ok(verdict) => verdict,
+                Err(_) => std::process::exit(NO_VERDICT),
             }
         }
     };
@@ -52,4 +72,11 @@ fn main() {
         .write_all(to_json(&verdict).as_bytes())
         .expect("stdout is writable");
     stdout.flush().expect("stdout flushes");
+}
+
+/// Whether `input` is meant as an enclave job, so even its parse error stays off stderr.
+fn is_enclave_job(input: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(input)
+        .map(|v| v.get("judge_claim").is_some())
+        .unwrap_or(false)
 }

@@ -381,7 +381,7 @@ fn parse_u256(s: &str) -> Result<U256, Ended> {
     s.parse().map_err(|_| Reason::MalformedExploit.into())
 }
 
-fn hex(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn hex(s: &str) -> Option<Vec<u8>> {
     let digits = s.strip_prefix("0x")?.as_bytes();
     digits
         .chunks(2)

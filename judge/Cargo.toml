@@ -23,6 +23,19 @@ revm = { version = "43.0.3", default-features = false, features = ["std"] }
 alloy-trie = { version = "0.9", default-features = false, features = ["std", "ethereum"] }
 alloy-rlp = { version = "0.3", default-features = false, features = ["std"] }
 
+# wasi:http, the job's only network (block confirmation, R2.8). Only the WebAssembly
+# build has it; the host build `cargo test` makes alongside the tests answers no RPC.
+[target.'cfg(target_os = "wasi")'.dependencies]
+wasi = "0.13.3"
+
+[features]
+# TEST ONLY, never in the attested build: read the proof chain's RPC addresses from the
+# `BOUNTEE_TEST_RPCS` environment variable instead of the pinned list, so seam J's tests
+# can point the judge at local test stand-ins. OutLayer runs the build whose hash the
+# bounty contract pins, built without features; see `src/confirm.rs`.
+test-stand-in-rpcs = []
+
 [dev-dependencies]
 proptest = "1"
+alloy-rlp = { version = "0.3", default-features = false, features = ["std"] }
 bountee-formats = { workspace = true }
