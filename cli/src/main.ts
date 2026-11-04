@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// BounTEE's command-line tool. Commands so far: `--version`, `test` (ticket #11). The rest
-// (init, list, show, claim, status, broadcast, verify, balance, key, open-exploit, withdraw,
+// BounTEE's command-line tool. Commands so far: `--version`, `test` (ticket #11), `broadcast`
+// (ticket #13). The rest (init, list, show, claim, status, verify, balance, key, open-exploit, withdraw,
 // post) land in the CLI tickets; each takes `--json` for machine-readable output (R14.5).
 import { readFileSync } from "node:fs";
+import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadcast.ts";
 import { formatTestResult, testCommand } from "./test.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -10,6 +11,8 @@ const args = process.argv.slice(2);
 const json = args.includes("--json");
 const rest = args.filter((a) => a !== "--json");
 
+const BROADCAST_USAGE =
+  "usage: bountee broadcast <protocol>/<name> [--contract <account>] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]";
 const USAGE = "usage: bountee test <foundry-script>[:<contract>] --bounty <rules.json | protocol/name> [--sig <fn>] [--out <job.json>] [--rpc <url>] [--block <n>] [--judge <wasm>] [--contract <account>] [--json]";
 
 /** Positional arguments and `--name value` flags. */
@@ -52,6 +55,19 @@ try {
       nearRpc: flags["near-rpc"],
     });
     console.log(json ? JSON.stringify(result) : formatTestResult(result));
+  } else if (rest[0] === "broadcast") {
+    const { positional, flags } = parse(rest.slice(1));
+    const bounty = positional[0];
+    if (!bounty) fail(`broadcast needs a bounty id\n${BROADCAST_USAGE}`, 2);
+    const result = await broadcastCommand({
+      bounty,
+      contract: flags.contract,
+      nearRpc: flags["near-rpc"],
+      rpcs: flags.rpc === undefined ? undefined : parseRpcFlags(flags.rpc.split(",")),
+      waitSecs: flags.wait === undefined ? undefined : Number(flags.wait),
+    });
+    console.log(json ? JSON.stringify(result) : formatBroadcastResult(result));
+    if (result.pauses.some((p) => p.sent === "failed")) process.exit(1);
   } else {
     fail(`unknown command: ${rest.join(" ") || "(none)"}`, 2);
   }
