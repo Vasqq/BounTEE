@@ -1,0 +1,11 @@
+# A harmless Whitehat script against Circle's test USDC on Base Sepolia (ticket #11):
+# `bountee test` runs it on a fork of the chain as it is now and the judge scores it ZERO.
+[profile.default]
+src = "script"
+script = "script"
+out = "out"
+cache_path = "cache"
+broadcast = "broadcast"
+libs = []
+solc_version = "0.8.28"
+evm_version = "cancun"

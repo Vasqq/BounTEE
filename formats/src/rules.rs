@@ -8,7 +8,7 @@ use crate::primitives::{
 pub const RECENCY_LIMIT_SECS: u32 = 300;
 
 /// Names a bounty: the Protocol's NEAR account and a name it hasn't used before (D25).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(
     feature = "near",
