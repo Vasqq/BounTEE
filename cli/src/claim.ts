@@ -17,7 +17,7 @@ import { Account, actions, JsonRpcProvider, type KeyPairString } from "near-api-
 import { parseBlockRef, parseExploit, parseAccountProof, type BountyId } from "@bountee/formats";
 import { KEYSTORE_API, seal } from "./seal.ts";
 
-const NEAR_RPC = { testnet: "https://rpc.testnet.near.org", mainnet: "https://rpc.mainnet.near.org" } as const;
+const NEAR_RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" } as const;
 /** `submit_claim` needs at least 200 Tgas; the rest goes to storing the secret and the job. */
 const CLAIM_GAS = 300_000_000_000_000n;
 

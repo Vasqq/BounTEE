@@ -6,7 +6,8 @@
 //    and uploads both wasm files to FastFS.
 // 2. Deploys the bounty contract keyless (deploy + new + delete key, one transaction),
 //    pinned to H1, with the USDC stand-in `ft.bountee-spike4.testnet`.
-// 3. Posts a bounty (fixture rules) and tops up the Whitehat's claim balance.
+// 3. Posts a bounty on Base Sepolia (`usdc-zero/rules.json`) and tops up the Whitehat's
+//    claim balance.
 //
 // Accounts (keys in ~/.near-credentials/testnet, created with near-cli-rs
 // `account create-account sponsor-by-faucet-service`): CONTRACT, PROTOCOL (holds the USDC
@@ -104,9 +105,9 @@ if (keys.keys.length > 0) {
   console.log(`deployed keyless: ${deployTx}`);
 }
 
-// A live bounty under the fixture rules (#8's anvil block; #15's minimal judge_claim
-// replays without block confirmation, which #14 adds).
-const rules = JSON.parse(readFileSync(join(root, "judge/tests/fixtures/rules.json"), "utf8"));
+// A live bounty on Base Sepolia (#11's harmless-transfer rules), so the enclave confirms
+// the claim's block through its pinned RPCs (#14).
+const rules = JSON.parse(readFileSync(join(root, "cli/test/fixtures/usdc-zero/rules.json"), "utf8"));
 rules.judge_build_hash = `0x${pinned.hash}`;
 rules.end_date_ns = String(BigInt(Date.now() + 30 * 86400_000) * 1_000_000n);
 const name = process.env.BOUNTY_NAME ?? "sealing";

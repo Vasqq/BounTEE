@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { Account, JsonRpcProvider, type KeyPairString } from "near-api-js";
 
-export const RPC = process.env.NEAR_TESTNET_RPC ?? "https://rpc.testnet.near.org";
+export const RPC = process.env.NEAR_TESTNET_RPC ?? "https://test.rpc.fastnear.com";
 export const provider = new JsonRpcProvider({ url: RPC });
 
 export function account(id: string): Account {

@@ -4,8 +4,9 @@
 // Seams (written before the first test): T here catches what OutLayer itself enforces: the
 // contract's own job opens the sealed exploit and records only a coarse verdict (R5.5); a
 // copied sealed exploit sent straight to OutLayer by another account is refused (R5.2);
-// another judge build can't open it (R5.3). It misses the Foundry-script claim path and
-// block confirmation (#16, #14).
+// another judge build can't open it (R5.3). The claim is a live one on Base Sepolia, made
+// by `bountee test` (#11) moments before it is filed, so the enclave confirms its block
+// (#14). It misses live progress and the receipt (#16).
 //
 // Runs only when BOUNTEE_TESTNET_SEALING names the deployment file (it spends testnet
 // NEAR and needs the accounts' keys in ~/.near-credentials/testnet). Every transaction hash
@@ -21,7 +22,7 @@ import { account, txStatus, view } from "./fixtures/testnet/near.ts";
 
 const deploymentFile = process.env.BOUNTEE_TESTNET_SEALING;
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
-const judgeFixtures = new URL("../../judge/tests/fixtures/", import.meta.url);
+const harmless = fileURLToPath(new URL("./fixtures/usdc-zero/script/Harmless.s.sol", import.meta.url));
 const tgas = (n: number) => BigInt(n) * 10n ** 12n;
 const milliNear = (n: number) => BigInt(n) * 10n ** 21n;
 
@@ -38,12 +39,8 @@ function bountee(args: string[]): Promise<{ code: number | null; stdout: string;
 
 describe.skipIf(!deploymentFile)("sealing on OutLayer testnet", () => {
   const d = deploymentFile ? JSON.parse(readFileSync(deploymentFile, "utf8")) : {};
-  const exploitText = readFileSync(new URL("exploits/seedOnly.json", judgeFixtures), "utf8");
-  const exploit = JSON.parse(exploitText);
-  const evidence = (() => {
-    const s = JSON.parse(readFileSync(new URL("state.json", judgeFixtures), "utf8"));
-    return { block: s.block, header: s.header, proofs: s.proofs };
-  })();
+  let exploit: any;
+  let evidence: any;
   const evidenceLog: Record<string, string> = {};
   let claimId = 0;
   let claimTx = "";
@@ -67,7 +64,8 @@ describe.skipIf(!deploymentFile)("sealing on OutLayer testnet", () => {
             params: null,
           },
           tgas(300),
-          milliNear(20),
+          // As the bounty contract pays: the job, plus OutLayer's hold on input above 32 KiB.
+          milliNear(20) + BigInt(Math.max(0, Buffer.byteLength(input) - 32 * 1024)) * 10n ** 19n,
         ),
       ],
       throwOnFailure: false,
@@ -108,7 +106,17 @@ describe.skipIf(!deploymentFile)("sealing on OutLayer testnet", () => {
 
   beforeAll(async () => {
     const dir = mkdtempSync(join(tmpdir(), "bountee-claim-"));
-    writeFileSync(join(dir, "exploit.json"), exploitText);
+    // A live claim: the bounty's own rules, the harmless script run by `bountee test` at a
+    // recent Base Sepolia block, with its proofs.
+    const name = d.bounty.split("/")[1];
+    const rules = (await view(d.contract, "bounty", { id: { protocol: d.protocol, name } })).rules;
+    writeFileSync(join(dir, "rules.json"), JSON.stringify(rules));
+    const tested = await bountee(["test", harmless, "--bounty", join(dir, "rules.json"), "--out", join(dir, "job.json"), "--json"]);
+    expect(tested.code, tested.stderr).toBe(0);
+    const job = JSON.parse(readFileSync(join(dir, "job.json"), "utf8")).replay;
+    exploit = job.exploit;
+    evidence = { block: job.block, header: job.header, proofs: job.proofs };
+    writeFileSync(join(dir, "exploit.json"), JSON.stringify(exploit));
     writeFileSync(join(dir, "evidence.json"), JSON.stringify(evidence));
     const { code, stdout, stderr } = await bountee([
       "claim", "--contract", d.contract, "--bounty", d.bounty, "--as", d.whitehat,
@@ -119,13 +127,14 @@ describe.skipIf(!deploymentFile)("sealing on OutLayer testnet", () => {
     claimId = out.claim_id;
     claimTx = out.tx_hash;
     evidenceLog.claim = claimTx;
+    writeFileSync(`${deploymentFile}.evidence.json`, JSON.stringify({ claim_id: claimId, ...evidenceLog }, null, 2) + "\n");
     console.log(`claim ${claimId}: ${claimTx}`);
     const status = await txStatus(claimTx, d.whitehat);
     const args = JSON.parse(Buffer.from(status.transaction.actions[0].FunctionCall.args, "base64").toString("utf8"));
     copied = args.sealed_exploit;
     const claim = await view(d.contract, "claim", { claim_id: claimId });
     input = JSON.stringify({ judge_claim: {
-      rules: (await view(d.contract, "bounty", { id: { protocol: d.protocol, name: d.bounty.split("/")[1] } })).rules,
+      rules,
       bounty: claim.bounty, whitehat: d.attacker, block: claim.block, header: claim.header,
       proofs_json: JSON.stringify(evidence.proofs), submitted_at_ns: claim.submitted_at_ns,
     } });
@@ -141,10 +150,8 @@ describe.skipIf(!deploymentFile)("sealing on OutLayer testnet", () => {
     expect(claim.state).toBe("judged");
     expect(claim.verdict).toStrictEqual({ outcome: "ZERO", reason: "below_minimum_theft" });
     const onChain = JSON.stringify(await txStatus(claimTx, d.whitehat)) + JSON.stringify(claim);
-    for (const tx of exploit.transactions) {
-      expect(onChain).not.toContain(tx.input.slice(2));
-      expect(onChain).not.toContain(tx.from.slice(2));
-    }
+    // No transaction's calldata appears (its sender's absence proof is public by design).
+    for (const tx of exploit.transactions) expect(onChain).not.toContain(tx.input.slice(2));
   }, 240_000);
 
   test("R5.2: the copied sealed exploit, sent straight to OutLayer by another account with the pinned build, is refused", async () => {
