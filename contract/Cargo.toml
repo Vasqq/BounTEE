@@ -1,4 +1,5 @@
-# The bounty contract's own workspace, on contract/rust-toolchain.toml (rustc 1.86).
+# The bounty contract's own workspace, pinned by contract/rust-toolchain.toml to rustc 1.86
+# for a stable build (not a NEAR limit).
 # resolver 3 picks the newest dependency versions that still support rust-version 1.86.
 [workspace]
 resolver = "3"
