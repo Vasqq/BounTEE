@@ -1,0 +1,22 @@
+# Claims are judged against the covered contracts' recent state, not a snapshot committed at posting
+
+A snapshot committed at posting forces every claim to prove state from an old block, which needs an archive RPC serving historical `eth_getProof`. On Nov 4, 2026, Arbitrum's public RPCs (testnet and mainnet) already refused state 2,000 blocks old, so Whitehats and AI agents would need a paid data service. It also doesn't match the product: BounTEE should prove a live, current bug and then pause it. So each claim names a recent block of the proof chain and carries proofs against that block's state root. The judge, inside the enclave, confirms that block with several independent RPCs and refuses blocks older than a fixed limit. The bounty covers whatever is live at the covered addresses at the claim's block, so Protocols keep operating and upgrading normally.
+
+## How the enclave trusts a recent block
+
+- The claim names its block by number and hash. The judge asks three independent RPCs per chain, pinned in the judge's build (never supplied by the claim or the Protocol), and accepts the block only if at least two answer and every answer matches the claim's hash. Its state root comes from that block's header.
+- The recency limit is time, not blocks (Arbitrum makes about four blocks a second), fixed at **5 minutes** for every bounty: the block's timestamp must be no more than 5 minutes before the claim's submission time, which the bounty contract records and passes to the judge, and not after it. Measuring against submission rather than judging time means a retried claim never goes stale.
+- If too few RPCs answer, or their answers disagree with each other, the job fails with no verdict, and the claim keeps its place and can be retried (R2.6). Only at least two RPCs agreeing on a different hash, or a stale block, is INVALID, so one flaky public RPC never costs a Whitehat their fee and place.
+- Confirmation and replay are separate steps. The enclave always runs both, in jobs only the bounty contract requests. Local runs (`test`, `verify`, re-running a published exploit, the offline demo tests) replay against a recorded block header and its proofs and check the header's hash, with no RPC confirmation. A published exploit therefore includes the claim's block header and proofs, so it re-runs to the enclave's verdict at any time.
+
+## Consequences
+
+- Accepted trade-off: a bug a Protocol fixes itself stops being claimable once the recency limit has passed since the fix landed (5 minutes). A claim naming an earlier block within that window is still judged on that block, and a fix made after a claim's block doesn't affect that claim.
+- Judging never waits behind earlier claims: each claim's job is requested when it is submitted, so the recency check happens within seconds; only payment waits (R3.6).
+- Posting no longer commits a snapshot. The posting check still confirms the pause-role grants, that each contract can be paused, and the pause gas, at posting time.
+- An upgrade between posting and a claim is judged as it stands at the claim's block. If an upgrade removed the pause function or the role, the pause fails and the Whitehat is still paid (R2.4).
+- The posting-time code match across chains is dropped: code may diverge later, and a winning claim pauses every covered contract regardless.
+- Demo exploits ship with proofs committed in the repo at a fixed block, so `test` on a demo runs offline.
+- Open: whether a claim's proofs fit OutLayer's and NEAR's input limits. Fallback, if proof-based state slips at the Day-3 checkpoint: the committed-snapshot pattern from tests 3–5 (ADR-0011), in which the whole snapshot is committed by hash at posting with no chain proofs, and the README names the Protocol as trusted for the snapshot matching the chain.
+- A judge can't win a live claim: each win closes its bounty and pauses its vault. Every real winning run (Day-3, demo-ready, the video, the recorded agent run, mainnet) uses a freshly deployed demo instance and bounty, from a script.
+- Supersedes the committed snapshot in ADR-0006 and the posting check's state-root confirmation (ADR-0003).

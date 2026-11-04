@@ -1,0 +1,3 @@
+# Payouts are open to anyone, with no identity checks
+
+Four simulated jurors raised sanctions and KYC: automatic payouts to anonymous accounts clash with how protocols usually pay bounties. BounTEE pays whoever proves the exploit, with no allowlist or identity check, and the README says so plainly. An allowlist would add an onboarding flow and an approver role, and would shut out AI agents, which can't pass identity checks. The README points to the protection that exists at the asset level: the USDC issuer's ability to freeze sanctioned accounts (to be verified for USDC on NEAR before it is claimed). KYC'd payouts are listed as later work.
