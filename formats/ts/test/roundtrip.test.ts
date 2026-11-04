@@ -9,7 +9,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import fc from "fast-check";
 import { beforeAll, expect, test } from "vitest";
-import { isAccountId, isBountyName, pauseRole, parseBountyId, parseClaim, parseRules, parseVerdict, REASONS, toJson } from "../src/index.ts";
+import { isAccountId, isBountyName, pauseRole, parseBountyId, parseClaim, parseExploit, parseJob, parseRules, parseVerdict, REASONS, toJson } from "../src/index.ts";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
 let echoBin = "";
@@ -68,26 +68,45 @@ const rulesArb = fc.record({
   judge_build_hash: hex(64),
 });
 
+const accountProofArb = fc.record({
+  address,
+  nonce: uint(64n),
+  balance: uint(256n),
+  code_hash: hex(64),
+  storage_hash: hex(64),
+  account_proof: fc.array(bytes, { maxLength: 3 }),
+  storage: fc.array(fc.record({ key: hex(64), value: hex(64), proof: fc.array(bytes, { maxLength: 2 }) }), {
+    maxLength: 2,
+  }),
+  code: bytes,
+});
+
+const blockArb = fc.record({ number: fc.maxSafeNat(), hash: hex(64) });
+
+// #8: the exploit the judge replays; `to: null` is a contract creation.
+const exploitArb = fc.record({
+  transactions: fc.array(
+    fc.record({ from: address, to: fc.option(address, { nil: null }), value: uint(256n), input: bytes, gas: fc.maxSafeNat() }),
+    { maxLength: 4 },
+  ),
+});
+
+const jobArb = fc.record({
+  replay: fc.record({
+    rules: rulesArb,
+    block: blockArb,
+    header: bytes,
+    proofs: fc.array(accountProofArb, { maxLength: 2 }),
+    exploit: exploitArb,
+  }),
+});
+
 const claimArb = fc.record({
   bounty: bountyId,
   whitehat: accountId,
-  block: fc.record({ number: fc.maxSafeNat(), hash: hex(64) }),
+  block: blockArb,
   header: bytes,
-  proofs: fc.array(
-    fc.record({
-      address,
-      nonce: uint(64n),
-      balance: uint(256n),
-      code_hash: hex(64),
-      storage_hash: hex(64),
-      account_proof: fc.array(bytes, { maxLength: 3 }),
-      storage: fc.array(fc.record({ key: hex(64), value: hex(64), proof: fc.array(bytes, { maxLength: 2 }) }), {
-        maxLength: 2,
-      }),
-      code: bytes,
-    }),
-    { maxLength: 3 },
-  ),
+  proofs: fc.array(accountProofArb, { maxLength: 3 }),
   sealed_exploit: fc.uint8Array({ minLength: 1, maxLength: 60 }).map((b) => Buffer.from(b).toString("base64")),
 });
 
@@ -98,6 +117,8 @@ const formats = [
   ["claim", claimArb, parseClaim],
   ["verdict", verdictArb, parseVerdict],
   ["bounty_id", bountyId, parseBountyId],
+  ["exploit", exploitArb, parseExploit],
+  ["job", jobArb, parseJob],
 ] as const;
 
 test.each(formats.map((f) => [f[0], f]))("%s: Rust writes back exactly what TypeScript wrote", (_k, f) => {

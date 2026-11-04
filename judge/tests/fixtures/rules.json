@@ -1,0 +1,19 @@
+{
+  "covered_contracts": [
+    { "chain_id": 31337, "address": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512" },
+    { "chain_id": 31337, "address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0" }
+  ],
+  "proof_chain": 31337,
+  "recency_limit_secs": 300,
+  "listed_tokens": [
+    { "token": "0x5fbdb2315678afecb367f032d93f642f64180aa3", "price": "1000" },
+    { "token": "native", "price": "1" }
+  ],
+  "seed": { "native": "1000000000000000000", "tokens": [] },
+  "bounty_amount": "1000000",
+  "minimum_theft": "100000",
+  "end_date_ns": "1794268800000000000",
+  "disclosure_delay_days": 30,
+  "exploit_public_key": "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
+  "judge_build_hash": "0x9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+}

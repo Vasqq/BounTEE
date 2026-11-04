@@ -136,25 +136,71 @@ export const parseRules: (v: unknown) => Rules = object<Rules>({
   judge_build_hash: b256,
 });
 
+const parseBlockRef = object<BlockRef>({ number: safeU64, hash: b256 });
+
+const parseAccountProof = object<AccountProof>({
+  address: evmAddress,
+  nonce: u64,
+  balance: uint,
+  code_hash: b256,
+  storage_hash: b256,
+  account_proof: array(bytes),
+  storage: array(object<StorageProof>({ key: b256, value: b256, proof: array(bytes) })),
+  code: bytes,
+});
+
 export const parseClaim: (v: unknown) => Claim = object<Claim>({
   bounty: parseBountyId,
   whitehat: accountId,
-  block: object<BlockRef>({ number: safeU64, hash: b256 }),
+  block: parseBlockRef,
   header: bytes,
-  proofs: array(
-    object<AccountProof>({
-      address: evmAddress,
-      nonce: u64,
-      balance: uint,
-      code_hash: b256,
-      storage_hash: b256,
-      account_proof: array(bytes),
-      storage: array(object<StorageProof>({ key: b256, value: b256, proof: array(bytes) })),
-      code: bytes,
-    }),
-  ),
+  proofs: array(parseAccountProof),
   sealed_exploit: base64,
 });
+
+/** One transaction of an exploit; `to` is `null` for a contract creation (see job.rs). */
+export interface ExploitTransaction {
+  from: string;
+  to: string | null;
+  value: string;
+  input: string;
+  gas: number;
+}
+
+/** The transactions a Foundry script broadcasts, replayed from fresh accounts. */
+export interface Exploit {
+  transactions: ExploitTransaction[];
+}
+
+/** A local replay (R2.9): rules, the claim's block, header and proofs, and the exploit. */
+export interface Replay {
+  rules: Rules;
+  block: BlockRef;
+  header: string;
+  proofs: AccountProof[];
+  exploit: Exploit;
+}
+
+/** The judge's stdin. */
+export type Job = { replay: Replay };
+
+const evmAddressOrNull = (v: unknown): string | null => (v === null ? null : evmAddress(v));
+
+export const parseExploit: (v: unknown) => Exploit = object<Exploit>({
+  transactions: array(
+    object<ExploitTransaction>({ from: evmAddress, to: evmAddressOrNull, value: uint, input: bytes, gas: safeU64 }),
+  ),
+});
+
+export const parseReplay: (v: unknown) => Replay = object<Replay>({
+  rules: parseRules,
+  block: parseBlockRef,
+  header: bytes,
+  proofs: array(parseAccountProof),
+  exploit: parseExploit,
+});
+
+export const parseJob: (v: unknown) => Job = object<Job>({ replay: parseReplay });
 
 const outcomeOf = (v: unknown): Outcome =>
   v === "PAYS" || v === "ZERO" || v === "INVALID" ? v : fail("outcome", v);

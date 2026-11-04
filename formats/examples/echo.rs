@@ -5,7 +5,8 @@
 use std::io::{BufRead, Write};
 
 use bountee_formats::{
-    from_json, pause_role, to_json, AccountId, BountyId, BountyName, Claim, Rules, Verdict,
+    from_json, pause_role, to_json, AccountId, BountyId, BountyName, Claim, Exploit, Job, Rules,
+    Verdict,
 };
 use serde_json::{json, Value};
 
@@ -27,6 +28,8 @@ fn answer(request: &Value) -> Result<String, String> {
         "rules" => echo::<Rules>(value),
         "claim" => echo::<Claim>(value),
         "verdict" => echo::<Verdict>(value),
+        "exploit" => echo::<Exploit>(value),
+        "job" => echo::<Job>(value),
         "bounty_id" => echo::<BountyId>(value),
         "account_id" => AccountId::parse(text(value))
             .map(|a| to_json(&a))
