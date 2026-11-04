@@ -11,7 +11,8 @@ import { actions } from "near-api-js";
 import { parseReplay, RECENCY_LIMIT_SECS, type Replay, type Verdict } from "@bountee/formats";
 import { broadcastCommand, type BroadcastResult } from "./broadcast.ts";
 import { rpc } from "./proofs.ts";
-import { PUBLIC_RPCS, testCommand, type TestOptions, type TestResult } from "./test.ts";
+import { proofRpcs } from "./chains.ts";
+import { testCommand, type TestOptions, type TestResult } from "./test.ts";
 import { Near, events, formatNear, milliNear, tgas } from "./near.ts";
 
 /** Time a claim needs from here to `submit_claim` recording its submission time. */
@@ -28,7 +29,7 @@ export interface PreparedClaim {
 }
 
 async function blockTimestamp(chainId: number, number: number, rpcUrl?: string): Promise<number> {
-  const urls = rpcUrl ? [rpcUrl] : (PUBLIC_RPCS[chainId] ?? []);
+  const urls = rpcUrl ? [rpcUrl] : proofRpcs(chainId);
   for (const url of urls) {
     try {
       const b = await rpc<{ timestamp: string }>(url, "eth_getBlockByNumber", [`0x${number.toString(16)}`, false]);

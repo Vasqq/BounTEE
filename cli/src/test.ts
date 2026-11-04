@@ -15,13 +15,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { parseRules, toJson, type Exploit, type Rules, type Verdict } from "@bountee/formats";
+import { proofRpcs } from "./chains.ts";
 import { NEAR_RPC } from "./near.ts";
 import { collectReplay, exploitFromBroadcast, rpc } from "./proofs.ts";
-
-/** Ordinary public RPCs that serve `eth_getProof` at recent blocks, in order of preference (spec, RPCs). */
-export const PUBLIC_RPCS: Record<number, string[]> = {
-  84532: ["https://sepolia.base.org", "https://84532.rpc.thirdweb.com"],
-};
 
 /** How far behind the head the claim's block is: a few seconds, since a public RPC can fail on the very latest. */
 const BLOCKS_BEHIND = 3;
@@ -118,8 +114,8 @@ function freshAccount(root: string): { key: string; address: string } {
 // ---- Steps ---------------------------------------------------------------------------------------------
 
 async function pickRpc(rules: Rules, o: TestOptions): Promise<{ urls: string[]; block: number }> {
-  const urls = o.rpc ? [o.rpc] : PUBLIC_RPCS[rules.proof_chain];
-  if (!urls) throw new Error(`no public RPC known for chain ${rules.proof_chain}: pass --rpc`);
+  const urls = o.rpc ? [o.rpc] : proofRpcs(rules.proof_chain);
+  if (urls.length === 0) throw new Error(`no public RPC known for chain ${rules.proof_chain}: pass --rpc`);
   const errors: string[] = [];
   for (const [i, url] of urls.entries()) {
     try {

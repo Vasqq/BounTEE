@@ -4,16 +4,9 @@
 //
 // A pause someone else already sent is reported as `known`, not as an error, so running it
 // twice is harmless. Verification on NEAR (R7.3's second half) is ticket #21.
+import { defaultRpcs } from "./chains.ts";
 import { NEAR_RPC } from "./near.ts";
 import { rpc } from "./proofs.ts";
-
-/** Each chain's public RPC, used unless `--rpc <chain id>=<url>` names another. */
-export const DEFAULT_RPCS: Record<number, string> = {
-  84532: "https://sepolia.base.org",
-  421614: "https://sepolia-rollup.arbitrum.io/rpc",
-  8453: "https://mainnet.base.org",
-  42161: "https://arb1.arbitrum.io/rpc",
-};
 
 export interface BroadcastOptions {
   bounty: string;
@@ -112,7 +105,8 @@ export async function broadcastCommand(o: BroadcastOptions): Promise<BroadcastRe
   if (!bounty) throw new Error(`no bounty ${o.bounty} on ${contract}`);
   if (bounty.signed_pauses.length === 0) throw new Error(`bounty ${o.bounty} has no signed pauses (state: ${bounty.state})`);
 
-  const rpcs = { ...DEFAULT_RPCS, ...o.rpcs };
+  // Each chain's default public RPC (chains.ts), unless `--rpc <chain id>=<url>` names another.
+  const rpcs = { ...defaultRpcs(), ...o.rpcs };
   const urlFor = (chain: number) => {
     const url = rpcs[chain];
     if (!url) throw new Error(`no RPC for chain ${chain}: pass --rpc ${chain}=<url>`);

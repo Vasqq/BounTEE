@@ -10,12 +10,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
+import { proofRpcs } from "../src/chains.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const fixture = fileURLToPath(new URL("./fixtures/usdc-zero/", import.meta.url));
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const wasm = `${repo}target/${readFileSync(`${repo}judge/wasm-target`, "utf8").trim()}/release/bountee-judge.wasm`;
-const PUBLIC_RPC = "https://sepolia.base.org";
+const PUBLIC_RPCS = proofRpcs(84532);
+const PUBLIC_RPC = PUBLIC_RPCS[0]!;
 const USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
 const KECCAK_EMPTY = "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470";
 
@@ -95,7 +97,7 @@ test("D3: the saved exploit is the script's transaction, sent by a fresh account
 // R4.5, ticket criterion 3: every proof comes from an ordinary public RPC, matches the
 // chain at the claim's block, and the fresh sender is proven absent.
 test("R4.5: the proofs come from a public RPC and match the chain at the claim's block", () => {
-  expect([PUBLIC_RPC, "https://84532.rpc.thirdweb.com"]).toContain(out.rpc);
+  expect(PUBLIC_RPCS).toContain(out.rpc);
   const { replay } = JSON.parse(readFileSync(out.saved, "utf8"));
   const usdc = replay.proofs.find((p: { address: string }) => p.address === USDC);
   const keys = usdc.storage.map((s: { key: string }) => s.key);
