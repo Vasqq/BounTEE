@@ -6,11 +6,14 @@ Landing is then confirmed on NEAR. NEAR's MPC network offers foreign-chain trans
 
 The live MPC contracts (`v1.signer-prod.testnet`, `v1.signer`) list Base and Arbitrum among their foreign chains, but not Flare or Ethereum, so the demo chains become Base and Arbitrum, our core user's chains, and Flare drops out.
 
+The bounty contract fixes the finality it requests at `Safe`, so nobody can pick a weaker one. MPC nodes sign only once the chain's head at the requested finality has passed the transaction's block, and they don't wait for it. On Base Sepolia on Nov 4 the `finalized` head lagged about 3 hours, longer than a demo can wait, and the `safe` head 11–27 minutes. `Latest` verifies in seconds but doesn't guard against an L2 reorg, so a "verified" pause could later vanish.
+
 ## Consequences
 
 - The hosted watcher is removed.
-- "Verified" waits for finality on Base and Arbitrum, so it can take minutes; the page shows "landed" first, then "verified", and the time is measured.
+- "Verified" waits for the safe head on Base and Arbitrum, so it can take minutes; the page shows "landed" first, then "verified", and the time is measured.
 - The posting fee also covers up to three verification attempts per chain, so the keyless contract never pays for it (R11.4); further requests pay their own cost. The contract computes the pause's transaction hash from the signed pause it stored, so nobody can waste the prepaid attempts on junk hashes.
-- To prove in the first spike: calling `verify_foreign_transaction` from the bounty contract on testnet, its request format, cost and time to "verified". Arbitrum Sepolia test-ETH access is checked early.
+- A failed verification gives no reason: a reverted transaction, an unknown hash and one not yet safe all time out alike after about 200 NEAR blocks. So the command-line tool requests verification only once the chain's safe head has passed the pause's block, or the prepaid attempts are wasted.
+- Proven on testnet, Nov 4: a contract's `verify_foreign_transaction` call came back verified 7 times out of 7 for a successful Base Sepolia transaction, in 7–38 s from the request, for about 0.00125 NEAR; a reverted and an unknown transaction both timed out. Arbitrum Sepolia's safe-head lag and test-ETH access are still to check.
 - Liam's Flare audience on X is no longer served by the demo chains.
 - Supersedes the demo-chain choice (Base and Flare) and the hosted watcher in earlier docs.
