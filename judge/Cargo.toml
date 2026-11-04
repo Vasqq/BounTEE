@@ -22,6 +22,9 @@ revm = { version = "43.0.3", default-features = false, features = ["std"] }
 # Merkle-Patricia proof verification (EIP-1186) against the header's state root.
 alloy-trie = { version = "0.9", default-features = false, features = ["std", "ethereum"] }
 alloy-rlp = { version = "0.3", default-features = false, features = ["std"] }
+# Opening the sealed exploit (#15): base64, then raw DEFLATE; both pure Rust.
+base64 = "0.23"
+miniz_oxide = "0.8"
 
 [dev-dependencies]
 proptest = "1"
