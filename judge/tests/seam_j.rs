@@ -22,31 +22,19 @@
 //! none needs keys, funds or a network (the fixtures are remade, rarely, by
 //! `fixtures/make-fixtures.ts`).
 
+mod common;
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 use bountee_formats::{from_json, Outcome, Reason, Verdict};
+use common::{repo_root, wasm_target};
 use proptest::prelude::*;
 use revm::primitives::keccak256;
 use revm::primitives::ruint::Uint;
 use serde_json::{json, Value};
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .to_path_buf()
-}
-
-/// The judge's WebAssembly target: the single setting in `judge/wasm-target`.
-fn wasm_target() -> String {
-    std::fs::read_to_string(repo_root().join("judge/wasm-target"))
-        .unwrap()
-        .trim()
-        .to_owned()
-}
 
 /// Build the judge for its WebAssembly target once per test run and return the module.
 fn judge_wasm() -> &'static PathBuf {
@@ -179,12 +167,12 @@ fn unhex(s: &str) -> Vec<u8> {
         .collect()
 }
 
-// ---- Ticket #6 ---------------------------------------------------------------------------
+// ---- R3.11: input that isn't a job ------------------------------------------------------
 
-/// Ticket #6 smoke, and R3.11: input that isn't a job is a malformed exploit, answered in
-/// the shared verdict format within OutLayer's 900-byte output limit.
+/// R3.11: input that isn't a job is a malformed exploit, answered in the shared verdict
+/// format within OutLayer's 900-byte output limit.
 #[test]
-fn smoke_compiled_judge_answers_with_a_verdict() {
+fn r3_11_input_that_is_not_a_job_is_malformed() {
     let stdout = run_judge("not a job");
     assert!(
         stdout.len() <= 900,

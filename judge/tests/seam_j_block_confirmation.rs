@@ -21,6 +21,7 @@
 //! - Inspection (R2.8, recorded in the judge's `confirm.rs`): no RPC address is read from
 //!   the job input, a claim or a Protocol.
 
+mod common;
 #[path = "stand-ins/test_rpc.rs"]
 mod test_rpc;
 
@@ -30,22 +31,9 @@ use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 
 use bountee_formats::{from_json, Reason, Verdict};
+use common::{repo_root, wasm_target};
 use serde_json::{json, Value};
 use test_rpc::{Answer, TestRpc};
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .to_path_buf()
-}
-
-fn wasm_target() -> String {
-    std::fs::read_to_string(repo_root().join("judge/wasm-target"))
-        .unwrap()
-        .trim()
-        .to_owned()
-}
 
 /// Build the judge for its WebAssembly target, with `features`, into its own target
 /// directory so the test build never overwrites the attested one.

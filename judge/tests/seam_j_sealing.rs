@@ -16,6 +16,7 @@
 //!
 //! R15.3: every test reads only committed fixtures; no keys, funds or network.
 
+mod common;
 #[path = "stand-ins/test_rpc.rs"]
 #[allow(dead_code)]
 mod test_rpc;
@@ -26,6 +27,7 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 use bountee_formats::{from_json, Outcome, Reason, Verdict};
+use common::{repo_root, wasm_target};
 use proptest::prelude::*;
 use serde_json::{json, Value};
 use test_rpc::{Answer, TestRpc};
@@ -35,13 +37,6 @@ const BOUNTY_CONTRACT: &str = "bounty.bountee.testnet";
 /// The account the fixture bundles are sealed for.
 const SEALED_FOR: &str = "alice.testnet";
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .to_path_buf()
-}
-
 /// Where the judge's test build goes (shared with `seam_j_block_confirmation.rs`).
 const TEST_BUILD_DIR: &str = "target/judge-test-stand-in-rpcs";
 
@@ -49,21 +44,27 @@ const TEST_BUILD_DIR: &str = "target/judge-test-stand-in-rpcs";
 fn judge_wasm() -> &'static PathBuf {
     static WASM: OnceLock<PathBuf> = OnceLock::new();
     WASM.get_or_init(|| {
-        let target = std::fs::read_to_string(repo_root().join("judge/wasm-target"))
-            .unwrap()
-            .trim()
-            .to_owned();
+        let target = wasm_target();
         let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
         let status = Command::new(cargo)
             .current_dir(repo_root())
             .env_remove("BOUNTEE_BOUNTY_CONTRACT")
-            .args(["build", "--release", "-p", "bountee-judge", "--target", &target])
+            .args([
+                "build",
+                "--release",
+                "-p",
+                "bountee-judge",
+                "--target",
+                &target,
+            ])
             .args(["--features", "test-stand-in-rpcs", "--target-dir"])
             .arg(repo_root().join(TEST_BUILD_DIR))
             .status()
             .expect("cargo runs");
         assert!(status.success(), "the judge builds for {target}");
-        repo_root().join(format!("{TEST_BUILD_DIR}/{target}/release/bountee-judge.wasm"))
+        repo_root().join(format!(
+            "{TEST_BUILD_DIR}/{target}/release/bountee-judge.wasm"
+        ))
     })
 }
 
@@ -76,7 +77,10 @@ struct Run {
 /// Run the compiled judge as an OutLayer job: `env` are the variables OutLayer sets. Three
 /// stand-in RPCs confirm the claim's block.
 fn run_job(job: &Value, env: &[(&str, &str)]) -> Run {
-    let hash = job["judge_claim"]["block"]["hash"].as_str().unwrap().to_owned();
+    let hash = job["judge_claim"]["block"]["hash"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let rpcs = [0, 1, 2].map(|_| TestRpc::answering(Answer::Hash(hash.clone())));
     let urls: Vec<&str> = rpcs.iter().map(|r| r.url.as_str()).collect();
     let mut cmd = Command::new("wasmtime");
@@ -172,8 +176,14 @@ fn only_verdict(run: &Run) -> Verdict {
         run.stdout,
         format!(
             "{{\"outcome\":\"{}\",\"reason\":\"{}\"}}",
-            serde_json::to_value(verdict.outcome()).unwrap().as_str().unwrap(),
-            serde_json::to_value(verdict.reason()).unwrap().as_str().unwrap()
+            serde_json::to_value(verdict.outcome())
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            serde_json::to_value(verdict.reason())
+                .unwrap()
+                .as_str()
+                .unwrap()
         ),
         "stdout is the verdict alone"
     );
@@ -192,7 +202,10 @@ fn refused(run: &Run) {
 /// the bounty contract requested, is judged on the exploit (seedOnly scores ZERO, drain PAYS).
 #[test]
 fn r5_4_the_claimant_sealed_inside_is_judged_on_the_exploit() {
-    let zero = only_verdict(&as_contract_job(&judge_claim(SEALED_FOR), &sealed("alice-seedOnly")));
+    let zero = only_verdict(&as_contract_job(
+        &judge_claim(SEALED_FOR),
+        &sealed("alice-seedOnly"),
+    ));
     assert_eq!(zero.reason(), Reason::BelowMinimumTheft);
     let pays = as_contract_job(&judge_claim(SEALED_FOR), &sealed("alice-drain"));
     assert_eq!(only_verdict(&pays).outcome(), Outcome::Pays);
@@ -219,17 +232,20 @@ proptest! {
     }
 }
 
-/// OutLayer runs a job whose build finds no secret without it (ADR-0012): the judge
-/// refuses it, with no verdict.
+/// R2.6 (ADR-0012): OutLayer runs a job whose build finds no secret without it; the judge
+/// fails that job with no verdict, so the claim stays pending with nothing moved.
 #[test]
-fn a_job_with_no_secret_is_refused() {
+fn r2_6_a_job_with_no_secret_ends_with_no_verdict() {
     refused(&run_job(
         &judge_claim(SEALED_FOR),
         &[("NEAR_PREDECESSOR_ID", BOUNTY_CONTRACT)],
     ));
     refused(&run_job(
         &judge_claim(SEALED_FOR),
-        &[("NEAR_PREDECESSOR_ID", BOUNTY_CONTRACT), ("BOUNTEE_SEALED_EXPLOIT", "")],
+        &[
+            ("NEAR_PREDECESSOR_ID", BOUNTY_CONTRACT),
+            ("BOUNTEE_SEALED_EXPLOIT", ""),
+        ],
     ));
 }
 
@@ -238,7 +254,12 @@ fn a_job_with_no_secret_is_refused() {
 #[test]
 fn r5_2_a_job_not_requested_by_the_bounty_contract_is_refused() {
     let secret = sealed("alice-drain");
-    for caller in [SEALED_FOR, "mallory.testnet", "bounty.bountee.testnet.evil", ""] {
+    for caller in [
+        SEALED_FOR,
+        "mallory.testnet",
+        "bounty.bountee.testnet.evil",
+        "",
+    ] {
         refused(&run_job(
             &judge_claim(SEALED_FOR),
             &[
@@ -258,7 +279,11 @@ fn r5_2_a_job_not_requested_by_the_bounty_contract_is_refused() {
 #[test]
 fn r3_11_r5_5_an_unreadable_sealed_exploit_is_malformed() {
     // Not base64; base64 but not DEFLATE; a deflated bundle with no exploit.
-    for secret in ["not base64!", "AAAA", "Q1Yqz8gsSc1ILFGyUkrMyUxO1StJLS7JSy1RqgUA"] {
+    for secret in [
+        "not base64!",
+        "AAAA",
+        "Q1Yqz8gsSc1ILFGyUkrMyUxO1StJLS7JSy1RqgUA",
+    ] {
         let verdict = only_verdict(&as_contract_job(&judge_claim(SEALED_FOR), secret));
         assert_eq!(verdict.reason(), Reason::MalformedExploit, "{secret}");
     }
