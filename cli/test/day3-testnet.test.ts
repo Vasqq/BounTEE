@@ -10,7 +10,7 @@
 //   -> its sealed exploit copied and sent straight to OutLayer: refused (R5.2)
 //
 // Runs only with BOUNTEE_DAY3_RUN=1 (it spends testnet NEAR and Base Sepolia ETH). Needs
-// ~/.bountee-testnet/day3-deployment.json from `fixtures/testnet/deploy-system.ts`, the
+// ~/.bountee-testnet/day3-deployment.json from `testnet/deploy-system.ts`, the
 // Protocol's and attacker's keys in ~/.near-credentials/testnet, and the Base Sepolia
 // deployer in ~/.bountee-testnet/base-sepolia-deployer.env. WHITEHAT=<account> uses an
 // existing account instead of `init` (when NEAR's faucet is rate-limited). Every transaction
@@ -25,14 +25,15 @@ import { actions } from "near-api-js";
 import { describe, expect, test } from "vitest";
 import { ensureClaimBalance } from "../src/claim-flow.ts";
 import { Near, events, milliNear, tgas } from "../src/near.ts";
-import { withNumber } from "./fixtures/testnet/header.ts";
+import { defaultRpc } from "../src/chains.ts";
+import { withNumber } from "./testnet/header.ts";
 
 const RUN = process.env.BOUNTEE_DAY3_RUN === "1";
 const home = homedir();
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const repo = fileURLToPath(new URL("../../", import.meta.url));
-const freshInstance = fileURLToPath(new URL("./fixtures/testnet/fresh-instance.ts", import.meta.url));
-const RPC = "https://sepolia.base.org";
+const freshInstance = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
+const RPC = defaultRpc(84532)!;
 const ATTACKER = process.env.ATTACKER ?? "bts1-mallory-1104.testnet";
 const evidenceFile = join(home, ".bountee-testnet", "day3-evidence.json");
 const evidence: Record<string, unknown> = {};

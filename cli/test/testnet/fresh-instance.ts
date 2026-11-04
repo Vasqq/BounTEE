@@ -18,7 +18,7 @@
 // bountee-spike4.testnet), BOUNTY_NAME (default demo-<UTC yyyymmddhhmm>), BOUNTY_AMOUNT (test
 // USDC smallest unit, default 100e6), MINIMUM_THEFT (default 1000e6), WHITEHAT and
 // CLAIMS (the Whitehat and how many claims the run files, for the preflight), DEPLOYER_ENV
-// (default ~/.bountee-testnet/base-sepolia-deployer.env), RPC (default sepolia.base.org),
+// (default ~/.bountee-testnet/base-sepolia-deployer.env), RPC (default: Base Sepolia's in cli/src/chains.ts),
 // PREFLIGHT_ONLY=1 to stop after step 0.
 import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
@@ -29,10 +29,11 @@ import { fileURLToPath } from "node:url";
 import { base58 } from "@scure/base";
 import { actions } from "near-api-js";
 import { pauseRole } from "@bountee/formats";
-import { Near, events, formatNear, milliNear, tgas } from "../../../src/near.ts";
+import { defaultRpc } from "../../src/chains.ts";
+import { Near, events, formatNear, milliNear, tgas } from "../../src/near.ts";
 
 const home = homedir();
-const root = fileURLToPath(new URL("../../../../", import.meta.url));
+const root = fileURLToPath(new URL("../../../", import.meta.url));
 const deployment = JSON.parse(readFileSync(process.env.BOUNTEE_DAY3 ?? join(home, ".bountee-testnet", "day3-deployment.json"), "utf8"));
 const CONTRACT: string = deployment.contract;
 const USDC: string = deployment.usdc;
@@ -41,9 +42,9 @@ const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 12);
 const NAME = process.env.BOUNTY_NAME ?? `demo-${stamp}`;
 const BOUNTY_AMOUNT = process.env.BOUNTY_AMOUNT ?? "100000000";
 const MINIMUM_THEFT = process.env.MINIMUM_THEFT ?? "1000000000";
-const RPC = process.env.RPC ?? "https://sepolia.base.org";
-const OUT = process.env.BOUNTEE_INSTANCE ?? join(home, ".bountee-testnet", "day3-instance.json");
 const CHAIN = 84532;
+const RPC = process.env.RPC ?? defaultRpc(CHAIN)!;
+const OUT = process.env.BOUNTEE_INSTANCE ?? join(home, ".bountee-testnet", "day3-instance.json");
 const deployerEnv: Record<string, string> = Object.fromEntries(
   readFileSync(process.env.DEPLOYER_ENV ?? join(home, ".bountee-testnet", "base-sepolia-deployer.env"), "utf8")
     .split("\n")

@@ -1,5 +1,5 @@
 // Seam T, ticket #15 (testnet half): a sealed exploit against real OutLayer testnet and a
-// keyless bounty contract deployed by `fixtures/testnet/deploy-sealing.ts`.
+// keyless bounty contract deployed by `testnet/deploy-sealing.ts`.
 //
 // Seams (written before the first test): T here catches what OutLayer itself enforces: the
 // contract's own job opens the sealed exploit and records only a coarse verdict (R5.5); a
@@ -18,7 +18,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { actions } from "near-api-js";
 import { beforeAll, describe, expect, test } from "vitest";
-import { account, txStatus, view } from "./fixtures/testnet/near.ts";
+import { Near } from "../src/near.ts";
+
+const near = new Near("testnet", process.env.NEAR_TESTNET_RPC);
 
 const deploymentFile = process.env.BOUNTEE_TESTNET_SEALING;
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
@@ -49,7 +51,7 @@ describe.skipIf(!deploymentFile)("sealing on OutLayer testnet", () => {
 
   /** Run a job straight on OutLayer as the attacker; return the whole outcome. */
   async function attackerJob(label: string, judge: { hash: string; url: string }, secretsRef: object) {
-    const r = await account(d.attacker).signAndSendTransaction({
+    const r = await near.account(d.attacker).signAndSendTransaction({
       receiverId: "outlayer.testnet",
       actions: [
         actions.functionCall(
@@ -73,12 +75,12 @@ describe.skipIf(!deploymentFile)("sealing on OutLayer testnet", () => {
     });
     evidenceLog[label] = r.transaction.hash;
     console.log(`${label}: ${r.transaction.hash}`);
-    return txStatus(r.transaction.hash, d.attacker);
+    return near.txStatus(r.transaction.hash, d.attacker);
   }
 
   /** The attacker files the copied ciphertext as its own secret, open to anyone. */
   async function plantCopy(label: string, judgeHash: string, profile: string) {
-    const r = await account(d.attacker).signAndSendTransaction({
+    const r = await near.account(d.attacker).signAndSendTransaction({
       receiverId: "outlayer.testnet",
       actions: [
         actions.functionCall(
@@ -109,7 +111,7 @@ describe.skipIf(!deploymentFile)("sealing on OutLayer testnet", () => {
     // A live claim: the bounty's own rules, the harmless script run by `bountee test` at a
     // recent Base Sepolia block, with its proofs.
     const name = d.bounty.split("/")[1];
-    const rules = (await view(d.contract, "bounty", { id: { protocol: d.protocol, name } })).rules;
+    const rules = (await near.view(d.contract, "bounty", { id: { protocol: d.protocol, name } })).rules;
     writeFileSync(join(dir, "rules.json"), JSON.stringify(rules));
     const tested = await bountee(["test", harmless, "--bounty", join(dir, "rules.json"), "--out", join(dir, "job.json"), "--json"]);
     expect(tested.code, tested.stderr).toBe(0);
@@ -129,10 +131,10 @@ describe.skipIf(!deploymentFile)("sealing on OutLayer testnet", () => {
     evidenceLog.claim = claimTx;
     writeFileSync(`${deploymentFile}.evidence.json`, JSON.stringify({ claim_id: claimId, ...evidenceLog }, null, 2) + "\n");
     console.log(`claim ${claimId}: ${claimTx}`);
-    const status = await txStatus(claimTx, d.whitehat);
+    const status = await near.txStatus(claimTx, d.whitehat);
     const args = JSON.parse(Buffer.from(status.transaction.actions[0].FunctionCall.args, "base64").toString("utf8"));
     copied = args.sealed_exploit;
-    const claim = await view(d.contract, "claim", { claim_id: claimId });
+    const claim = await near.view(d.contract, "claim", { claim_id: claimId });
     input = JSON.stringify({ judge_claim: {
       rules,
       bounty: claim.bounty, whitehat: d.attacker, block: claim.block, header: claim.header,
@@ -143,13 +145,13 @@ describe.skipIf(!deploymentFile)("sealing on OutLayer testnet", () => {
   test("R5.5, R5.1: the bounty contract's own job opens the sealed exploit; a ZERO claim records only its coarse reason, with no plaintext on chain", async () => {
     let claim: any;
     for (let i = 0; i < 40; i++) {
-      claim = await view(d.contract, "claim", { claim_id: claimId });
+      claim = await near.view(d.contract, "claim", { claim_id: claimId });
       if (claim.state !== "storing" && claim.state !== "judging") break;
       await new Promise((r) => setTimeout(r, 3000));
     }
     expect(claim.state).toBe("judged");
     expect(claim.verdict).toStrictEqual({ outcome: "ZERO", reason: "below_minimum_theft" });
-    const onChain = JSON.stringify(await txStatus(claimTx, d.whitehat)) + JSON.stringify(claim);
+    const onChain = JSON.stringify(await near.txStatus(claimTx, d.whitehat)) + JSON.stringify(claim);
     // No transaction's calldata appears (its sender's absence proof is public by design).
     for (const tx of exploit.transactions) expect(onChain).not.toContain(tx.input.slice(2));
   }, 240_000);
