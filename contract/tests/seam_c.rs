@@ -555,7 +555,10 @@ async fn a_posting_needs_the_prepaid_fee_and_the_contract_never_spends_its_own_b
     // (the second deposit carried 5 milliNEAR for that); nothing came back.
     let left: u128 = left.as_str().unwrap().parse()?;
     let margin = NearToken::from_millinear(5).as_yoctonear();
-    assert!(left > short.as_yoctonear() && left < short.as_yoctonear() + margin, "{left}");
+    assert!(
+        left > short.as_yoctonear() && left < short.as_yoctonear() + margin,
+        "{left}"
+    );
 
     // A deposit too small to pay for its own balance entry is refused, not paid for.
     for method in ["prepay_posting_fee", "top_up_claim_balance"] {
@@ -896,5 +899,36 @@ async fn claims_wait_for_the_posting_check() -> anyhow::Result<()> {
         .await?;
     posting.await?.into_result()?;
     assert_eq!(s.bounty("checking").await?["state"], "live");
+    Ok(())
+}
+
+/// R1.1 (the seed BounTEE sets): the seed is native coin only, because the judge gives no
+/// verdict for a seed holding an ERC-20; a deployment naming one is refused.
+#[tokio::test]
+async fn a_deployment_with_an_erc20_seed_is_refused() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let wasm = near_workspaces::compile_project("./").await?;
+    let root = s.worker.root_account()?;
+    let second = root
+        .create_subaccount("bounty2")
+        .initial_balance(NearToken::from_near(10))
+        .transact()
+        .await?
+        .into_result()?;
+    let mut config = s.view("config", json!({})).await?;
+    config["seed"]["tokens"] =
+        json!([{ "token": "0x00000000000000000000000000000000000000bb", "amount": "1" }]);
+    let r = second
+        .batch(second.id())
+        .deploy(&wasm)
+        .call(
+            Function::new("new")
+                .args_json(json!({ "config": config }))
+                .deposit(NearToken::from_millinear(125))
+                .gas(tgas(100)),
+        )
+        .transact()
+        .await?;
+    assert!(failure_text(&r).contains("native coin only"), "{r:?}");
     Ok(())
 }

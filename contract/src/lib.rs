@@ -36,6 +36,7 @@ pub struct Config {
     /// Where OutLayer fetches the judge's wasm. What runs is chosen by the hash, never the URL.
     pub judge_wasm_url: String,
     /// The seed every bounty's replay starts fresh accounts with; set by BounTEE (R1.1, R4.7).
+    /// Native coin only: the judge gives no verdict for a seed holding any ERC-20.
     pub seed: Seed,
 }
 
@@ -190,6 +191,10 @@ impl Contract {
         require!(
             env::attached_deposit() >= fees::USDC_REGISTRATION,
             "attach the USDC registration deposit"
+        );
+        require!(
+            config.seed.tokens.is_empty(),
+            "the seed is native coin only"
         );
         let me = env::current_account_id();
         payout::ext_ft::ext(config.usdc.clone())
