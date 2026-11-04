@@ -986,3 +986,31 @@ async fn r5_5_r5_7_a_failed_claim_records_only_its_coarse_reason() -> anyhow::Re
     assert!(s.worker.view_access_keys(s.contract.id()).await?.is_empty());
     Ok(())
 }
+
+/// R11.2 (found on testnet in #15): a live claim's proofs run to ~120 KB of JSON; such a
+/// claim's job is still requested and judged, not left `storing` because writing its large
+/// job input overran the gas the callback kept back.
+#[tokio::test]
+async fn a_claim_with_live_sized_proofs_is_judged() -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    s.top_up(&s.whitehat, NearToken::from_near(3)).await?;
+    s.script(json!({ "output": ZERO })).await?;
+    let proof = json!({ "address": "0x00000000000000000000000000000000000000aa",
+        "account_proof": vec![format!("0x{}", "ab".repeat(532)); 110] });
+    let proofs = Value::Array(vec![proof; 1]).to_string();
+    assert!(proofs.len() > 110_000, "{}", proofs.len());
+    let mut args = s.claim_args("vault");
+    args["proofs"] = Value::String(proofs);
+    let id: u64 = s
+        .whitehat
+        .call(s.contract.id(), "submit_claim")
+        .args_json(args)
+        .gas(tgas(300))
+        .transact()
+        .await?
+        .into_result()?
+        .json()?;
+    let claim = s.claim(id).await?;
+    assert_eq!(claim["state"], "judged", "{claim}");
+    Ok(())
+}

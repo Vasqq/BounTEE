@@ -175,7 +175,7 @@ impl Contract {
             Some(&profile),
             &whitehat,
             job_deposit,
-            Self::gas_left(gas::ON_CLAIM_JUDGED.saturating_add(gas::TAIL)),
+            || Self::gas_left(gas::ON_CLAIM_JUDGED.saturating_add(gas::TAIL)),
         )
         .then(
             Self::ext(env::current_account_id())
