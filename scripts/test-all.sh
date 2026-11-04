@@ -26,7 +26,7 @@ for suite in "${suites[@]}"; do
       need wasmtime "https://wasmtime.dev"
       run "seam J: judge as $(cat judge/wasm-target) under wasmtime" cargo test -p bountee-judge
       ;;
-    c) run "seam C: bounty contract in the NEAR sandbox (rustc $(sed -n 's/channel = "\(.*\)"/\1/p' contract/rust-toolchain.toml))" bash -c 'cd contract && cargo test' ;;
+    c) run "seam C: bounty contract in the NEAR sandbox (rustc $(sed -n 's/channel = "\(.*\)"/\1/p' contract/rust-toolchain.toml))" bash -c 'cd contract && cargo test -- --test-threads=1' ;;
     t) run "seam T: command-line tool" pnpm --filter @bountee/cli test ;;
     w) run "seam W: web app in Playwright" pnpm --filter @bountee/web test ;;
     e)
