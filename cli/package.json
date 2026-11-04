@@ -17,9 +17,11 @@
   },
   "dependencies": {
     "@bountee/formats": "workspace:*",
-    "@noble/hashes": "^2.4.0"
+    "@noble/hashes": "^2.4.0",
+    "near-api-js": "7.3.1"
   },
   "devDependencies": {
+    "@scure/base": "1.2.6",
     "@types/node": "^22",
     "typescript": "~5.9.3",
     "vitest": "^4.1.12"

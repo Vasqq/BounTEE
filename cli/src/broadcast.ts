@@ -4,6 +4,7 @@
 //
 // A pause someone else already sent is reported as `known`, not as an error, so running it
 // twice is harmless. Verification on NEAR (R7.3's second half) is ticket #21.
+import { NEAR_RPC } from "./near.ts";
 import { rpc } from "./proofs.ts";
 
 /** Each chain's public RPC, used unless `--rpc <chain id>=<url>` names another. */
@@ -106,7 +107,7 @@ export async function broadcastCommand(o: BroadcastOptions): Promise<BroadcastRe
   const [protocol, name] = [m[1]!, m[2]!];
   const contract = o.contract ?? process.env.BOUNTEE_CONTRACT;
   if (!contract) throw new Error("broadcast needs the bounty contract's account: pass --contract or set BOUNTEE_CONTRACT");
-  const nearRpc = o.nearRpc ?? "https://rpc.testnet.near.org";
+  const nearRpc = o.nearRpc ?? NEAR_RPC.testnet;
   const bounty = await viewBounty(nearRpc, contract, protocol, name);
   if (!bounty) throw new Error(`no bounty ${o.bounty} on ${contract}`);
   if (bounty.signed_pauses.length === 0) throw new Error(`bounty ${o.bounty} has no signed pauses (state: ${bounty.state})`);

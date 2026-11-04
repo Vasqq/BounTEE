@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-// BounTEE's command-line tool. Commands so far: `--version`, `test` (ticket #11), `broadcast`
-// (ticket #13). The rest (init, list, show, claim, status, verify, balance, key, open-exploit, withdraw,
+// BounTEE's command-line tool. Commands so far: `--version`, `init` (#16), `test` (ticket #11),
+// `broadcast` (ticket #13). The rest (list, show, claim, status, verify, balance, key, open-exploit, withdraw,
 // post) land in the CLI tickets; each takes `--json` for machine-readable output (R14.5).
 import { readFileSync } from "node:fs";
 import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadcast.ts";
+import { initCommand } from "./init.ts";
+import { parseNetwork } from "./near.ts";
 import { formatTestResult, testCommand } from "./test.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -39,6 +41,10 @@ function fail(message: string, code = 1): never {
 try {
   if (rest[0] === "--version") {
     console.log(json ? JSON.stringify({ name: "bountee", version: pkg.version }) : `bountee ${pkg.version}`);
+  } else if (rest[0] === "init") {
+    const { flags } = parse(rest.slice(1));
+    const result = await initCommand({ network: parseNetwork(flags.network), account: flags.account });
+    console.log(json ? JSON.stringify(result) : result.message);
   } else if (rest[0] === "test") {
     const { positional, flags } = parse(rest.slice(1));
     const script = positional[0];

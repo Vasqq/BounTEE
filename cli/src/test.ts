@@ -15,6 +15,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { parseRules, toJson, type Exploit, type Rules, type Verdict } from "@bountee/formats";
+import { NEAR_RPC } from "./near.ts";
 import { collectReplay, exploitFromBroadcast, rpc } from "./proofs.ts";
 
 /** Ordinary public RPCs that serve `eth_getProof` at recent blocks, in order of preference (spec, RPCs). */
@@ -59,7 +60,7 @@ async function loadRules(o: TestOptions): Promise<Rules> {
   const contract = o.contract ?? process.env.BOUNTEE_CONTRACT;
   if (!contract) throw new Error("--bounty <id> needs the bounty contract's account: pass --contract or set BOUNTEE_CONTRACT");
   const args = Buffer.from(JSON.stringify({ id: { protocol: m[1], name: m[2] } })).toString("base64");
-  const res = await rpc<{ result: number[] }>(o.nearRpc ?? "https://rpc.testnet.near.org", "query", {
+  const res = await rpc<{ result: number[] }>(o.nearRpc ?? NEAR_RPC.testnet, "query", {
     request_type: "call_function",
     finality: "final",
     account_id: contract,
