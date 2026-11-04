@@ -1,6 +1,5 @@
-//! Settling a PAYS verdict: every pause is signed, then the whole bounty is paid to the
-//! Whitehat (ADR-0001, R7.1, R3.2). Ticket #13 adds the signing step in
-//! [`Contract::settle_pays`]; the payout itself is [`Contract::pay_out`].
+//! The payout of a PAYS verdict: once every pause is signed and stored (`pauses`), the whole
+//! bounty is paid to the Whitehat (ADR-0001, R7.1, R3.2) by [`Contract::pay_out`].
 //!
 //! USDC leaves the contract only here, as the payout (R2.3); the Protocol's withdrawal
 //! after the end date is the only other path, in its own ticket.
@@ -51,13 +50,6 @@ impl Contract {
 }
 
 impl Contract {
-    /// A PAYS verdict on a live bounty, which is now closed to further claims. Every pause
-    /// is signed before the payout (R7.1): ticket #13 requests and stores the signatures
-    /// here and calls [`Contract::pay_out`] from their callback. Until then it pays at once.
-    pub(crate) fn settle_pays(&mut self, claim_id: u64) -> Promise {
-        self.pay_out(claim_id)
-    }
-
     /// Pay the whole bounty amount to the claim's Whitehat, registering them with USDC
     /// first if needed (R3.2, R2.7). No allowlist and no identity check (D9). The NEAR it
     /// attaches comes from the bounty's posting fee.

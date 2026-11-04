@@ -85,6 +85,8 @@ impl Contract {
                 state: BountyState::Checking,
                 winning_claim: None,
                 fee_reserve: NearToken::from_yoctonear(0),
+                signed_pauses: Vec::new(),
+                signing_since: None,
             },
         );
         self.bounties.flush();

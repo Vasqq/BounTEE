@@ -81,6 +81,7 @@ impl Sandbox {
             "judge_build_hash": JUDGE_BUILD_HASH,
             "judge_wasm_url": JUDGE_WASM_URL,
             "seed": { "native": SEED_NATIVE, "tokens": [] },
+            "mpc_root_public_key": mpc::root_public_key(),
         });
         bounty
             .batch(bounty.id())
@@ -371,7 +372,7 @@ impl Sandbox {
         Ok(())
     }
 
-    async fn sign_requests(&self) -> anyhow::Result<Vec<String>> {
+    async fn sign_requests(&self) -> anyhow::Result<Vec<Value>> {
         Ok(self.test_mpc.view("sign_requests").await?.json()?)
     }
 }
@@ -576,8 +577,7 @@ async fn a_posting_needs_the_prepaid_fee_and_the_contract_never_spends_its_own_b
 
     // A whole claim, judged PAYS and paid, costs the contract nothing of its own.
     s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
-    s.script(json!({ "output": PAYS })).await?;
-    s.submit_claim(&s.whitehat, "paid").await?.into_result()?;
+    s.pay_claim("paid").await?;
     assert_eq!(s.bounty("paid").await?["state"], "paid");
     let free_at_end = s.free_balance().await?;
     assert!(
@@ -770,12 +770,7 @@ async fn pays_pays_the_whole_amount_to_an_unregistered_account() -> anyhow::Resu
         .json()?;
     assert_eq!(registered, Value::Null, "the Whitehat starts unregistered");
 
-    s.script(json!({ "output": PAYS })).await?;
-    let id: u64 = s
-        .submit_claim(&s.whitehat, "vault")
-        .await?
-        .into_result()?
-        .json()?;
+    let id = s.pay_claim("vault").await?;
     assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
     assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
     let bounty = s.bounty("vault").await?;
@@ -848,8 +843,7 @@ async fn a_null_or_failed_job_gives_no_verdict() -> anyhow::Result<()> {
 #[tokio::test]
 async fn after_a_payout_later_claims_are_refused_without_replay() -> anyhow::Result<()> {
     let s = live_bounty("vault").await?;
-    s.script(json!({ "output": PAYS })).await?;
-    s.submit_claim(&s.whitehat, "vault").await?.into_result()?;
+    s.pay_claim("vault").await?;
     let jobs = s.requests().await?.len();
     let rows: Vec<(String, u32)> = s.test_outlayer.view("secret_rows").await?.json()?;
 
@@ -1012,5 +1006,463 @@ async fn a_claim_with_live_sized_proofs_is_judged() -> anyhow::Result<()> {
         .json()?;
     let claim = s.claim(id).await?;
     assert_eq!(claim["state"], "judged", "{claim}");
+    Ok(())
+}
+
+// ---- pause signing (ticket #13) ----
+
+/// The test side of the MPC stand-in: a known root key, the key the network derives from it
+/// for (predecessor, path), and answers in the MPC network's own JSON.
+mod mpc {
+    use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
+    use k256::elliptic_curve::sec1::ToEncodedPoint;
+    use k256::elliptic_curve::PrimeField;
+    use k256::Scalar;
+    use serde_json::{json, Value};
+    use sha3::{Digest, Keccak256, Sha3_256};
+
+    const ROOT_SECRET: [u8; 32] = [7u8; 32];
+
+    fn root() -> SigningKey {
+        SigningKey::from_bytes(&ROOT_SECRET.into()).unwrap()
+    }
+
+    pub fn root_public_key() -> String {
+        let point = root().verifying_key().to_encoded_point(false);
+        format!(
+            "secp256k1:{}",
+            bs58::encode(&point.as_bytes()[1..]).into_string()
+        )
+    }
+
+    /// The key the network signs with for `predecessor` and `path`: root + tweak.
+    pub fn derived(predecessor: &str, path: &str) -> SigningKey {
+        let digest: [u8; 32] = Sha3_256::digest(format!(
+            "near-mpc-recovery v0.1.0 epsilon derivation:{predecessor},{path}"
+        ))
+        .into();
+        let tweak = Scalar::from_repr(digest.into()).unwrap();
+        let secret = *root().as_nonzero_scalar().as_ref() + tweak;
+        SigningKey::from_bytes(&secret.to_repr()).unwrap()
+    }
+
+    /// A key that is not the bounty's.
+    pub fn wrong() -> SigningKey {
+        SigningKey::from_bytes(&[9u8; 32].into()).unwrap()
+    }
+
+    /// The MPC network's answer to a request for `payload_hex`, signed by `key`, with hex
+    /// in upper case as the network's docs show it. With `high_s`, s is the other valid
+    /// (non-EIP-2) half, as an unnormalised signer might send.
+    pub fn answer(key: &SigningKey, payload_hex: &str, high_s: bool) -> Value {
+        let hash = hex::decode(payload_hex).unwrap();
+        let (sig, recid): (Signature, RecoveryId) = key.sign_prehash_recoverable(&hash).unwrap();
+        let s = if high_s {
+            -*sig.s().as_ref()
+        } else {
+            *sig.s().as_ref()
+        };
+        let big_r = format!(
+            "{}{}",
+            if recid.is_y_odd() { "03" } else { "02" },
+            hex::encode(sig.r().to_repr())
+        );
+        json!({
+            "scheme": "Secp256k1",
+            "big_r": { "affine_point": big_r.to_uppercase() },
+            "s": { "scalar": hex::encode(s.to_repr()).to_uppercase() },
+            "recovery_id": recid.to_byte(),
+        })
+    }
+
+    fn keccak(b: &[u8]) -> [u8; 32] {
+        Keccak256::digest(b).into()
+    }
+
+    /// Who signed a type-2 transaction decoded by `cast decode-transaction`: its signing
+    /// hash is rebuilt with `cast to-rlp` from the decoded fields, then recovered.
+    pub fn sender(decoded: &Value) -> String {
+        let num = |k: &str| {
+            let v = u128::from_str_radix(&decoded[k].as_str().unwrap()[2..], 16).unwrap();
+            if v == 0 {
+                "0x".to_owned()
+            } else {
+                let h = format!("{v:x}");
+                format!("0x{}{h}", if h.len() % 2 == 1 { "0" } else { "" })
+            }
+        };
+        let fields = json!([
+            num("chainId"),
+            num("nonce"),
+            num("maxPriorityFeePerGas"),
+            num("maxFeePerGas"),
+            num("gas"),
+            decoded["to"],
+            num("value"),
+            decoded["input"],
+            []
+        ]);
+        let rlp = super::cast(&["to-rlp", &fields.to_string()]);
+        let mut payload = vec![0x02];
+        payload.extend(hex::decode(rlp.trim().trim_start_matches("0x")).unwrap());
+        let hash = keccak(&payload);
+        let sig = Signature::from_slice(
+            &hex::decode(super::word(&decoded["r"]) + &super::word(&decoded["s"])).unwrap(),
+        )
+        .unwrap();
+        let parity = u8::from_str_radix(&decoded["yParity"].as_str().unwrap()[2..], 16).unwrap();
+        let key =
+            VerifyingKey::recover_from_prehash(&hash, &sig, RecoveryId::from_byte(parity).unwrap())
+                .unwrap();
+        let point = key.to_encoded_point(false);
+        format!("0x{}", hex::encode(&keccak(&point.as_bytes()[1..])[12..]))
+    }
+}
+
+/// A decoded 256-bit value as 64 hex digits.
+fn word(v: &Value) -> String {
+    format!("{:0>64}", v.as_str().unwrap().trim_start_matches("0x"))
+}
+
+/// Half the secp256k1 group order: an EIP-2 signature's s is at most this.
+const HALF_ORDER: &str = "7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0";
+
+/// Run Foundry's `cast`, an EVM decoder independent of the contract's own encoder.
+fn cast(args: &[&str]) -> String {
+    let out = std::process::Command::new("cast")
+        .args(args)
+        .output()
+        .expect("cast (Foundry) on PATH");
+    assert!(
+        out.status.success(),
+        "cast {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// The D25 pause-role address, derived by the shared formats crate, not the contract.
+fn pause_role_address(s: &Sandbox, name: &str) -> String {
+    let bounty = bountee_formats::BountyId {
+        protocol: bountee_formats::AccountId::parse(s.protocol.id().as_str()).unwrap(),
+        name: bountee_formats::BountyName::parse(name).unwrap(),
+    };
+    let contract = bountee_formats::AccountId::parse(s.contract.id().as_str()).unwrap();
+    bountee_formats::pause_role::address(&mpc::root_public_key(), &contract, &bounty)
+        .unwrap()
+        .to_string()
+}
+
+type Pending = near_workspaces::operations::TransactionStatus;
+
+impl Sandbox {
+    async fn wait_for_sign_requests(&self, n: usize) -> anyhow::Result<Vec<Value>> {
+        for _ in 0..150 {
+            let r = self.sign_requests().await?;
+            if r.len() >= n {
+                return Ok(r);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        anyhow::bail!(
+            "only {} sign requests arrived",
+            self.sign_requests().await?.len()
+        )
+    }
+
+    async fn respond(&self, index: usize, response: Value) -> anyhow::Result<()> {
+        self.test_mpc
+            .call("respond")
+            .args_json(json!({ "index": index, "response": response }))
+            .transact()
+            .await?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Answer the requests from index `from` on, each signed by `key`.
+    async fn answer_from(
+        &self,
+        requests: &[Value],
+        from: usize,
+        key: &k256::ecdsa::SigningKey,
+        high_s: bool,
+    ) -> anyhow::Result<()> {
+        for (i, r) in requests.iter().enumerate().skip(from) {
+            let request: Value = serde_json::from_str(r["request"].as_str().unwrap())?;
+            let payload = request["payload_v2"]["Ecdsa"].as_str().unwrap();
+            self.respond(i, mpc::answer(key, payload, high_s)).await?;
+        }
+        Ok(())
+    }
+
+    fn pause_key(&self, name: &str) -> k256::ecdsa::SigningKey {
+        mpc::derived(
+            self.contract.id().as_str(),
+            &format!("{}/{name}", self.protocol.id()),
+        )
+    }
+
+    /// Anyone retries the pause signing, without waiting for its receipts.
+    async fn sign_pauses(&self, name: &str) -> anyhow::Result<Pending> {
+        Ok(self
+            .other
+            .call(self.contract.id(), "sign_pauses")
+            .args_json(json!({ "id": { "protocol": self.protocol.id(), "name": name } }))
+            .gas(tgas(300))
+            .transact_async()
+            .await?)
+    }
+
+    /// A claim that scores PAYS, submitted without waiting for its receipts.
+    async fn submit_pays(&self, name: &str) -> anyhow::Result<Pending> {
+        self.script(json!({ "output": PAYS })).await?;
+        Ok(self
+            .whitehat
+            .call(self.contract.id(), "submit_claim")
+            .args_json(self.claim_args(name))
+            .gas(tgas(300))
+            .transact_async()
+            .await?)
+    }
+
+    /// A claim by the Whitehat that scores PAYS, its pauses signed by the MPC stand-in with
+    /// the bounty's own key, and paid. Returns the claim's ID.
+    async fn pay_claim(&self, name: &str) -> anyhow::Result<u64> {
+        let before = self.sign_requests().await?.len();
+        let covered = self.bounty(name).await?["rules"]["covered_contracts"]
+            .as_array()
+            .unwrap()
+            .len();
+        let claim = self.submit_pays(name).await?;
+        let requests = self.wait_for_sign_requests(before + covered).await?;
+        self.answer_from(&requests, before, &self.pause_key(name), false)
+            .await?;
+        let id: u64 = claim.await?.into_result()?.json()?;
+        self.wait_for_bounty_state(name, "paid").await?;
+        Ok(id)
+    }
+
+    async fn wait_for_bounty_state(&self, name: &str, state: &str) -> anyhow::Result<Value> {
+        for _ in 0..150 {
+            let b = self.bounty(name).await?;
+            if b["state"] == state {
+                return Ok(b);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        anyhow::bail!(
+            "bounty {name} never reached {state}: {}",
+            self.bounty(name).await?
+        )
+    }
+
+    /// The bounty is closed with its PAYS claim waiting: nothing paid, nothing stored,
+    /// and no other claim can take its place.
+    async fn assert_waiting(&self, name: &str, claim_id: u64) -> anyhow::Result<()> {
+        let bounty = self.bounty(name).await?;
+        assert_eq!(bounty["state"], "signing", "{bounty}");
+        assert_eq!(bounty["winning_claim"], claim_id);
+        assert_eq!(bounty["signed_pauses"], json!([]));
+        assert_eq!(self.usdc_balance(self.whitehat.id()).await?, 0);
+        assert_eq!(self.usdc_balance(self.contract.id()).await?, BOUNTY_AMOUNT);
+        let r = self.submit_claim(&self.other, name).await?;
+        assert!(failure_text(&r).contains("closed"), "{r:?}");
+        Ok(())
+    }
+}
+
+/// R7.1, R7.2, R8.1, R2.4, R7.11, D25: on PAYS a pause is signed for every covered contract
+/// on every chain, each from the bounty's pause-role address, each calling only `pause()`
+/// on its contract with the chain ID signed, all stored before the payout; the payout then
+/// goes through with no EVM chain involved at all.
+#[tokio::test]
+async fn pays_signs_every_pause_from_the_pause_role_address_and_then_pays() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let mut rules = valid_rules(&s).await?;
+    rules["covered_contracts"] = json!([
+        { "chain_id": 84532, "address": "0x00000000000000000000000000000000000000aa" },
+        { "chain_id": 84532, "address": "0x00000000000000000000000000000000000000cc" },
+        { "chain_id": 421614, "address": "0x00000000000000000000000000000000000000aa" },
+    ]);
+    s.post("vault", &rules).await?.into_result()?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+    let role = pause_role_address(&s, "vault");
+    let view = s
+        .view(
+            "pause_role",
+            json!({ "id": { "protocol": s.protocol.id(), "name": "vault" } }),
+        )
+        .await?;
+    assert_eq!(
+        view["address"], role,
+        "D25: the same address the formats derive"
+    );
+
+    let claim = s.submit_pays("vault").await?;
+    let requests = s.wait_for_sign_requests(3).await?;
+    // Nothing is paid while the pauses are unsigned.
+    assert_eq!(s.bounty("vault").await?["state"], "signing");
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, 0);
+    for r in &requests {
+        assert_eq!(r["predecessor"], s.contract.id().as_str());
+        assert_eq!(r["deposit"], "1");
+        let request: Value = serde_json::from_str(r["request"].as_str().unwrap())?;
+        assert_eq!(request["path"], format!("{}/vault", s.protocol.id()));
+        assert_eq!(request["domain_id"], 0);
+    }
+    // The first answer has a high s, which the contract must make low (EIP-2).
+    let key = s.pause_key("vault");
+    s.answer_from(&requests[..1], 0, &key, true).await?;
+    s.answer_from(&requests, 1, &key, false).await?;
+    let id: u64 = claim.await?.into_result()?.json()?;
+    // The yields resume in later receipts than the claim's own transaction.
+    s.wait_for_bounty_state("vault", "paid").await?;
+
+    let bounty = s.bounty("vault").await?;
+    assert_eq!(bounty["state"], "paid");
+    assert_eq!(bounty["winning_claim"], id);
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    let pauses = bounty["signed_pauses"].as_array().unwrap();
+    assert_eq!(pauses.len(), 3);
+    let expected = [(84532, "aa", 0), (84532, "cc", 1), (421614, "aa", 0)];
+    for (p, (chain, to, nonce)) in pauses.iter().zip(expected) {
+        let raw = p["tx"].as_str().unwrap();
+        let tx: Value = serde_json::from_str(&cast(&["decode-transaction", raw]))?;
+        assert_eq!(tx["type"], "0x2");
+        assert_eq!(tx["chainId"], format!("{:#x}", chain));
+        assert_eq!(tx["to"], format!("0x{}{to}", "0".repeat(38)));
+        assert_eq!(tx["input"], "0x8456cb59", "pause() and nothing else");
+        assert_eq!(tx["value"], "0x0");
+        assert_eq!(tx["accessList"], json!([]));
+        assert_eq!(tx["nonce"], format!("{:#x}", nonce));
+        assert_eq!(tx["hash"], p["tx_hash"]);
+        assert!(word(&tx["s"]).as_str() <= HALF_ORDER, "low s: {}", tx["s"]);
+        assert_eq!(mpc::sender(&tx), role, "signed from the pause-role address");
+    }
+    Ok(())
+}
+
+impl Sandbox {
+    /// Wait until no pause signing is under way, and return the bounty.
+    async fn wait_until_not_signing(&self, name: &str) -> anyhow::Result<Value> {
+        for _ in 0..300 {
+            let b = self.bounty(name).await?;
+            if b["signing_pauses"] == false {
+                return Ok(b);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        anyhow::bail!("pause signing never finished: {}", self.bounty(name).await?)
+    }
+
+    async fn sign_request_payload(&self, index: usize) -> anyhow::Result<String> {
+        let requests = self.wait_for_sign_requests(index + 1).await?;
+        let request: Value = serde_json::from_str(requests[index]["request"].as_str().unwrap())?;
+        Ok(request["payload_v2"]["Ecdsa"].as_str().unwrap().to_owned())
+    }
+}
+
+/// R2.5: when signing fails (an answer from the wrong key, a malformed answer, a failed
+/// `sign`), the PAYS claim stays the bounty's winner, unpaid with nothing stored, no other
+/// claim takes its place, and anyone can retry until every pause is signed; then it pays.
+#[tokio::test]
+async fn a_failed_signing_keeps_the_claim_waiting_in_its_place_until_a_retry() -> anyhow::Result<()>
+{
+    let s = live_bounty("vault").await?;
+    let r = s.sign_pauses("vault").await?.await?;
+    assert!(failure_text(&r).contains("no pauses waiting"), "{r:?}");
+
+    let claim = s.submit_pays("vault").await?;
+    // An answer from the wrong key.
+    let payload = s.sign_request_payload(0).await?;
+    s.respond(0, mpc::answer(&mpc::wrong(), &payload, false))
+        .await?;
+    let id: u64 = claim.await?.into_result()?.json()?;
+    s.wait_until_not_signing("vault").await?;
+    s.assert_waiting("vault", id).await?;
+
+    // A malformed answer; a second retry while one is under way is refused.
+    let retry = s.sign_pauses("vault").await?;
+    s.sign_request_payload(1).await?;
+    let r = s.sign_pauses("vault").await?.await?;
+    assert!(failure_text(&r).contains("already under way"), "{r:?}");
+    s.respond(
+        1,
+        json!({ "scheme": "Secp256k1", "big_r": { "affine_point": "02" },
+                "s": { "scalar": "00" }, "recovery_id": 0 }),
+    )
+    .await?;
+    retry.await?;
+    s.wait_until_not_signing("vault").await?;
+    s.assert_waiting("vault", id).await?;
+
+    // `sign` itself fails.
+    s.test_mpc
+        .call("fail_next_sign")
+        .transact()
+        .await?
+        .into_result()?;
+    s.sign_pauses("vault").await?.await?;
+    s.wait_until_not_signing("vault").await?;
+    s.assert_waiting("vault", id).await?;
+
+    // A retry signed with the bounty's key pays the same claim.
+    let retry = s.sign_pauses("vault").await?;
+    let payload = s.sign_request_payload(2).await?;
+    s.respond(2, mpc::answer(&s.pause_key("vault"), &payload, false))
+        .await?;
+    retry.await?.into_result()?;
+    let bounty = s.wait_for_bounty_state("vault", "paid").await?;
+    assert_eq!(bounty["winning_claim"], id);
+    assert_eq!(bounty["signed_pauses"].as_array().unwrap().len(), 1);
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    Ok(())
+}
+
+/// R2.5: a signature request nobody answers times out; the claim waits unpaid in its
+/// place, and a retry pays it.
+#[tokio::test]
+async fn a_timed_out_signing_keeps_the_claim_waiting_until_a_retry() -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    let claim = s.submit_pays("vault").await?;
+    s.sign_request_payload(0).await?;
+    // NEAR times a yield out after 200 blocks.
+    s.worker.fast_forward(250).await?;
+    let id: u64 = claim.await?.into_result()?.json()?;
+    s.wait_until_not_signing("vault").await?;
+    s.assert_waiting("vault", id).await?;
+
+    let retry = s.sign_pauses("vault").await?;
+    let payload = s.sign_request_payload(1).await?;
+    s.respond(1, mpc::answer(&s.pause_key("vault"), &payload, false))
+        .await?;
+    retry.await?.into_result()?;
+    s.wait_for_bounty_state("vault", "paid").await?;
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    Ok(())
+}
+
+/// D25: the pause-role address can be computed before posting, and a Protocol can't
+/// reuse a bounty name: the second posting is refused and its USDC goes back.
+#[tokio::test]
+async fn a_protocol_cannot_reuse_a_bounty_name() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let view = s
+        .view(
+            "pause_role",
+            json!({ "id": { "protocol": s.protocol.id(), "name": "vault" } }),
+        )
+        .await?;
+    assert_eq!(view["address"], pause_role_address(&s, "vault"));
+    assert_eq!(view["path"], format!("{}/vault", s.protocol.id()));
+
+    let rules = valid_rules(&s).await?;
+    s.post("vault", &rules).await?.into_result()?;
+    let usdc = s.usdc_balance(s.protocol.id()).await?;
+    let again = s.post("vault", &rules).await?;
+    assert!(failure_text(&again).contains("already used"), "{again:?}");
+    assert_eq!(s.usdc_balance(s.protocol.id()).await?, usdc, "refunded");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
     Ok(())
 }

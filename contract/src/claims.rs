@@ -56,7 +56,7 @@ impl Contract {
             BountyState::Checking | BountyState::CheckFailed => {
                 env::panic_str("this bounty's posting check hasn't passed")
             }
-            BountyState::Paying | BountyState::Paid => {
+            BountyState::Signing | BountyState::Paying | BountyState::Paid => {
                 env::panic_str("this bounty is closed: it has been paid")
             }
         }
@@ -169,17 +169,29 @@ impl Contract {
         claim.state = ClaimState::Judging;
         let profile = claim.secret_profile.clone();
         let whitehat = claim.whitehat.clone();
+        // Keep back the gas to sign every pause on PAYS in the same transaction, if the job
+        // still gets enough; otherwise a PAYS waits for `sign_pauses`.
+        let covered = self
+            .bounties
+            .get(&claim.bounty)
+            .map_or(0, |b| b.rules.covered_contracts.len());
+        let with_pauses = gas::ON_CLAIM_JUDGED.saturating_add(gas::pause_signing(covered));
+        let judged_gas = if Self::gas_left(with_pauses.saturating_add(gas::TAIL)) >= gas::MIN_JOB {
+            with_pauses
+        } else {
+            gas::ON_CLAIM_JUDGED
+        };
         outlayer::request_job(
             &self.config,
             &input,
             Some(&profile),
             &whitehat,
             job_deposit,
-            || Self::gas_left(gas::ON_CLAIM_JUDGED.saturating_add(gas::TAIL)),
+            || Self::gas_left(judged_gas.saturating_add(gas::TAIL)),
         )
         .then(
             Self::ext(env::current_account_id())
-                .with_static_gas(gas::ON_CLAIM_JUDGED)
+                .with_static_gas(judged_gas)
                 .with_unused_gas_weight(0)
                 .on_claim_judged(claim_id, job_deposit),
         )
@@ -232,9 +244,20 @@ impl Contract {
             // Already closed by an earlier payout: nothing more is paid (R3.4).
             return PromiseOrValue::Value(());
         }
-        bounty.state = BountyState::Paying;
+        bounty.state = BountyState::Signing;
         bounty.winning_claim = Some(claim_id);
-        self.settle_pays(claim_id).into()
+        let needed = gas::pause_signing(bounty.rules.covered_contracts.len());
+        if Self::gas_left(near_sdk::Gas::from_gas(0)) < needed {
+            emit(
+                "pause_signing_waiting",
+                json!({ "bounty": bounty_id, "claim_id": claim_id }),
+            );
+            return PromiseOrValue::Value(());
+        }
+        match self.start_pause_signing(&bounty_id) {
+            Some(p) => p.into(),
+            None => PromiseOrValue::Value(()),
+        }
     }
 }
 
