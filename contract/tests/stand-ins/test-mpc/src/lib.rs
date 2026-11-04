@@ -13,6 +13,8 @@
 //! - `sign_requests()` reads back every request exactly as received, with its caller.
 //! - `respond(index, response)` answers a pending request with any JSON (a test signs the
 //!   payload with its own key, the wrong key, or sends garbage). Unanswered, it times out.
+//!   Answering `{"stand_in_defer": true}` keeps the request pending under a fresh yield, so
+//!   a test can hold a request open past the bounty contract's stale-signing limit.
 //! - `fail_next_sign()` makes the next `sign` call itself fail.
 
 use near_sdk::json_types::U128;
@@ -93,7 +95,7 @@ impl TestMpc {
         });
         let args = serde_json::json!({ "index": index }).to_string();
         let (promise, yield_id) =
-            Promise::new_yield("on_sign_response", args, Gas::from_tgas(7), GasWeight(0));
+            Promise::new_yield("on_sign_response", args, Gas::from_tgas(7), GasWeight(1)); // spare gas lets a test defer it
         self.yields.insert(index, yield_id);
         let _ = promise.as_return();
     }
@@ -114,7 +116,23 @@ impl TestMpc {
     pub fn on_sign_response(&mut self, index: u32) {
         #[allow(deprecated)]
         match env::promise_result(0) {
-            PromiseResult::Successful(bytes) => env::value_return(&bytes),
+            PromiseResult::Successful(bytes) => {
+                let defer = serde_json::from_slice::<Value>(&bytes)
+                    .is_ok_and(|v| v["stand_in_defer"] == Value::Bool(true));
+                if defer {
+                    let args = serde_json::json!({ "index": index }).to_string();
+                    let (promise, yield_id) = Promise::new_yield(
+                        "on_sign_response",
+                        args,
+                        Gas::from_tgas(7),
+                        GasWeight(1),
+                    );
+                    self.yields.insert(index, yield_id);
+                    let _ = promise.as_return();
+                } else {
+                    env::value_return(&bytes)
+                }
+            }
             PromiseResult::Failed => {
                 self.yields.remove(&index);
                 env::panic_str("Signature request has timed out.")

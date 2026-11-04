@@ -1452,6 +1452,49 @@ async fn a_timed_out_signing_keeps_the_claim_waiting_until_a_retry() -> anyhow::
     Ok(())
 }
 
+/// R2.5: a signing callback arriving after its request went stale and a retry started
+/// can't clear the retry's in-flight flag, so no second retry can run beside it; the retry
+/// then pays the same claim.
+#[tokio::test]
+async fn a_stale_signing_callback_leaves_the_newer_request_in_flight() -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    let claim = s.submit_pays("vault").await?;
+    s.sign_request_payload(0).await?;
+    // Hold the first request open past the contract's stale limit (300 blocks); each
+    // deferral lasts one yield (200 blocks).
+    let defer = json!({ "stand_in_defer": true });
+    s.respond(0, defer.clone()).await?;
+    s.worker.fast_forward(150).await?;
+    s.respond(0, defer).await?;
+    s.worker.fast_forward(160).await?;
+    assert_eq!(s.bounty("vault").await?["signing_pauses"], false, "stale");
+
+    let retry = s.sign_pauses("vault").await?;
+    let payload = s.sign_request_payload(1).await?;
+    assert_eq!(s.bounty("vault").await?["signing_pauses"], true);
+    // The stale request's answer arrives now, and its callback runs within a few blocks.
+    let stale = s.sign_request_payload(0).await?;
+    s.respond(0, mpc::answer(&mpc::wrong(), &stale, false))
+        .await?;
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    assert_eq!(
+        s.bounty("vault").await?["signing_pauses"],
+        true,
+        "the retry is still in flight"
+    );
+    let r = s.sign_pauses("vault").await?.await?;
+    assert!(failure_text(&r).contains("already under way"), "{r:?}");
+
+    s.respond(1, mpc::answer(&s.pause_key("vault"), &payload, false))
+        .await?;
+    retry.await?.into_result()?;
+    let id: u64 = claim.await?.into_result()?.json()?;
+    let bounty = s.wait_for_bounty_state("vault", "paid").await?;
+    assert_eq!(bounty["winning_claim"], id);
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    Ok(())
+}
+
 /// D25: the pause-role address can be computed before posting, and a Protocol can't
 /// reuse a bounty name: the second posting is refused and its USDC goes back.
 #[tokio::test]

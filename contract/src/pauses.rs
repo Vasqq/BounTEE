@@ -256,15 +256,20 @@ impl Contract {
 
     /// After every pause's `sign`: store them all and pay if each one recovers to the
     /// bounty's pause-role address; otherwise store and pay nothing, and leave the bounty
-    /// waiting for a retry. Never panics, so the in-flight flag is always cleared.
+    /// waiting for a retry. Never panics, so the in-flight flag is always cleared. A
+    /// callback for a request other than the current one (`started_at` names the request:
+    /// the block it started at) is stale and does nothing, so it can't clear a retry's flag.
     #[private]
-    pub fn on_pauses_signed(&mut self, id: BountyId) -> PromiseOrValue<()> {
+    pub fn on_pauses_signed(&mut self, id: BountyId, started_at: u64) -> PromiseOrValue<()> {
         let me = env::current_account_id();
         let expected =
             derived_key(&self.config.mpc_root_public_key, &me, &path(&id)).map(|k| address_of(&k));
         let Some(bounty) = self.bounties.get_mut(&id) else {
             return PromiseOrValue::Value(());
         };
+        if bounty.signing_since != Some(started_at) {
+            return PromiseOrValue::Value(());
+        }
         bounty.signing_since = None;
         let Some(claim_id) = bounty.winning_claim else {
             return PromiseOrValue::Value(());
@@ -342,7 +347,8 @@ impl Contract {
         bounty.fee_reserve = bounty
             .fee_reserve
             .saturating_sub(one_yocto.saturating_mul(txs.len() as u128));
-        bounty.signing_since = Some(env::block_height());
+        let started_at = env::block_height();
+        bounty.signing_since = Some(started_at);
         let mut joined: Option<Promise> = None;
         for tx in &txs {
             let args = json!({ "request": {
@@ -367,7 +373,7 @@ impl Contract {
                 Self::ext(env::current_account_id())
                     .with_static_gas(gas::ON_PAUSES_SIGNED)
                     .with_unused_gas_weight(0)
-                    .on_pauses_signed(id.clone()),
+                    .on_pauses_signed(id.clone(), started_at),
             ),
         )
     }
