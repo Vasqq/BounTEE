@@ -17,6 +17,12 @@ path = "src/main.rs"
 bountee-formats = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Pure-Rust EVM: the C-backed precompile crates don't build for WASI (spike #2).
+revm = { version = "43.0.3", default-features = false, features = ["std"] }
+# Merkle-Patricia proof verification (EIP-1186) against the header's state root.
+alloy-trie = { version = "0.9", default-features = false, features = ["std", "ethereum"] }
+alloy-rlp = { version = "0.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+proptest = "1"
 bountee-formats = { workspace = true }

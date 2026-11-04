@@ -1,0 +1,11 @@
+# The judge's fixture chain (ticket #8): contracts and scripts that make-fixtures.sh
+# deploys and runs on anvil to produce the committed headers, proofs and exploits.
+[profile.default]
+src = "src"
+script = "script"
+out = "out"
+cache_path = "cache"
+broadcast = "broadcast"
+libs = []
+solc_version = "0.8.28"
+evm_version = "cancun"

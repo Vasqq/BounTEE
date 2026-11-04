@@ -16,7 +16,8 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "@bountee/formats": "workspace:*"
+    "@bountee/formats": "workspace:*",
+    "@noble/hashes": "^2.4.0"
   },
   "devDependencies": {
     "@types/node": "^22",

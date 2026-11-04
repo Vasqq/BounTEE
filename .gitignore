@@ -23,3 +23,9 @@ node_modules/
 .env.*
 
 .DS_Store
+/demo/broadcast/
+
+# Judge fixture chain (judge/tests/fixtures/make-fixtures.ts): build output only
+/judge/tests/fixtures/chain/out/
+/judge/tests/fixtures/chain/cache/
+/judge/tests/fixtures/chain/broadcast/

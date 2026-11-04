@@ -3,6 +3,8 @@
 //! - [`Rules`]: a bounty's rules, every field R1.1 records.
 //! - [`Claim`]: what a Whitehat submits: the bounty, their account, the claim's block, its
 //!   header and state proofs, and the sealed exploit.
+//! - [`Job`]: the judge's stdin; [`Replay`] is a local replay of an [`Exploit`], the
+//!   transactions a Foundry script broadcasts.
 //! - [`Verdict`]: the judge's answer, PAYS, ZERO or INVALID with one coarse reason (R5.5).
 //! - [`pause_role`]: D25, a bounty's pause-role address under NEAR Chain Signatures.
 //!
@@ -11,6 +13,7 @@
 //! Shared fixtures live in `formats/fixtures`.
 
 mod claim;
+mod job;
 mod primitives;
 mod rules;
 mod verdict;
@@ -19,6 +22,7 @@ mod verdict;
 pub mod pause_role;
 
 pub use claim::{AccountProof, BlockRef, Claim, StorageProof};
+pub use job::{Exploit, ExploitTransaction, Job, Replay};
 pub use primitives::{
     is_account_id, is_bounty_name, AccountId, Base64, BountyName, Bytes, EvmAddress, FormatError,
     PublicKey, SafeU64, Uint, B256, MAX_SAFE_INTEGER, U64,
