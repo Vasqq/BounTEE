@@ -1,0 +1,15 @@
+[package]
+name = "test-usdc"
+version = "0.1.0"
+description = "TEST STAND-IN for USDC on NEAR (a stock NEP-141), used only by the bounty contract's seam C tests"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { workspace = true }
+near-contract-standards = { workspace = true }

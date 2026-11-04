@@ -2,7 +2,7 @@
 # resolver 3 picks the newest dependency versions that still support rust-version 1.86.
 [workspace]
 resolver = "3"
-members = [".", "tests/stand-ins/test-outlayer", "tests/stand-ins/test-mpc"]
+members = [".", "tests/stand-ins/test-outlayer", "tests/stand-ins/test-mpc", "tests/stand-ins/test-usdc"]
 
 [workspace.package]
 edition = "2021"
@@ -12,6 +12,7 @@ rust-version = "1.86"
 
 [workspace.dependencies]
 near-sdk = "5"
+near-contract-standards = "5"
 
 [package]
 name = "bountee-contract"
