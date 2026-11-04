@@ -91,15 +91,29 @@ const exploitArb = fc.record({
   ),
 });
 
-const jobArb = fc.record({
-  replay: fc.record({
-    rules: rulesArb,
-    block: blockArb,
-    header: bytes,
-    proofs: fc.array(accountProofArb, { maxLength: 2 }),
-    exploit: exploitArb,
+const jobArb = fc.oneof(
+  fc.record({
+    replay: fc.record({
+      rules: rulesArb,
+      block: blockArb,
+      header: bytes,
+      proofs: fc.array(accountProofArb, { maxLength: 2 }),
+      exploit: exploitArb,
+    }),
   }),
-});
+  // #14: the enclave's claim job, as the bounty contract builds it.
+  fc.record({
+    judge_claim: fc.record({
+      rules: rulesArb,
+      bounty: bountyId,
+      whitehat: accountId,
+      block: blockArb,
+      header: bytes,
+      proofs_json: fc.string(),
+      submitted_at_ns: uint(64n),
+    }),
+  }),
+);
 
 const claimArb = fc.record({
   bounty: bountyId,

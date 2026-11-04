@@ -4,7 +4,7 @@
 //! - [`Claim`]: what a Whitehat submits: the bounty, their account, the claim's block, its
 //!   header and state proofs, and the sealed exploit.
 //! - [`Job`]: the judge's stdin; [`Replay`] is a local replay of an [`Exploit`], the
-//!   transactions a Foundry script broadcasts.
+//!   transactions a Foundry script broadcasts; [`JudgeClaim`] is the enclave's claim job.
 //! - [`Verdict`]: the judge's answer, PAYS, ZERO or INVALID with one coarse reason (R5.5).
 //! - [`pause_role`]: D25, a bounty's pause-role address under NEAR Chain Signatures.
 //!

@@ -181,8 +181,21 @@ export interface Replay {
   exploit: Exploit;
 }
 
+/** The enclave's claim job, as the bounty contract requests it (R2.8; see job.rs). */
+export interface JudgeClaim {
+  rules: Rules;
+  bounty: BountyId;
+  whitehat: string;
+  block: BlockRef;
+  header: string;
+  /** The claim's proofs array, as the JSON text the Whitehat submitted. */
+  proofs_json: string;
+  /** NEAR nanoseconds, U64 decimal string. */
+  submitted_at_ns: string;
+}
+
 /** The judge's stdin. */
-export type Job = { replay: Replay };
+export type Job = { replay: Replay } | { judge_claim: JudgeClaim };
 
 const evmAddressOrNull = (v: unknown): string | null => (v === null ? null : evmAddress(v));
 
@@ -200,7 +213,25 @@ export const parseReplay: (v: unknown) => Replay = object<Replay>({
   exploit: parseExploit,
 });
 
-export const parseJob: (v: unknown) => Job = object<Job>({ replay: parseReplay });
+const text = (v: unknown): string => (typeof v === "string" ? v : fail("string", v));
+
+export const parseJudgeClaim: (v: unknown) => JudgeClaim = object<JudgeClaim>({
+  rules: parseRules,
+  bounty: parseBountyId,
+  whitehat: accountId,
+  block: parseBlockRef,
+  header: bytes,
+  proofs_json: text,
+  submitted_at_ns: u64,
+});
+
+/** One key naming the action, as serde writes a Rust enum. */
+export const parseJob = (v: unknown): Job => {
+  if (typeof v === "object" && v !== null && !Array.isArray(v) && "judge_claim" in v) {
+    return object<{ judge_claim: JudgeClaim }>({ judge_claim: parseJudgeClaim })(v);
+  }
+  return object<{ replay: Replay }>({ replay: parseReplay })(v);
+};
 
 /**
  * What a Whitehat seals (R5.1): the exploit with their account bound inside it (R5.4).

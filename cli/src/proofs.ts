@@ -52,15 +52,22 @@ export function exploitFromBroadcast(log: BroadcastLog): Exploit {
 
 // ---- JSON-RPC ----------------------------------------------------------------------------
 
-export async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const body = (await res.json()) as { result?: T; error?: { message: string } };
-  if (body.error || body.result === undefined) throw new Error(`${method}: ${body.error?.message ?? "no result"}`);
-  return body.result;
+/** One JSON-RPC call. Public RPCs rate-limit bursts (HTTP 429), so those are retried. */
+export async function rpc<T>(url: string, method: string, params: unknown[] | object): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    if (res.status === 429 && attempt < 5) {
+      await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
+      continue;
+    }
+    const body = (await res.json()) as { result?: T; error?: { message: string } };
+    if (body.error || body.result === undefined) throw new Error(`${method}: ${body.error?.message ?? "no result"}`);
+    return body.result;
+  }
 }
 
 const hexOf = (bytes: Uint8Array) => `0x${Buffer.from(bytes).toString("hex")}`;

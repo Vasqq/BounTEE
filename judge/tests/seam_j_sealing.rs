@@ -8,11 +8,17 @@
 //!   `fixtures/make-sealed.ts`). Catches: R5.4 (the account bound in the sealed exploit
 //!   must be the claimant), refusing a job with no secret or another caller (no verdict),
 //!   and R5.5 at the judge (nothing but the verdict leaves it on ZERO or INVALID).
+//!   The claim's block is confirmed by #14's local test stand-in RPCs, through the
+//!   judge's test build (`test-stand-in-rpcs`, which differs from the attested build only
+//!   in where its RPC list comes from); the sealed-exploit path is the same in both.
 //!   Misses: OutLayer's decryption and access rule, which decide whether the secret
-//!   reaches the judge at all (seam T, `cli/test/sealing-testnet.test.ts`), and block
-//!   confirmation (#14).
+//!   reaches the judge at all (seam T, `cli/test/sealing-testnet.test.ts`).
 //!
 //! R15.3: every test reads only committed fixtures; no keys, funds or network.
+
+#[path = "stand-ins/test_rpc.rs"]
+#[allow(dead_code)]
+mod test_rpc;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -22,6 +28,7 @@ use std::sync::OnceLock;
 use bountee_formats::{from_json, Outcome, Reason, Verdict};
 use proptest::prelude::*;
 use serde_json::{json, Value};
+use test_rpc::{Answer, TestRpc};
 
 /// The bounty contract a default build of the judge is pinned to (`judge/src/sealed.rs`).
 const BOUNTY_CONTRACT: &str = "bounty.bountee.testnet";
@@ -35,6 +42,10 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Where the judge's test build goes (shared with `seam_j_block_confirmation.rs`).
+const TEST_BUILD_DIR: &str = "target/judge-test-stand-in-rpcs";
+
+/// The judge's test build: the attested build plus `test-stand-in-rpcs`.
 fn judge_wasm() -> &'static PathBuf {
     static WASM: OnceLock<PathBuf> = OnceLock::new();
     WASM.get_or_init(|| {
@@ -47,10 +58,12 @@ fn judge_wasm() -> &'static PathBuf {
             .current_dir(repo_root())
             .env_remove("BOUNTEE_BOUNTY_CONTRACT")
             .args(["build", "--release", "-p", "bountee-judge", "--target", &target])
+            .args(["--features", "test-stand-in-rpcs", "--target-dir"])
+            .arg(repo_root().join(TEST_BUILD_DIR))
             .status()
             .expect("cargo runs");
         assert!(status.success(), "the judge builds for {target}");
-        repo_root().join(format!("target/{target}/release/bountee-judge.wasm"))
+        repo_root().join(format!("{TEST_BUILD_DIR}/{target}/release/bountee-judge.wasm"))
     })
 }
 
@@ -60,10 +73,16 @@ struct Run {
     stderr: String,
 }
 
-/// Run the compiled judge as an OutLayer job: `env` are the variables OutLayer sets.
+/// Run the compiled judge as an OutLayer job: `env` are the variables OutLayer sets. Three
+/// stand-in RPCs confirm the claim's block.
 fn run_job(job: &Value, env: &[(&str, &str)]) -> Run {
+    let hash = job["judge_claim"]["block"]["hash"].as_str().unwrap().to_owned();
+    let rpcs = [0, 1, 2].map(|_| TestRpc::answering(Answer::Hash(hash.clone())));
+    let urls: Vec<&str> = rpcs.iter().map(|r| r.url.as_str()).collect();
     let mut cmd = Command::new("wasmtime");
-    cmd.args(["run", "-S", "http"]);
+    cmd.args(["run", "-S", "http"])
+        .arg("--env")
+        .arg(format!("BOUNTEE_TEST_RPCS={}", urls.join(",")));
     for (k, v) in env {
         cmd.arg("--env").arg(format!("{k}={v}"));
     }
@@ -97,9 +116,29 @@ fn sealed(name: &str) -> String {
     fixture(&format!("sealed/{name}.txt")).trim().to_owned()
 }
 
-/// A `judge_claim` job for the fixture block, as the bounty contract writes it.
+/// The fixture header's timestamp, in seconds, read from its RLP (field 11).
+fn block_timestamp(header: &str) -> u64 {
+    let rlp: Vec<u8> = (2..header.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&header[i..i + 2], 16).unwrap())
+        .collect();
+    let mut buf = &rlp[..];
+    alloy_rlp::Header::decode(&mut buf).unwrap();
+    for _ in 0..11 {
+        let item = alloy_rlp::Header::decode(&mut buf).unwrap();
+        buf = &buf[item.payload_length..];
+    }
+    let item = alloy_rlp::Header::decode(&mut buf).unwrap();
+    buf[..item.payload_length]
+        .iter()
+        .fold(0, |n, b| (n << 8) | u64::from(*b))
+}
+
+/// A `judge_claim` job for the fixture block, as the bounty contract writes it, submitted
+/// ten seconds after the block.
 fn judge_claim(whitehat: &str) -> Value {
     let state: Value = serde_json::from_str(&fixture("state.json")).unwrap();
+    let submitted = (block_timestamp(state["header"].as_str().unwrap()) + 10) * 1_000_000_000;
     let rules: Value = serde_json::from_str(&fixture("rules.json")).unwrap();
     json!({ "judge_claim": {
         "rules": rules,
@@ -108,7 +147,7 @@ fn judge_claim(whitehat: &str) -> Value {
         "block": state["block"],
         "header": state["header"],
         "proofs_json": state["proofs"].to_string(),
-        "submitted_at_ns": "1794000000000000000",
+        "submitted_at_ns": submitted.to_string(),
     }})
 }
 
