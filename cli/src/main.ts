@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // BounTEE's command-line tool. Commands so far: `--version`, `init` (#16), `test` (ticket #11),
-// `broadcast` (ticket #13). The rest (list, show, claim, status, verify, balance, key, open-exploit, withdraw,
+// `broadcast` (ticket #13), `claim` (sealing and filing, #15; script path, verdict, payout and
+// pauses, #16). The rest (list, show, status, verify, balance, key, open-exploit, withdraw,
 // post) land in the CLI tickets; each takes `--json` for machine-readable output (R14.5).
 import { readFileSync } from "node:fs";
 import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadcast.ts";
+import { claim, formatClaimResult } from "./claim.ts";
 import { initCommand } from "./init.ts";
 import { parseNetwork } from "./near.ts";
 import { formatTestResult, testCommand } from "./test.ts";
@@ -74,6 +76,12 @@ try {
     });
     console.log(json ? JSON.stringify(result) : formatBroadcastResult(result));
     if (result.pauses.some((p) => p.sent === "failed")) process.exit(1);
+  } else if (rest[0] === "claim") {
+    const r = await claim(rest.slice(1));
+    console.log(json ? JSON.stringify(r) : formatClaimResult(r));
+    // A claim with no verdict, or a PAYS whose pause didn't go out, isn't done.
+    if (r.state && r.state !== "judged") process.exit(1);
+    if (r.broadcast?.pauses.some((p) => p.sent === "failed")) process.exit(1);
   } else {
     fail(`unknown command: ${rest.join(" ") || "(none)"}`, 2);
   }

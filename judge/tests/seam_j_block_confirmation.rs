@@ -17,7 +17,7 @@
 //!   override. Misses: the real pinned RPCs and OutLayer's network (proved once on
 //!   testnet, recorded in the spec), the attested build's own confirmation path (the test
 //!   build differs from it only in where the RPC list comes from), and the sealed
-//!   exploit and account binding (#15).
+//!   exploit and account binding (#15, `seam_j_sealing.rs`).
 //! - Inspection (R2.8, recorded in the judge's `confirm.rs`): no RPC address is read from
 //!   the job input, a claim or a Protocol.
 
@@ -88,19 +88,33 @@ fn attested_build() -> &'static PathBuf {
     WASM.get_or_init(|| build(&[], "target"))
 }
 
+/// The bounty contract a default build of the judge is pinned to (`src/sealed.rs`).
+const BOUNTY_CONTRACT: &str = "bounty.bountee.testnet";
+
+/// `exploit` sealed for the job's Whitehat as `bountee claim` seals it (#15): base64 of the
+/// raw DEFLATE of the sealed bundle's JSON.
+fn sealed(job: &Value, exploit: &Value) -> String {
+    use base64::Engine;
+    let bundle = json!({ "whitehat": job["judge_claim"]["whitehat"], "exploit": exploit });
+    let compressed = miniz_oxide::deflate::compress_to_vec(bundle.to_string().as_bytes(), 9);
+    base64::engine::general_purpose::STANDARD.encode(compressed)
+}
+
 /// Run `wasm` on `job` with the test stand-ins' addresses in `BOUNTEE_TEST_RPCS` and, when
-/// given, `exploit` as the job's secret.
+/// given, `exploit` sealed as the job's secret, in a job the bounty contract requested.
 fn run(wasm: &PathBuf, job: &Value, rpcs: &[&TestRpc], exploit: Option<&Value>) -> Output {
     let urls: Vec<&str> = rpcs.iter().map(|r| r.url.as_str()).collect();
     let mut command = Command::new("wasmtime");
     command
         .args(["run", "-S", "http"])
         .arg("--env")
-        .arg(format!("BOUNTEE_TEST_RPCS={}", urls.join(",")));
+        .arg(format!("BOUNTEE_TEST_RPCS={}", urls.join(",")))
+        .arg("--env")
+        .arg(format!("NEAR_PREDECESSOR_ID={BOUNTY_CONTRACT}"));
     if let Some(exploit) = exploit {
         command
             .arg("--env")
-            .arg(format!("BOUNTEE_SEALED_EXPLOIT={exploit}"));
+            .arg(format!("BOUNTEE_SEALED_EXPLOIT={}", sealed(job, exploit)));
     }
     let mut child = command
         .arg("--")

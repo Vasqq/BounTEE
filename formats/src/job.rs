@@ -58,6 +58,21 @@ pub struct Replay {
     pub exploit: Exploit,
 }
 
+/// What a Whitehat seals on their machine (R5.1): the exploit with their own account bound
+/// inside it, so a copy filed by anyone else is INVALID (R5.4).
+///
+/// `bountee claim` writes it as JSON, compresses it with raw DEFLATE (RFC 1951) and
+/// base64-encodes it (padded); that text is the value of the OutLayer secret
+/// `BOUNTEE_SEALED_EXPLOIT`, which only the pinned judge build, in a job the bounty
+/// contract requests, can read (ADR-0012).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SealedBundle {
+    /// The NEAR account the claim must be filed by: the payee.
+    pub whitehat: AccountId,
+    pub exploit: Exploit,
+}
+
 /// The enclave's claim-judging job, as the bounty contract requests it (#12, #14): the
 /// judge confirms `block` through the RPCs pinned in its build (R2.8), checks its
 /// timestamp against `submitted_at_ns`, then replays the claim. The sealed exploit is not

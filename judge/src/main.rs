@@ -6,7 +6,8 @@
 //!   stderr names each read the claim doesn't prove (one `unproven …` line each), which
 //!   `cli/src/proofs.ts` uses to fetch the missing proofs.
 //! - `judge_claim`, the enclave (#14): [`claim::judge`] confirms the block through the
-//!   pinned RPCs, then replays the sealed exploit. Nothing is written to stderr.
+//!   pinned RPCs, then opens the sealed exploit ([`sealed::exploit`], #15) and replays
+//!   it. Nothing is written to stderr.
 //!
 //! stdout carries only the verdict. A job that can't have a verdict (R2.6) exits with
 //! status 2 and nothing on stdout: OutLayer reports it as a failed job, which reaches the
@@ -61,7 +62,7 @@ fn main() {
         Ok(Job::JudgeClaim(job)) => {
             // A panic's message would go to stderr; the abort still fails the job.
             std::panic::set_hook(Box::new(|_| {}));
-            match claim::judge(&job, sealed::exploit) {
+            match claim::judge(&job, || sealed::exploit(&job.whitehat)) {
                 Ok(verdict) => verdict,
                 Err(_) => std::process::exit(NO_VERDICT),
             }

@@ -66,15 +66,16 @@ pub fn store_sealed_exploit(
 }
 
 /// Request a job running the pinned judge build on `input`, optionally with the claim's
-/// secret profile. OutLayer refunds what the job doesn't use to `payer`. The job gets all
-/// the gas the caller has left over after its own static allocations.
+/// secret profile. OutLayer refunds what the job doesn't use to `payer`. `gas` is asked
+/// only once the request's arguments are written, so the work of writing a large input
+/// (a claim's proofs) is already spent and can't overrun the gas the caller keeps back.
 pub fn request_job(
     config: &Config,
     input: &str,
     secret_profile: Option<&str>,
     payer: &AccountId,
     deposit: NearToken,
-    gas: Gas,
+    gas: impl FnOnce() -> Gas,
 ) -> Promise {
     let args = json!({
         "source": { "WasmUrl": {
@@ -96,11 +97,12 @@ pub fn request_job(
         "payer_account_id": payer,
         "params": null,
     });
+    let args = args.to_string().into_bytes();
     Promise::new(config.outlayer.clone()).function_call_weight(
         "request_execution".to_owned(),
-        args.to_string().into_bytes(),
+        args,
         deposit,
-        gas,
+        gas(),
         GasWeight(1),
     )
 }
