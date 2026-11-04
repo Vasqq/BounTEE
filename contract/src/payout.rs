@@ -1,12 +1,15 @@
 //! The payout of a PAYS verdict: once every pause is signed and stored (`pauses`), the whole
-//! bounty is paid to the Whitehat (ADR-0001, R7.1, R3.2) by [`Contract::pay_out`].
+//! bounty is paid to the Whitehat (ADR-0001, R7.1, R3.2) by [`Contract::pay_out`]. If the
+//! token refuses the transfer, the bounty stays `paying` with its USDC held, and anyone can
+//! [`Contract::retry_payout`] the same transfer to the same Whitehat (R2.4).
 //!
 //! USDC leaves the contract only here, as the payout (R2.3); the Protocol's withdrawal
 //! after the end date is the only other path, in its own ticket.
 
+use bountee_formats::BountyId;
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::json;
-use near_sdk::{env, ext_contract, near, AccountId, NearToken, Promise, PromiseResult};
+use near_sdk::{env, ext_contract, near, require, AccountId, NearToken, Promise, PromiseResult};
 
 use crate::{emit, fees, gas, BountyState, Contract, ContractExt};
 
@@ -19,8 +22,32 @@ pub trait FungibleToken {
 
 #[near]
 impl Contract {
+    /// Retry the payout of a bounty whose transfer failed (R2.4). Anyone may call; it sends
+    /// the same whole amount to the winning claim's Whitehat and no one else, and is refused
+    /// while a transfer is under way or once the bounty is paid, so it never pays twice.
+    /// Attach the gas `fees()` names as `min_retry_payout_gas`.
+    pub fn retry_payout(&mut self, id: BountyId) -> Promise {
+        let bounty = self
+            .bounties
+            .get(&id)
+            .unwrap_or_else(|| env::panic_str("no such bounty"));
+        require!(
+            bounty.state == BountyState::Paying && !bounty.paying_out,
+            "this bounty has no payout waiting for a retry"
+        );
+        let claim_id = bounty
+            .winning_claim
+            .unwrap_or_else(|| env::panic_str("this bounty has no winning claim"));
+        require!(
+            Self::gas_left(gas::TAIL) >= gas::payout(),
+            "attach more gas: see min_retry_payout_gas in fees()"
+        );
+        self.pay_out(claim_id)
+    }
+
     /// After the payout's transfer: the bounty is paid, or, if the transfer failed, stays
-    /// closed with its USDC still held.
+    /// `paying` with its USDC still held, waiting for a retry. Never panics, so the
+    /// in-flight flag is always cleared.
     #[private]
     pub fn on_paid(&mut self, claim_id: u64) {
         let Some(claim) = self.claims.get(&claim_id) else {
@@ -30,6 +57,10 @@ impl Contract {
         let Some(bounty) = self.bounties.get_mut(&bounty_id) else {
             return;
         };
+        if bounty.state != BountyState::Paying || bounty.winning_claim != Some(claim_id) {
+            return;
+        }
+        bounty.paying_out = false;
         #[allow(deprecated)]
         match env::promise_result(0) {
             PromiseResult::Successful(_) => {
@@ -52,13 +83,15 @@ impl Contract {
 impl Contract {
     /// Pay the whole bounty amount to the claim's Whitehat, registering them with USDC
     /// first if needed (R3.2, R2.7). No allowlist and no identity check (D9). The NEAR it
-    /// attaches comes from the bounty's posting fee.
+    /// attaches comes from the bounty's posting fee. The caller has checked the bounty is
+    /// `paying` this claim with no transfer under way.
     pub(crate) fn pay_out(&mut self, claim_id: u64) -> Promise {
         let claim = self.claims.get(&claim_id).expect("a judged claim").clone();
         let bounty = self
             .bounties
             .get_mut(&claim.bounty)
             .expect("the claim's bounty");
+        bounty.paying_out = true;
         let amount = bounty
             .rules
             .bounty_amount

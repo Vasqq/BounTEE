@@ -102,6 +102,16 @@ pub mod gas {
     /// What the claim's job is left at least, before gas is kept back to sign pauses.
     pub const MIN_JOB: Gas = Gas::from_tgas(60);
 
+    /// Gas for the payout's three steps, from the call that starts it.
+    pub const fn payout() -> Gas {
+        Gas::from_gas(
+            USDC_STORAGE_DEPOSIT.as_gas()
+                + USDC_TRANSFER.as_gas()
+                + ON_PAID.as_gas()
+                + TAIL.as_gas(),
+        )
+    }
+
     /// Gas to sign the pauses of `n` covered contracts and pay, from the call that starts it.
     pub const fn pause_signing(n: usize) -> Gas {
         Gas::from_gas(SIGN_PAUSE.as_gas() * n as u64 + ON_PAUSES_SIGNED.as_gas() + TAIL.as_gas())
@@ -131,7 +141,8 @@ pub enum BountyState {
     /// A PAYS verdict closed it; its pauses are being signed, or wait for a retry, before
     /// the payout (R2.5). It takes no more claims (R3.4).
     Signing,
-    /// Every pause is signed and stored; the payout is under way.
+    /// Every pause is signed and stored; the payout is under way, or its transfer failed
+    /// and waits for a retry ([`Contract::retry_payout`]).
     Paying,
     /// The whole bounty was paid to the winning claim (R3.2).
     Paid,
@@ -150,6 +161,9 @@ pub struct Bounty {
     /// retry can't run beside it. A request older than [`pauses::SIGNING_STALE_BLOCKS`] is
     /// treated as over: its callback must have run (or died) by then.
     pub signing_since: Option<u64>,
+    /// Set while a payout's transfer is under way and cleared only by its callback, so no
+    /// retry can send a second transfer beside it.
+    pub paying_out: bool,
 }
 
 /// A bounty as its view returns it: every rule exactly as posted (R1.2).
@@ -163,6 +177,8 @@ pub struct BountyView {
     pub signed_pauses: Vec<pauses::SignedPause>,
     /// Whether pause signing is under way; a `signing` bounty that isn't waits for a retry.
     pub signing_pauses: bool,
+    /// Whether a payout transfer is under way; a `paying` bounty that isn't waits for a retry.
+    pub paying_out: bool,
 }
 
 /// Where a claim is in its life.
@@ -266,6 +282,7 @@ impl Contract {
             "min_claim_gas": gas::MIN_CLAIM,
             "min_sign_pauses_gas_per_contract": gas::SIGN_PAUSE,
             "min_sign_pauses_gas_base": gas::pause_signing(0),
+            "min_retry_payout_gas": gas::payout(),
             "pause_gas_limit": pauses::PAUSE_GAS_LIMIT,
             "pause_max_fee_per_gas": U128(pauses::PAUSE_MAX_FEE_PER_GAS),
             "pause_max_priority_fee_per_gas": U128(pauses::PAUSE_MAX_PRIORITY_FEE_PER_GAS),
@@ -280,6 +297,7 @@ impl Contract {
             winning_claim: b.winning_claim,
             signed_pauses: b.signed_pauses.clone(),
             signing_pauses: b.signing_in_flight(),
+            paying_out: b.paying_out,
         })
     }
 

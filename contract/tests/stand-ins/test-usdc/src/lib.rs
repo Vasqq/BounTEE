@@ -1,8 +1,9 @@
 //! TEST STAND-IN for USDC on NEAR. Lives only in the test folder and is deployed only to
 //! the local sandbox. It is the stock `near-contract-standards` NEP-141 (6 decimals), so
 //! `ft_transfer_call`, `ft_resolve_transfer` refunds and storage registration behave as
-//! the standard says. Circle's USDC splits gas differently (spike #4); that is proven at
-//! seam T. `mint` exists only here, so tests can fund accounts.
+//! the standard says, unless a test makes `ft_transfer` fail. Circle's USDC splits gas
+//! differently (spike #4); that is proven at seam T. `mint` and `refuse_transfers` exist
+//! only here, so tests can fund accounts and fail a payout.
 
 use near_contract_standards::fungible_token::core::FungibleTokenCore;
 use near_contract_standards::fungible_token::resolver::FungibleTokenResolver;
@@ -17,6 +18,8 @@ use near_sdk::{near, AccountId, NearToken, PanicOnDefault, PromiseOrValue};
 #[derive(PanicOnDefault)]
 pub struct TestUsdc {
     token: FungibleToken,
+    /// Test-only: while set, every `ft_transfer` fails, as a token refusing a transfer would.
+    refuse_transfers: bool,
 }
 
 #[near]
@@ -25,6 +28,7 @@ impl TestUsdc {
     pub fn new() -> Self {
         Self {
             token: FungibleToken::new(b"t".to_vec()),
+            refuse_transfers: false,
         }
     }
 
@@ -40,12 +44,18 @@ impl TestUsdc {
         }
         self.token.internal_deposit(&account_id, amount.0);
     }
+
+    /// Test-only: make every later `ft_transfer` fail (`true`) or succeed again (`false`).
+    pub fn refuse_transfers(&mut self, refuse: bool) {
+        self.refuse_transfers = refuse;
+    }
 }
 
 #[near]
 impl FungibleTokenCore for TestUsdc {
     #[payable]
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>) {
+        near_sdk::require!(!self.refuse_transfers, "test stand-in: transfers refused");
         self.token.ft_transfer(receiver_id, amount, memo)
     }
 

@@ -87,6 +87,7 @@ impl Contract {
                 fee_reserve: NearToken::from_yoctonear(0),
                 signed_pauses: Vec::new(),
                 signing_since: None,
+                paying_out: false,
             },
         );
         self.bounties.flush();

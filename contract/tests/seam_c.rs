@@ -942,19 +942,21 @@ async fn a_deployment_with_an_erc20_seed_is_refused() -> anyhow::Result<()> {
 async fn r5_5_r5_7_a_failed_claim_records_only_its_coarse_reason() -> anyhow::Result<()> {
     let s = live_bounty("vault").await?;
     let leaky = r#"{"outcome":"ZERO","reason":"below_minimum_theft","gain":"99999"}"#;
-    for (output, recorded) in [
-        (ZERO, Some(ZERO)),
-        (INVALID, Some(INVALID)),
-        (leaky, None),
-    ] {
+    for (output, recorded) in [(ZERO, Some(ZERO)), (INVALID, Some(INVALID)), (leaky, None)] {
         s.script(json!({ "output": output })).await?;
         let r = s.submit_claim(&s.whitehat, "vault").await?;
         let logs = r.logs().join("\n");
         let id: u64 = r.into_result()?.json()?;
         let claim = s.claim(id).await?;
         let public = format!("{claim}\n{logs}");
-        assert!(!public.contains(SEALED), "the sealed exploit is not published");
-        assert!(!public.contains("99999"), "nothing beyond the coarse reason");
+        assert!(
+            !public.contains(SEALED),
+            "the sealed exploit is not published"
+        );
+        assert!(
+            !public.contains("99999"),
+            "nothing beyond the coarse reason"
+        );
         match recorded {
             Some(verdict) => {
                 assert_eq!(claim["verdict"], serde_json::from_str::<Value>(verdict)?);
@@ -1229,6 +1231,14 @@ impl Sandbox {
     /// A claim by the Whitehat that scores PAYS, its pauses signed by the MPC stand-in with
     /// the bounty's own key, and paid. Returns the claim's ID.
     async fn pay_claim(&self, name: &str) -> anyhow::Result<u64> {
+        let id = self.judge_pays(name).await?;
+        self.wait_for_bounty_state(name, "paid").await?;
+        Ok(id)
+    }
+
+    /// A claim by the Whitehat that scores PAYS, its pauses signed by the MPC stand-in with
+    /// the bounty's own key; the payout is started. Returns the claim's ID.
+    async fn judge_pays(&self, name: &str) -> anyhow::Result<u64> {
         let before = self.sign_requests().await?.len();
         let covered = self.bounty(name).await?["rules"]["covered_contracts"]
             .as_array()
@@ -1239,7 +1249,6 @@ impl Sandbox {
         self.answer_from(&requests, before, &self.pause_key(name), false)
             .await?;
         let id: u64 = claim.await?.into_result()?.json()?;
-        self.wait_for_bounty_state(name, "paid").await?;
         Ok(id)
     }
 
@@ -1464,5 +1473,93 @@ async fn a_protocol_cannot_reuse_a_bounty_name() -> anyhow::Result<()> {
     assert!(failure_text(&again).contains("already used"), "{again:?}");
     assert_eq!(s.usdc_balance(s.protocol.id()).await?, usdc, "refunded");
     assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+    Ok(())
+}
+
+// ---- payout retry (code review of #12) ----
+
+impl Sandbox {
+    /// `by` retries the payout of `name`, without waiting for its receipts.
+    async fn retry_payout(&self, by: &Account, name: &str) -> anyhow::Result<Pending> {
+        Ok(by
+            .call(self.contract.id(), "retry_payout")
+            .args_json(json!({ "id": { "protocol": self.protocol.id(), "name": name } }))
+            .gas(tgas(100))
+            .transact_async()
+            .await?)
+    }
+
+    async fn refuse_transfers(&self, refuse: bool) -> anyhow::Result<()> {
+        self.test_usdc
+            .call("refuse_transfers")
+            .args_json(json!({ "refuse": refuse }))
+            .transact()
+            .await?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Wait until no payout transfer is under way, and return the bounty.
+    async fn wait_until_not_paying_out(&self, name: &str) -> anyhow::Result<Value> {
+        for _ in 0..150 {
+            let b = self.bounty(name).await?;
+            if b["paying_out"] == false {
+                return Ok(b);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        anyhow::bail!("the payout never finished: {}", self.bounty(name).await?)
+    }
+}
+
+/// R2.4, R2.3: a PAYS payout whose USDC transfer fails leaves the bounty `paying` with its
+/// USDC held. Anyone may retry it; a retry re-sends the same amount to the winning
+/// Whitehat only (never to the caller), and pays exactly once: two retries at once, and a
+/// retry after the payout, move nothing more, even with another bounty's USDC held.
+#[tokio::test]
+async fn a_failed_payout_transfer_is_retried_to_the_same_winner_exactly_once() -> anyhow::Result<()>
+{
+    let s = live_bounty("vault").await?;
+    s.post("vault-2", &valid_rules(&s).await?)
+        .await?
+        .into_result()?;
+    let held = 2 * BOUNTY_AMOUNT;
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, held);
+    let r = s.retry_payout(&s.other, "vault").await?.await?;
+    assert!(failure_text(&r).contains("no payout waiting"), "{r:?}");
+
+    s.refuse_transfers(true).await?;
+    let id = s.judge_pays("vault").await?;
+    s.wait_for_bounty_state("vault", "paying").await?;
+    let bounty = s.wait_until_not_paying_out("vault").await?;
+    assert_eq!(bounty["state"], "paying", "{bounty}");
+    assert_eq!(bounty["winning_claim"], id);
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, 0);
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, held);
+
+    // A retry while the token still refuses fails the same way and leaves it retryable.
+    let _ = s.retry_payout(&s.other, "vault").await?.await?;
+    let bounty = s.wait_until_not_paying_out("vault").await?;
+    assert_eq!(bounty["state"], "paying", "{bounty}");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, held);
+
+    // Two retries at once, by two other accounts: the winner is paid once.
+    s.refuse_transfers(false).await?;
+    let a = s.retry_payout(&s.other, "vault").await?;
+    let b = s.retry_payout(&s.protocol, "vault").await?;
+    let _ = a.await?;
+    let _ = b.await?;
+    let bounty = s.wait_for_bounty_state("vault", "paid").await?;
+    s.wait_until_not_paying_out("vault").await?;
+    assert_eq!(bounty["winning_claim"], id);
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    assert_eq!(s.usdc_balance(s.other.id()).await?, 0);
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+
+    let r = s.retry_payout(&s.other, "vault").await?.await?;
+    assert!(failure_text(&r).contains("no payout waiting"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+    assert_eq!(s.bounty("vault-2").await?["state"], "live");
     Ok(())
 }
