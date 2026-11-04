@@ -28,8 +28,10 @@ fn round_trip(kind: &str, value: &Value) -> Result<Value, String> {
     }
 }
 
+/// R1.2: every format (rules, claim, verdict, bounty ID, exploit, job, sealed bundle) is
+/// written back exactly as it was read, so a recorded rule reads back unchanged.
 #[test]
-fn valid_values_round_trip_unchanged() {
+fn r1_2_valid_values_round_trip_unchanged() {
     for case in cases()["valid"].as_array().unwrap() {
         let kind = case["kind"].as_str().unwrap();
         let out = round_trip(kind, &case["value"]).unwrap_or_else(|e| panic!("{kind} {case}: {e}"));
@@ -37,8 +39,10 @@ fn valid_values_round_trip_unchanged() {
     }
 }
 
+/// R1.4, R3.11: a missing or invalid rule, and a malformed exploit or job, is refused when
+/// it is parsed.
 #[test]
-fn invalid_values_are_refused() {
+fn r1_4_r3_11_invalid_values_are_refused() {
     for case in cases()["invalid"].as_array().unwrap() {
         let kind = case["kind"].as_str().unwrap();
         assert!(

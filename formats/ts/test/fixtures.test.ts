@@ -30,7 +30,7 @@ const parsers: Record<string, (v: unknown) => unknown> = {
 
 describe("shared format cases", () => {
   for (const c of cases.valid) {
-    test(`valid ${c.kind} round-trips unchanged: ${c.note ?? JSON.stringify(c.value)}`, () => {
+    test(`R1.2: valid ${c.kind} round-trips unchanged: ${c.note ?? JSON.stringify(c.value)}`, () => {
       const written = toJson(parsers[c.kind]!(c.value));
       // Field order is part of the format: the JSON written matches the fixture byte for byte.
       expect(written).toBe(JSON.stringify(c.value));
@@ -38,7 +38,7 @@ describe("shared format cases", () => {
   }
 
   for (const c of cases.invalid) {
-    test(`invalid ${c.kind} is refused: ${c.note}`, () => {
+    test(`R1.4, R3.11: invalid ${c.kind} is refused: ${c.note}`, () => {
       expect(() => parsers[c.kind]!(c.value)).toThrow();
     });
   }

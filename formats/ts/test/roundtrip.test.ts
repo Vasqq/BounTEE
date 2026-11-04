@@ -138,7 +138,7 @@ const formats = [
   ["sealed_bundle", sealedBundleArb, parseSealedBundle],
 ] as const;
 
-test.each(formats.map((f) => [f[0], f]))("%s: Rust writes back exactly what TypeScript wrote", (_k, f) => {
+test.each(formats.map((f) => [f[0], f]))("R1.2 %s: Rust writes back exactly what TypeScript wrote", (_k, f) => {
   const [kind, arb, parse] = f;
   const values = fc.sample(arb as fc.Arbitrary<unknown>, { numRuns: 300, seed: 6 });
   const written = values.map((v) => toJson((parse as (v: unknown) => unknown)(v)));
@@ -156,7 +156,7 @@ const nearMiss = fc.oneof(
   bountyName,
 );
 
-test("account IDs and bounty names: Rust and TypeScript accept and refuse the same strings", () => {
+test("D25: account IDs and bounty names, the pause-role path's parts: Rust and TypeScript accept and refuse the same strings", () => {
   const strings = fc.sample(nearMiss, { numRuns: 2000, seed: 6 });
   const replies = rust(strings.flatMap((s) => [{ kind: "account_id", value: s }, { kind: "bounty_name", value: s }]));
   strings.forEach((s, i) => {

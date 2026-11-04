@@ -11,6 +11,12 @@
 //! The wire format is JSON. This crate is the definition; `formats/ts` is its TypeScript
 //! twin, and the round-trip tests in `formats/ts/test` hold the two to the same bytes.
 //! Shared fixtures live in `formats/fixtures`.
+//!
+//! Its tests sit at this public interface, a seam outside J, C, T, W and E on purpose: this
+//! is a format both the Rust side (judge, contract) and the TypeScript side (command-line
+//! tool, web app) must read, so drift between the two (shape, field order, validation,
+//! the D25 derivation) shows only where one side's output meets the other's parser. The
+//! five seams each drive one side, so none of them would catch it.
 
 mod claim;
 mod job;
