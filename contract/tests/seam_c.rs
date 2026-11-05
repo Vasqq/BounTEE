@@ -3648,6 +3648,69 @@ async fn r10_2_a_retried_claim_blocks_the_withdrawal_while_it_is_judged() -> any
     Ok(())
 }
 
+/// R10.2 (code review of #19): a claim retried after its place lapsed is open again while its
+/// job runs, and stays open when another claim's submission and verdict drop the lapsed
+/// places: after the end date the withdrawal is refused until the retried claim is judged.
+#[tokio::test]
+async fn r10_2_a_retried_lapsed_claim_still_blocks_the_withdrawal_after_another_claim(
+) -> anyhow::Result<()> {
+    // A day node: an hour passes in a few dozen blocks, well inside a job's 200-block yield.
+    let s = Sandbox::start_with_days().await?;
+    // Ends half an hour after the first claim's place lapses, so a second claim fits before.
+    let mut r = rules(&s, PLACE_HOLD_NS + 1_800_000_000_000, now_ns(&s).await?);
+    r["covered_contracts"][0]["address"] = json!(VAULT_W);
+    s.post("vault", &r).await?.into_result()?;
+    s.top_up(&s.whitehat, NearToken::from_near(2)).await?;
+    s.top_up(&s.other, NearToken::from_near(1)).await?;
+    s.script(json!({ "output": null })).await?;
+    let id: u64 = s
+        .submit_claim(&s.whitehat, "vault")
+        .await?
+        .into_result()?
+        .json()?;
+    let submitted: u64 = s.claim(id).await?["submitted_at_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    s.pass_time_to(submitted + PLACE_HOLD_NS).await?;
+
+    // No answer scripted: the retry's job stays running.
+    let retry = s
+        .whitehat
+        .call(s.contract.id(), "retry_claim")
+        .args_json(json!({ "claim_id": id, "proofs": PROOFS }))
+        .gas(tgas(300))
+        .transact_async()
+        .await?;
+    let jobs = s.wait_for_requests(3).await?;
+    assert_eq!(s.claim(id).await?["state"], "judging");
+
+    // Another Whitehat's claim, judged ZERO at once: its submission and its verdict each drop
+    // the places that have lapsed.
+    s.script(json!({ "output": ZERO })).await?;
+    let second: u64 = s
+        .submit_claim(&s.other, "vault")
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(s.claim(second).await?["state"], "judged");
+    assert_eq!(s.claim(id).await?["state"], "judging");
+
+    s.pass_end_date("vault").await?;
+    let r = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert!(failure_text(&r).contains("unresolved"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+
+    s.resolve(jobs[2]["id"].as_u64().unwrap(), Some(ZERO)).await?;
+    retry.await?.into_result()?;
+    s.withdraw_bounty(&s.protocol, "vault")
+        .await?
+        .into_result()?;
+    assert_eq!(s.bounty("vault").await?["state"], "withdrawn");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    Ok(())
+}
+
 /// R10.2 with ordering (#18): a PAYS claim whose payout waits behind an earlier claim with
 /// no verdict blocks the withdrawal after the end date, as does the earlier claim.
 #[tokio::test]

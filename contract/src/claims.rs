@@ -21,6 +21,7 @@
 
 use bountee_formats::{BlockRef, BountyId, Bytes, Outcome, Rules, Verdict, B256};
 use near_sdk::json_types::U64;
+use near_sdk::store::LookupMap;
 use near_sdk::serde_json::{self, json};
 use near_sdk::{
     env, near, require, AccountId, Gas, NearToken, Promise, PromiseOrValue, PromiseResult,
@@ -210,7 +211,7 @@ impl Contract {
         );
         self.sealed_exploits.insert(sealed_hash, claim_id);
         let record = self.bounties.get_mut(&bounty).expect("checked above");
-        record.prune_lapsed(now);
+        record.prune_lapsed(now, &self.claims);
         record.open_claims.push((claim_id, now));
         self.claims.flush();
         self.sealed_exploits.flush();
@@ -395,7 +396,7 @@ impl Contract {
         let now = env::block_timestamp();
         let could_win = bounty.claim_can_still_win(claim_id, submitted, now);
         bounty.close_claim(claim_id);
-        bounty.prune_lapsed(now);
+        bounty.prune_lapsed(now, &self.claims);
         // ZERO and INVALID move nothing and request no signature (R3.3); a later winner
         // this claim held back may now be paid (R3.6).
         if verdict.outcome() != Outcome::Pays {
@@ -515,10 +516,16 @@ impl Bounty {
         self.open_claims.retain(|(id, _)| *id != claim_id);
     }
 
-    /// Drop the claims whose place has lapsed; they can't hold a payout any more.
-    fn prune_lapsed(&mut self, now: u64) {
-        self.open_claims
-            .retain(|(_, submitted)| now < submitted.saturating_add(CLAIM_PLACE_HOLD_NS));
+    /// Drop the claims whose place has lapsed; they can't hold a payout any more. A claim
+    /// whose secret is being stored or whose job is running stays, at any age: until its
+    /// verdict it blocks the bounty's withdrawal (R10.2), though a lapsed one holds no payout.
+    fn prune_lapsed(&mut self, now: u64, claims: &LookupMap<u64, ClaimRecord>) {
+        self.open_claims.retain(|(id, submitted)| {
+            now < submitted.saturating_add(CLAIM_PLACE_HOLD_NS)
+                || claims
+                    .get(id)
+                    .is_some_and(|c| matches!(c.state, ClaimState::Storing | ClaimState::Judging))
+        });
     }
 }
 
