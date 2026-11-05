@@ -1922,15 +1922,17 @@ async fn a_landed_pause_is_verified_from_the_hash_of_the_stored_signed_pause() -
     assert_eq!(v.keys().copied().collect::<Vec<_>>(), vec![84532, 421614]);
     assert!(v.values().all(|c| c["verified"] == false), "{v:?}");
 
-    // Anyone asks; a hash in the arguments is not the contract's to take.
+    // Anyone asks (paying for both pauses' attempt); a hash in the arguments is not the
+    // contract's to take.
     let junk = "11".repeat(32);
+    let fee = s.fee("verify_pause_fee_per_pause").await?;
     let call = s
         .verify_pause(
             &s.other,
             "vault",
             84532,
             json!({ "tx_hash": junk }),
-            NearToken::from_yoctonear(0),
+            fee.saturating_mul(2),
         )
         .await?;
     let requests = s.wait_for_verify_requests(2).await?;
@@ -2019,7 +2021,7 @@ async fn a_failed_or_missing_transaction_is_never_recorded_as_verified() -> anyh
 
     // Nobody answers: both requests time out. A second request meanwhile is refused.
     let call = s
-        .verify_pause(&s.other, "vault", 84532, json!({}), none)
+        .verify_pause(&s.whitehat, "vault", 84532, json!({}), none)
         .await?;
     s.wait_for_verify_requests(2).await?;
     let r = s
@@ -2036,7 +2038,7 @@ async fn a_failed_or_missing_transaction_is_never_recorded_as_verified() -> anyh
 
     // One answer is about another payload, the other is garbage.
     let call = s
-        .verify_pause(&s.other, "vault", 84532, json!({}), none)
+        .verify_pause(&s.whitehat, "vault", 84532, json!({}), none)
         .await?;
     s.wait_for_verify_requests(4).await?;
     let other_tx = "22".repeat(32);
@@ -2050,7 +2052,7 @@ async fn a_failed_or_missing_transaction_is_never_recorded_as_verified() -> anyh
 
     // One of the two is verified, the other times out: the chain is not verified.
     let call = s
-        .verify_pause(&s.other, "vault", 84532, json!({}), none)
+        .verify_pause(&s.whitehat, "vault", 84532, json!({}), none)
         .await?;
     let requests = s.wait_for_verify_requests(6).await?;
     let req: Value = serde_json::from_str(requests[4]["request"].as_str().unwrap())?;
@@ -2111,7 +2113,7 @@ async fn three_attempts_per_chain_are_prepaid_and_later_ones_pay_their_own_cost(
             3 - n + 1
         );
         let call = s
-            .verify_pause(&s.other, "vault", 421614, json!({}), none)
+            .verify_pause(&s.whitehat, "vault", 421614, json!({}), none)
             .await?;
         s.wait_for_verify_requests(n as usize).await?;
         s.worker.fast_forward(250).await?;
@@ -2126,13 +2128,13 @@ async fn three_attempts_per_chain_are_prepaid_and_later_ones_pay_their_own_cost(
 
     // A fourth with no deposit, or less than its cost, is refused.
     let r = s
-        .verify_pause(&s.other, "vault", 421614, json!({}), none)
+        .verify_pause(&s.whitehat, "vault", 421614, json!({}), none)
         .await?
         .await?;
     assert!(failure_text(&r).contains("prepaid attempts are used"), "{r:?}");
     let short = NearToken::from_yoctonear(fee.as_yoctonear() - 1);
     let r = s
-        .verify_pause(&s.other, "vault", 421614, json!({}), short)
+        .verify_pause(&s.whitehat, "vault", 421614, json!({}), short)
         .await?
         .await?;
     assert!(failure_text(&r).contains("prepaid attempts are used"), "{r:?}");
@@ -2159,6 +2161,58 @@ async fn three_attempts_per_chain_are_prepaid_and_later_ones_pay_their_own_cost(
         after < before + extra.as_yoctonear() / 2,
         "the excess went back to the caller"
     );
+    Ok(())
+}
+
+/// R7.10, R11.4 (code review of #21): a chain's three prepaid attempts are for the winning
+/// Whitehat and the posting Protocol only. Anyone else's request is refused unless it
+/// attaches its own cost, and paid that way it uses none of them, so nobody can burn a
+/// chain's prepaid attempts before its pause lands at the cost of gas alone.
+#[tokio::test]
+async fn r7_10_only_the_winner_or_the_protocol_use_the_prepaid_verification_attempts(
+) -> anyhow::Result<()> {
+    let none = NearToken::from_yoctonear(0);
+    let s = paid_two_chain_bounty().await?;
+    let fee = s.fee("verify_pause_fee_per_pause").await?;
+
+    // Someone else with nothing attached: refused, nothing requested, nothing used.
+    let r = s
+        .verify_pause(&s.other, "vault", 421614, json!({}), none)
+        .await?
+        .await?;
+    assert!(
+        failure_text(&r).contains("attach verify_pause_fee_per_pause"),
+        "{r:?}"
+    );
+    assert!(s.verify_requests().await?.is_empty());
+    let v = s.verifications("vault").await?[&421614].clone();
+    assert_eq!((v["attempts"].clone(), v["prepaid_attempts_left"].clone()), (json!(0), json!(3)));
+
+    // Paying for their own attempts, they use none of the prepaid ones.
+    for n in 1..=3usize {
+        let call = s
+            .verify_pause(&s.other, "vault", 421614, json!({}), fee)
+            .await?;
+        s.wait_for_verify_requests(n).await?;
+        s.worker.fast_forward(250).await?;
+        call.await?.into_result()?;
+        s.wait_until_not_verifying("vault", 421614).await?;
+    }
+    let v = s.verifications("vault").await?[&421614].clone();
+    assert_eq!((v["attempts"].clone(), v["prepaid_attempts_left"].clone()), (json!(3), json!(3)));
+
+    // The winning Whitehat and the posting Protocol use them with nothing attached.
+    for (n, by) in [(4usize, &s.whitehat), (5, &s.protocol)] {
+        let call = s
+            .verify_pause(by, "vault", 421614, json!({}), none)
+            .await?;
+        s.wait_for_verify_requests(n).await?;
+        s.worker.fast_forward(250).await?;
+        call.await?.into_result()?;
+        s.wait_until_not_verifying("vault", 421614).await?;
+    }
+    let v = s.verifications("vault").await?[&421614].clone();
+    assert_eq!((v["attempts"].clone(), v["prepaid_attempts_left"].clone()), (json!(5), json!(1)));
     Ok(())
 }
 

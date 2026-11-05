@@ -9,8 +9,10 @@
 //! reverted, is unknown or isn't yet safe gets no answer from the network, so its request
 //! times out and nothing is recorded.
 //!
-//! The posting fee pays the first [`PREPAID_ATTEMPTS`] attempts per chain; later ones are
-//! paid by the caller's deposit, so the keyless contract never pays (R11.4). Nothing here
+//! The posting fee pays [`PREPAID_ATTEMPTS`] attempts per chain, used only by the winning
+//! Whitehat or the posting Protocol, so nobody else can burn them before the pause lands at
+//! the cost of gas; every other attempt is paid by its caller's deposit, so the keyless
+//! contract never pays (R11.4). Nothing here
 //! touches a bounty's state or its payout (R7.11).
 
 use bountee_formats::{BountyId, B256};
@@ -37,6 +39,8 @@ pub struct ChainVerification {
     pub chain_id: u64,
     /// Requests made for this chain so far.
     pub attempts: u32,
+    /// How many of them the posting fee paid for.
+    pub prepaid_used: u32,
     /// The block height the request under way started at.
     pub since: Option<u64>,
     /// The hashes of this chain's pauses the MPC network has verified.
@@ -105,9 +109,10 @@ impl Contract {
     /// Ask NEAR's MPC network to verify `chain_id`'s pause of bounty `id` (R7.10). Anyone may
     /// call, once the bounty's pauses are signed; the hashes are those of the pauses it stored.
     /// Attach the gas `fees()` names (`min_verify_pause_gas_base` plus
-    /// `min_verify_pause_gas_per_pause` for each pause on the chain). The first three attempts
-    /// per chain are prepaid; after that attach `verify_pause_fee_per_pause` for each pause
-    /// not yet verified. Any deposit beyond what is taken is refunded.
+    /// `min_verify_pause_gas_per_pause` for each pause on the chain). The posting fee prepays
+    /// three attempts per chain, for the winning Whitehat or the posting Protocol to use;
+    /// anyone else, and they once those are used, attach `verify_pause_fee_per_pause` for each
+    /// pause not yet verified. Any deposit beyond what is taken is refunded.
     #[payable]
     pub fn verify_pause(&mut self, id: BountyId, chain_id: u64) -> Promise {
         let (chain_name, chain_byte) = foreign_chain(chain_id)
@@ -130,6 +135,7 @@ impl Contract {
                 records.push(ChainVerification {
                     chain_id,
                     attempts: 0,
+                    prepaid_used: 0,
                     since: None,
                     verified: Vec::new(),
                 });
@@ -151,12 +157,29 @@ impl Contract {
 
         let cost = fees::VERIFY_PAUSE.saturating_mul(pending.len() as u128);
         let deposit = env::attached_deposit();
-        let taken = if record.attempts < PREPAID_ATTEMPTS && bounty.draw_fee(cost).is_ok() {
+        // The prepaid attempts are the winning Whitehat's and the posting Protocol's, so
+        // nobody else can spend them before the pause lands at the cost of gas alone.
+        let caller = env::predecessor_account_id();
+        let winner = bounty
+            .winning_claim
+            .and_then(|c| self.claims.get(&c))
+            .map(|c| &c.whitehat);
+        let may_use_prepaid =
+            winner == Some(&caller) || caller.as_str() == id.protocol.as_str();
+        let prepaid = may_use_prepaid
+            && record.prepaid_used < PREPAID_ATTEMPTS
+            && bounty.draw_fee(cost).is_ok();
+        let taken = if prepaid {
+            record.prepaid_used += 1;
             NearToken::from_yoctonear(0)
         } else {
             require!(
                 deposit >= cost,
-                "the prepaid attempts are used: attach verify_pause_fee_per_pause from fees() for each pause"
+                if may_use_prepaid {
+                    "the prepaid attempts are used: attach verify_pause_fee_per_pause from fees() for each pause"
+                } else {
+                    "only the winning Whitehat and the posting Protocol use the prepaid attempts: attach verify_pause_fee_per_pause from fees() for each pause"
+                }
             );
             cost
         };
@@ -288,6 +311,7 @@ impl Contract {
                 let record = records.and_then(|rs| rs.iter().find(|r| r.chain_id == chain_id));
                 let verified_pauses = record.map(|r| r.verified.clone()).unwrap_or_default();
                 let attempts = record.map_or(0, |r| r.attempts);
+                let prepaid_used = record.map_or(0, |r| r.prepaid_used);
                 PauseVerification {
                     chain_id,
                     verified: bounty
@@ -297,7 +321,7 @@ impl Contract {
                         .all(|p| verified_pauses.contains(&p.tx_hash)),
                     verified_pauses,
                     attempts,
-                    prepaid_attempts_left: PREPAID_ATTEMPTS.saturating_sub(attempts),
+                    prepaid_attempts_left: PREPAID_ATTEMPTS.saturating_sub(prepaid_used),
                     verifying: record.is_some_and(ChainVerification::in_flight),
                 }
             })
