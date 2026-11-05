@@ -1718,12 +1718,52 @@ async fn a_failed_payout_transfer_is_retried_to_the_same_winner_exactly_once() -
     Ok(())
 }
 
-/// R11.4 (code review of #12): a payout retry draws the winner's USDC registration and the
-/// transfer's yoctoNEAR from the bounty's posting fee. Retried again and again against a
-/// token that refuses, the posting fee runs out; then a retry is refused unless its caller
-/// attaches the shortfall, so the contract's own balance pays for none of them.
+impl Sandbox {
+    /// What is left of bounty `name`'s posting fee, in yoctoNEAR, as its view shows it.
+    async fn posting_fee_left(&self, name: &str) -> anyhow::Result<u128> {
+        Ok(self.bounty(name).await?["posting_fee_left"]
+            .as_str()
+            .unwrap()
+            .parse()?)
+    }
+
+    /// Set what is left of bounty `name`'s posting fee, straight in the sandbox's state, to
+    /// stand in for a fee spent down (no public call drains it this far). The bounty's record
+    /// is found by the bytes of the amount its view shows.
+    async fn set_posting_fee_left(&self, name: &str, yocto: u128) -> anyhow::Result<()> {
+        let left = self.posting_fee_left(name).await?.to_le_bytes();
+        let state = self.worker.view_state(self.contract.id()).await?;
+        let mut found = None;
+        for (key, value) in state {
+            let at: Vec<usize> = (0..value.len().saturating_sub(15))
+                .filter(|&i| value[i..i + 16] == left)
+                .collect();
+            if key.first() == Some(&0) && at.len() == 1 {
+                anyhow::ensure!(found.is_none(), "two bounties hold that fee");
+                found = Some((key, value, at[0]));
+            }
+        }
+        let (key, mut value, at) =
+            found.ok_or_else(|| anyhow::anyhow!("no bounty holds that fee"))?;
+        value[at..at + 16].copy_from_slice(&yocto.to_le_bytes());
+        self.worker
+            .patch_state(self.contract.id(), &key, &value)
+            .await?;
+        anyhow::ensure!(
+            self.posting_fee_left(name).await? == yocto,
+            "the patch didn't take"
+        );
+        Ok(())
+    }
+}
+
+/// R11.4, R2.4 (code review of #12): the winner is registered with USDC once per bounty.
+/// Retries against a token that refuses the transfer draw only the transfer's yoctoNEAR from
+/// the posting fee, so repeated retries can't drain it, and the contract's own balance pays
+/// nothing. Once the fee left can't cover a retry, the retry is refused unless its caller
+/// attaches the shortfall.
 #[tokio::test]
-async fn r11_4_repeated_payout_retries_never_take_the_contracts_own_balance(
+async fn r11_4_payout_retries_register_the_winner_once_and_never_take_the_contracts_balance(
 ) -> anyhow::Result<()> {
     let s = Sandbox::start().await?;
     let free_at_start = s.free_balance().await?;
@@ -1734,28 +1774,31 @@ async fn r11_4_repeated_payout_retries_never_take_the_contracts_own_balance(
     s.wait_for_bounty_state("vault", "paying").await?;
     s.wait_until_not_paying_out("vault").await?;
 
-    // The posting fee (0.5 NEAR) covers a few dozen 0.0125 NEAR retries at most.
-    let mut refused = None;
-    for n in 0..60 {
-        let r = s.retry_payout(&s.other, "vault").await?.await?;
-        if r.is_failure() {
-            refused = Some(failure_text(&r));
-            break;
-        }
+    // The first payout registered the winner; each retry takes one yoctoNEAR, no more.
+    let left = s.posting_fee_left("vault").await?;
+    for _ in 0..3 {
+        s.retry_payout(&s.other, "vault").await?.await?.into_result()?;
         s.wait_until_not_paying_out("vault").await?;
-        let free = s.free_balance().await?;
-        assert!(free >= free_at_start, "retry {n}: {free} < {free_at_start}");
     }
-    let refused = refused.expect("the retries never ran out of the posting fee");
-    assert!(refused.contains("can't pay for the payout: attach"), "{refused}");
+    assert_eq!(s.posting_fee_left("vault").await?, left - 3);
     assert_eq!(s.bounty("vault").await?["state"], "paying");
+    let free = s.free_balance().await?;
+    assert!(free >= free_at_start, "{free} < {free_at_start}");
 
-    // A caller who attaches the shortfall pays for the retry, and the winner is paid.
+    // With nothing left of the fee, a retry is refused and names what to attach.
+    s.set_posting_fee_left("vault", 0).await?;
+    let r = s.retry_payout(&s.other, "vault").await?.await?;
+    assert!(
+        failure_text(&r).contains("can't pay for the payout: attach 1 yoctoNEAR"),
+        "{r:?}"
+    );
+
+    // A caller who attaches it pays for the retry, and the winner is paid.
     s.refuse_transfers(false).await?;
     s.other
         .call(s.contract.id(), "retry_payout")
         .args_json(json!({ "id": { "protocol": s.protocol.id(), "name": "vault" } }))
-        .deposit(NearToken::from_millinear(20))
+        .deposit(NearToken::from_yoctonear(1))
         .gas(tgas(100))
         .transact()
         .await?

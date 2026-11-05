@@ -114,7 +114,11 @@ pub mod gas {
     /// For each step of the payout.
     pub const USDC_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
     pub const USDC_TRANSFER: Gas = Gas::from_tgas(15);
-    pub const ON_PAID: Gas = Gas::from_tgas(10);
+    /// For the payout's and the withdrawal's last callbacks (about 2 Tgas burnt in seam C).
+    pub const ON_PAID: Gas = Gas::from_tgas(5);
+    /// For the payout's callback after the winner's USDC registration, beside the transfer
+    /// and its callback that it schedules.
+    pub const ON_REGISTERED: Gas = Gas::from_tgas(5);
     /// For each pause's `sign` on the MPC contract, which asks for at least 15 Tgas and
     /// keeps 7 for its own yield callback (testnet config, Nov 4).
     pub const SIGN_PAUSE: Gas = Gas::from_tgas(20);
@@ -123,7 +127,7 @@ pub mod gas {
     /// What OutLayer's `request_execution` needs, most of it kept for its own callback
     /// (spike #4: about 55 Tgas).
     pub const REQUEST_JOB: Gas = Gas::from_tgas(60);
-    /// For checking and storing the signed pauses, then the payout's three steps.
+    /// For checking and storing the signed pauses, then the payout's steps.
     pub const ON_PAUSES_SIGNED: Gas = Gas::from_tgas(50);
     /// What the claim's job is left at least, before gas is kept back to sign pauses.
     pub const MIN_JOB: Gas = Gas::from_tgas(60);
@@ -133,11 +137,13 @@ pub mod gas {
     /// For recording a verification's answers.
     pub const ON_PAUSE_VERIFIED: Gas = Gas::from_tgas(10);
 
-    /// Gas for the payout's three steps, from the call that starts it.
+    /// Gas for the payout's steps (registration, its callback, transfer, last callback), from
+    /// the call that starts it.
     pub const fn payout() -> Gas {
         Gas::from_gas(
             USDC_STORAGE_DEPOSIT.as_gas()
                 + USDC_TRANSFER.as_gas()
+                + ON_REGISTERED.as_gas()
                 + ON_PAID.as_gas()
                 + TAIL.as_gas(),
         )
@@ -223,6 +229,9 @@ pub struct Bounty {
     /// When the payout's transfer succeeded (NEAR block time); the disclosure delay counts
     /// from it (D7).
     pub paid_at_ns: Option<u64>,
+    /// The winning claim whose Whitehat USDC has registered for this bounty's payout, so a
+    /// retry doesn't pay the registration again (R11.4).
+    pub registered_winner: Option<u64>,
 }
 
 impl Bounty {
@@ -281,6 +290,9 @@ pub struct BountyView {
     /// While an earlier claim still holds its place, the latest time it can hold the winning
     /// claim's payout (R3.6); after it, anyone's `retry_payout` pays.
     pub payout_waits_until_ns: Option<near_sdk::json_types::U64>,
+    /// What is left of the posting fee for the bounty's later costs (R11.4); a call it can't
+    /// cover names the shortfall to attach.
+    pub posting_fee_left: NearToken,
 }
 
 /// Where a claim is in its life.
@@ -444,6 +456,7 @@ impl Contract {
                 .winning_claim
                 .and_then(|w| b.payout_held_until(w, env::block_timestamp()))
                 .map(near_sdk::json_types::U64),
+            posting_fee_left: b.fee_reserve,
         })
     }
 

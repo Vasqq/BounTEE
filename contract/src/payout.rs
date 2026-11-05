@@ -10,7 +10,8 @@ use bountee_formats::BountyId;
 use near_sdk::json_types::{U128, U64};
 use near_sdk::serde_json::json;
 use near_sdk::{
-    env, ext_contract, near, require, AccountId, NearToken, Promise, PromiseOrValue, PromiseResult,
+    env, ext_contract, near, require, AccountId, Gas, NearToken, Promise, PromiseOrValue,
+    PromiseResult,
 };
 
 use crate::{emit, fees, gas, BountyState, Contract, ContractExt};
@@ -57,6 +58,40 @@ impl Contract {
         bounty.add_attached_to_fee();
         self.pay_out(claim_id)
             .unwrap_or_else(|short| crate::refuse_shortfall("the payout", short))
+    }
+
+    /// After the winner's USDC registration: on success it is recorded, so no retry pays it
+    /// again, and the transfer follows. If it failed, its deposit came back here and goes
+    /// back to the posting fee, and the bounty waits for a retry. Never panics, so the
+    /// in-flight flag is always cleared.
+    #[private]
+    pub fn on_winner_registered(&mut self, claim_id: u64) -> PromiseOrValue<()> {
+        let Some(claim) = self.claims.get(&claim_id) else {
+            return PromiseOrValue::Value(());
+        };
+        let bounty_id = claim.bounty.clone();
+        let Some(bounty) = self.bounties.get_mut(&bounty_id) else {
+            return PromiseOrValue::Value(());
+        };
+        if bounty.state != BountyState::Paying || bounty.winning_claim != Some(claim_id) {
+            return PromiseOrValue::Value(());
+        }
+        #[allow(deprecated)]
+        match env::promise_result(0) {
+            PromiseResult::Successful(_) => {
+                bounty.registered_winner = Some(claim_id);
+                self.transfer_payout(claim_id).into()
+            }
+            PromiseResult::Failed => {
+                bounty.fee_reserve = bounty.fee_reserve.saturating_add(fees::USDC_REGISTRATION);
+                bounty.paying_out = false;
+                emit(
+                    "payout_failed",
+                    json!({ "bounty": bounty_id, "claim_id": claim_id }),
+                );
+                PromiseOrValue::Value(())
+            }
+        }
     }
 
     /// After the payout's transfer: the bounty is paid, or, if the transfer failed, stays
@@ -138,10 +173,11 @@ impl Contract {
     }
 
     /// Pay the whole bounty amount to the claim's Whitehat, registering them with USDC
-    /// first if needed (R3.2, R2.7). No allowlist and no identity check (D9). The NEAR it
-    /// attaches comes from the bounty's posting fee; if that can't cover it, nothing starts
-    /// and the shortfall comes back. The caller has checked the bounty is `paying` this claim
-    /// with no transfer under way.
+    /// first, once per bounty (R3.2, R2.7). No allowlist and no identity check (D9). The NEAR
+    /// it attaches comes from the bounty's posting fee; if that can't cover it, nothing starts
+    /// and the shortfall comes back. Once the winner is registered, a retry draws only the
+    /// transfer's yoctoNEAR, so retries can't drain the fee (R11.4). The caller has checked
+    /// the bounty is `paying` this claim with no transfer under way.
     pub(crate) fn pay_out(&mut self, claim_id: u64) -> Result<Promise, NearToken> {
         let claim = self.claims.get(&claim_id).expect("a judged claim").clone();
         let bounty = self
@@ -149,35 +185,53 @@ impl Contract {
             .get_mut(&claim.bounty)
             .expect("the claim's bounty");
         let one_yocto = NearToken::from_yoctonear(1);
+        if bounty.registered_winner == Some(claim_id) {
+            bounty.draw_fee(one_yocto)?;
+            bounty.paying_out = true;
+            return Ok(self.transfer_payout(claim_id));
+        }
         bounty.draw_fee(fees::USDC_REGISTRATION.saturating_add(one_yocto))?;
         bounty.paying_out = true;
-        let amount = bounty
-            .rules
-            .bounty_amount
-            .to_u128()
-            .expect("checked at posting");
-        let usdc = self.config.usdc.clone();
-        Ok(ext_ft::ext(usdc.clone())
+        Ok(ext_ft::ext(self.config.usdc.clone())
             .with_attached_deposit(fees::USDC_REGISTRATION)
             .with_static_gas(gas::USDC_STORAGE_DEPOSIT)
             .with_unused_gas_weight(0)
             .storage_deposit(Some(claim.whitehat.clone()), Some(true))
             .then(
-                ext_ft::ext(usdc)
-                    .with_attached_deposit(one_yocto)
-                    .with_static_gas(gas::USDC_TRANSFER)
+                Self::ext(env::current_account_id())
+                    .with_static_gas(Gas::from_gas(
+                        gas::ON_REGISTERED.as_gas()
+                            + gas::USDC_TRANSFER.as_gas()
+                            + gas::ON_PAID.as_gas(),
+                    ))
                     .with_unused_gas_weight(0)
-                    .ft_transfer(
-                        claim.whitehat.clone(),
-                        U128(amount),
-                        Some(format!("BounTEE payout, claim {claim_id}")),
-                    ),
+                    .on_winner_registered(claim_id),
+            ))
+    }
+
+    /// The payout's transfer of the whole amount to the claim's Whitehat, then
+    /// [`Contract::on_paid`]. Its yoctoNEAR is already drawn from the posting fee.
+    fn transfer_payout(&self, claim_id: u64) -> Promise {
+        let claim = self.claims.get(&claim_id).expect("a judged claim");
+        let amount = self
+            .bounties
+            .get(&claim.bounty)
+            .and_then(|b| b.rules.bounty_amount.to_u128())
+            .expect("checked at posting");
+        ext_ft::ext(self.config.usdc.clone())
+            .with_attached_deposit(NearToken::from_yoctonear(1))
+            .with_static_gas(gas::USDC_TRANSFER)
+            .with_unused_gas_weight(0)
+            .ft_transfer(
+                claim.whitehat.clone(),
+                U128(amount),
+                Some(format!("BounTEE payout, claim {claim_id}")),
             )
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(gas::ON_PAID)
                     .with_unused_gas_weight(0)
                     .on_paid(claim_id),
-            ))
+            )
     }
 }
