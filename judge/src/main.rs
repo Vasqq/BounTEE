@@ -11,6 +11,9 @@
 //! - `posting_check`, the enclave (#17): [`posting::check`] simulates each covered
 //!   contract's pause from the bounty's pause-role address and checks its pause gas,
 //!   through the pinned RPCs. stdout is a `PostingCheckResult`; nothing goes to stderr.
+//! - `release`, the enclave (#22): [`release::release`] re-encrypts the winning claim's
+//!   sealed exploit to the Protocol's exploit key; stdout is a `ReleaseOutput`, not a
+//!   verdict. A release that may not happen exits with status 2 and writes nothing.
 //!
 //! stdout carries only the verdict. A job that can't have a verdict (R2.6) exits with
 //! status 2 and nothing on stdout: OutLayer reports it as a failed job, which reaches the
@@ -21,6 +24,7 @@ mod confirm;
 mod header;
 mod posting;
 mod proofs;
+mod release;
 mod replay;
 mod rpc;
 mod score;
@@ -70,12 +74,14 @@ fn main() {
             }
         }
         Ok(Job::PostingCheck(job)) => return write(&posting::check(&job)),
-        Ok(Job::JudgeClaim(job)) => {
-            match claim::judge(&job, || sealed::exploit(&job.whitehat)) {
-                Ok(verdict) => verdict,
-                Err(_) => std::process::exit(NO_VERDICT),
-            }
-        }
+        Ok(Job::Release(job)) => match release::release(&job) {
+            Some(output) => return write(&output),
+            None => std::process::exit(NO_VERDICT),
+        },
+        Ok(Job::JudgeClaim(job)) => match claim::judge(&job, || sealed::exploit(&job.whitehat)) {
+            Ok(verdict) => verdict,
+            Err(_) => std::process::exit(NO_VERDICT),
+        },
     };
     write(&verdict);
 }
@@ -92,6 +98,10 @@ fn write<T: Serialize>(answer: &T) {
 /// Whether `input` is meant as an enclave job, so even its parse error stays off stderr.
 fn is_enclave_job(input: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(input)
-        .map(|v| v.get("judge_claim").is_some() || v.get("posting_check").is_some())
+        .map(|v| {
+            v.get("judge_claim").is_some()
+                || v.get("posting_check").is_some()
+                || v.get("release").is_some()
+        })
         .unwrap_or(false)
 }

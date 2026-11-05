@@ -230,6 +230,12 @@ impl Contract {
             !rules.listed_tokens.is_empty(),
             "a bounty must list at least one token"
         );
+        // The release encrypts the winning exploit to this key (R6.2, R12.4): a key no
+        // release can use would leave the paid Protocol unable to open it.
+        require!(
+            crate::release::is_exploit_key(rules.exploit_public_key.as_str()),
+            "the exploit key must be an X25519 key: x25519:<32 bytes in base58>"
+        );
         require!(
             rules.covered_contracts.len() <= MAX_COVERED_CONTRACTS
                 && rules.listed_tokens.len() <= MAX_LISTED_TOKENS,

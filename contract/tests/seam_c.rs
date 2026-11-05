@@ -282,7 +282,7 @@ fn rules(s: &Sandbox, end_in_ns: u64, now_ns: u64) -> Value {
         "minimum_theft": "1000000000000000000",
         "end_date_ns": (now_ns + end_in_ns).to_string(),
         "disclosure_delay_days": 30,
-        "exploit_public_key": "secp256k1:4NfTiv3UsGahebgTaHyD9vF8KYKMBnfd6kh94mK6xv8f",
+        "exploit_public_key": "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
         "judge_build_hash": JUDGE_BUILD_HASH,
     })
 }
@@ -2136,7 +2136,10 @@ async fn r12_3_a_contract_already_covered_by_a_live_or_pending_bounty_is_refused
         .await?;
     assert!(failure_text(&r).contains("already covered"), "{r:?}");
     assert!(s.bounty("again").await?.is_null());
-    assert_eq!(s.usdc_balance(s.protocol.id()).await?, start - BOUNTY_AMOUNT);
+    assert_eq!(
+        s.usdc_balance(s.protocol.id()).await?,
+        start - BOUNTY_AMOUNT
+    );
 
     // VAULT_B: covered by a bounty whose posting check hasn't answered yet.
     s.prepay_posting_fee(&s.protocol, s.fee("posting_fee").await?)
@@ -2195,5 +2198,276 @@ async fn r7_6_fees_show_the_pause_gas_the_posting_check_asks_for() -> anyhow::Re
     );
     // 0.0002 ETH + 0.00001 ETH, from the spec.
     assert_eq!(fees["pause_gas_per_pause"], "210000000000000");
+    Ok(())
+}
+
+// ---- release (#22) ----------------------------------------------------------------------
+//
+// Seam C here catches R6.1 (the release job is requested only once the bounty is paid, never
+// while it is signing or paying, with the winning claim's own secret, one at a time), R12.4
+// (the job names the exploit key recorded in the posted rules, never one from the caller,
+// and the release kept is the job's output), R5.6 (no release for a failed, refused or
+// losing claim) and R11.4 (the release is paid from the posting fee). It misses the real
+// judge's encryption (seam J) and the real OutLayer (seam T).
+
+/// What a release job returns, as the stand-in answers it.
+const RELEASED: &str = r#"{"released":"AXNlYWxlZCB0byB0aGUgcHJvdG9jb2w="}"#;
+
+impl Sandbox {
+    /// `by` asks the contract to release `name`'s winning exploit, without waiting.
+    async fn release(&self, by: &Account, name: &str) -> anyhow::Result<Pending> {
+        Ok(by
+            .call(self.contract.id(), "release_exploit")
+            .args_json(json!({ "id": { "protocol": self.protocol.id(), "name": name } }))
+            .gas(tgas(150))
+            .transact_async()
+            .await?)
+    }
+
+    async fn released(&self, name: &str) -> anyhow::Result<Value> {
+        self.view(
+            "released_exploit",
+            json!({ "id": { "protocol": self.protocol.id(), "name": name } }),
+        )
+        .await
+    }
+
+    async fn wait_for_release_state(&self, name: &str, state: &str) -> anyhow::Result<Value> {
+        for _ in 0..150 {
+            let r = self.released(name).await?;
+            if r["state"] == state {
+                return Ok(r);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        anyhow::bail!(
+            "{name}'s release never reached {state}: {}",
+            self.released(name).await?
+        )
+    }
+
+    /// Wait until `n` release jobs have been requested, and return them.
+    async fn wait_for_release_requests(&self, n: usize) -> anyhow::Result<Vec<Value>> {
+        for _ in 0..150 {
+            let r = self.release_requests().await?;
+            if r.len() >= n {
+                return Ok(r);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        anyhow::bail!("release job {n} was never requested")
+    }
+
+    /// The job requests whose input is a release.
+    async fn release_requests(&self) -> anyhow::Result<Vec<Value>> {
+        Ok(self
+            .requests()
+            .await?
+            .into_iter()
+            .filter(|r| {
+                r["input_data"]
+                    .as_str()
+                    .is_some_and(|i| i.starts_with(r#"{"release""#))
+            })
+            .collect())
+    }
+}
+
+/// R6.1, R12.4, R11.4: the Protocol's copy is released only by a job the contract requests
+/// once the payout has succeeded (not while the pauses are signing, not while a failed
+/// transfer waits for a retry), with the winning claim's own secret, to the exploit key in
+/// the posted rules; one release at a time; the release kept is the job's output; the
+/// contract's own balance pays none of it.
+#[tokio::test]
+async fn r6_1_the_release_job_is_requested_only_after_the_payout_succeeds() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let free_at_start = s.free_balance().await?;
+    let rules = valid_rules(&s).await?;
+    s.post("vault", &rules).await?.into_result()?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+    let refused = |r: &ExecutionFinalResult| failure_text(r).contains("not been paid");
+
+    // Before any claim, and while a PAYS claim's pauses are being signed: nothing.
+    let r = s.release(&s.other, "vault").await?.await?;
+    assert!(refused(&r), "{r:?}");
+    s.refuse_transfers(true).await?;
+    let before = s.sign_requests().await?.len();
+    let claim = s.submit_pays("vault").await?;
+    let requests = s.wait_for_sign_requests(before + 1).await?;
+    assert_eq!(s.bounty("vault").await?["state"], "signing");
+    let r = s.release(&s.other, "vault").await?.await?;
+    assert!(refused(&r), "{r:?}");
+
+    // Signed, but the transfer failed: still nothing.
+    s.answer_from(&requests, before, &s.pause_key("vault"), false)
+        .await?;
+    let id: u64 = claim.await?.into_result()?.json()?;
+    s.wait_for_bounty_state("vault", "paying").await?;
+    s.wait_until_not_paying_out("vault").await?;
+    let r = s.release(&s.other, "vault").await?.await?;
+    assert!(refused(&r), "{r:?}");
+    assert!(s.release_requests().await?.is_empty());
+    assert_eq!(s.released("vault").await?, Value::Null);
+
+    // Paid: anyone may ask, and the contract requests the job.
+    s.refuse_transfers(false).await?;
+    let _ = s.retry_payout(&s.other, "vault").await?.await?;
+    s.wait_for_bounty_state("vault", "paid").await?;
+    let pending = s
+        .other
+        .call(s.contract.id(), "release_exploit")
+        // A caller can't name the key: an extra argument changes nothing.
+        .args_json(json!({
+            "id": { "protocol": s.protocol.id(), "name": "vault" },
+            "exploit_public_key": "x25519:HQm4yqJujXDwAJ3AkKTGcCjVby2TZ7HaVs3SAaqBCyAB",
+        }))
+        .gas(tgas(150))
+        .transact_async()
+        .await?;
+    let release = s.wait_for_release_requests(1).await?.remove(0);
+    assert_eq!(release["predecessor"], json!(s.contract.id()));
+    let source: Value = serde_json::from_str(release["source"].as_str().unwrap())?;
+    assert_eq!(source["WasmUrl"]["hash"], &JUDGE_BUILD_HASH[2..]);
+    let claim = s.claim(id).await?;
+    let secrets_ref: Value = serde_json::from_str(release["secrets_ref"].as_str().unwrap())?;
+    assert_eq!(
+        secrets_ref,
+        json!({ "profile": claim["secret_profile"], "account_id": s.contract.id() }),
+        "the winning claim's own secret"
+    );
+    let input: Value = serde_json::from_str(release["input_data"].as_str().unwrap())?;
+    assert_eq!(
+        input,
+        json!({ "release": {
+            "bounty": { "protocol": s.protocol.id(), "name": "vault" },
+            "claim_id": id,
+            "whitehat": s.whitehat.id(),
+            "exploit_public_key": rules["exploit_public_key"],
+        } }),
+        "R12.4: the exploit key recorded in the posted rules"
+    );
+    assert_eq!(release["payer_account_id"], json!(s.protocol.id()));
+    assert_eq!(
+        release["deposit"].as_str().unwrap(),
+        s.fee("job_deposit").await?.as_yoctonear().to_string()
+    );
+
+    // One at a time.
+    assert_eq!(s.released("vault").await?["state"], "requested");
+    let r = s.release(&s.protocol, "vault").await?.await?;
+    assert!(failure_text(&r).contains("under way"), "{r:?}");
+
+    // The job's output is what is kept, for the Protocol to open.
+    s.resolve(release["id"].as_u64().unwrap(), Some(RELEASED))
+        .await?;
+    pending.await?.into_result()?;
+    let released = s.wait_for_release_state("vault", "released").await?;
+    assert_eq!(released["claim_id"], id);
+    assert_eq!(released["released"], "AXNlYWxlZCB0byB0aGUgcHJvdG9jb2w=");
+    let r = s.release(&s.other, "vault").await?.await?;
+    assert!(failure_text(&r).contains("already released"), "{r:?}");
+    assert_eq!(s.release_requests().await?.len(), 1);
+
+    // R11.4: the posting fee paid for the job and the release's storage.
+    let free_at_end = s.free_balance().await?;
+    assert!(
+        free_at_end >= free_at_start,
+        "{free_at_end} < {free_at_start}"
+    );
+    Ok(())
+}
+
+/// R6.1: a release job that fails, is refused or returns anything but a release keeps
+/// nothing; anyone can ask again, and the next good answer is kept.
+#[tokio::test]
+async fn r6_1_a_failed_release_keeps_nothing_and_can_be_asked_again() -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    s.pay_claim("vault").await?;
+    for answer in [
+        json!({ "output": null }),
+        json!({ "output": PAYS }),
+        json!({ "output": r#"{"released":"not base64!"}"# }),
+    ] {
+        s.script(answer.clone()).await?;
+        s.release(&s.other, "vault").await?.await?.into_result()?;
+        assert_eq!(s.released("vault").await?, Value::Null, "{answer}");
+    }
+    s.script(json!({ "output": RELEASED })).await?;
+    s.release(&s.other, "vault").await?.await?.into_result()?;
+    assert_eq!(s.released("vault").await?["state"], "released");
+
+    // A request OutLayer refuses outright (the stand-in then refuses every later request,
+    // so this comes last, on a second paid bounty).
+    s.post("vault-2", &valid_rules(&s).await?)
+        .await?
+        .into_result()?;
+    s.pay_claim("vault-2").await?;
+    s.script(json!({ "fail": true })).await?;
+    s.release(&s.other, "vault-2").await?.await?.into_result()?;
+    assert_eq!(s.released("vault-2").await?, Value::Null);
+    Ok(())
+}
+
+/// R5.6: a failed or refused exploit is never released: a ZERO, an INVALID and a no-verdict
+/// claim leave nothing to release, and once a later claim wins, only the winner's secret is
+/// ever named in a release job.
+#[tokio::test]
+async fn r5_6_a_failed_exploit_is_never_released() -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    s.top_up(&s.other, NearToken::from_near(1)).await?;
+    let mut losers = vec![];
+    for output in [Some(ZERO), Some(INVALID), None] {
+        s.script(json!({ "output": output })).await?;
+        let id: u64 = s
+            .submit_claim(&s.other, "vault")
+            .await?
+            .into_result()?
+            .json()?;
+        losers.push(s.claim(id).await?["secret_profile"].clone());
+        let r = s.release(&s.other, "vault").await?.await?;
+        assert!(failure_text(&r).contains("not been paid"), "{r:?}");
+    }
+    assert!(s.release_requests().await?.is_empty());
+    assert_eq!(s.released("vault").await?, Value::Null);
+
+    let winner = s.pay_claim("vault").await?;
+    s.script(json!({ "output": RELEASED })).await?;
+    s.release(&s.protocol, "vault")
+        .await?
+        .await?
+        .into_result()?;
+    let jobs = s.release_requests().await?;
+    assert_eq!(jobs.len(), 1);
+    let secrets_ref: Value = serde_json::from_str(jobs[0]["secrets_ref"].as_str().unwrap())?;
+    assert_eq!(
+        secrets_ref["profile"],
+        s.claim(winner).await?["secret_profile"]
+    );
+    assert!(!losers.contains(&secrets_ref["profile"]));
+    assert_eq!(s.released("vault").await?["claim_id"], winner);
+    Ok(())
+}
+
+/// R6.2, R12.4 (code review of #22): a posting whose exploit key isn't an X25519 key of 32
+/// bytes is refused, since no release could ever open for it; the USDC goes back.
+#[tokio::test]
+async fn r6_2_a_posting_with_an_exploit_key_no_release_can_use_is_refused() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let before = s.usdc_balance(s.protocol.id()).await?;
+    for (name, key) in [
+        (
+            "secp",
+            "secp256k1:4NfTiv3UsGahebgTaHyD9vF8KYKMBnfd6kh94mK6xv8f",
+        ),
+        ("ed", "ed25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA"),
+        ("short", "x25519:6W7B3sSYk1p2DZ7"),
+    ] {
+        let mut rules = valid_rules(&s).await?;
+        rules["exploit_public_key"] = json!(key);
+        let r = s.post(name, &rules).await?;
+        assert!(failure_text(&r).contains("X25519"), "{name}: {r:?}");
+        assert_eq!(s.bounty(name).await?, Value::Null, "{name}");
+    }
+    assert_eq!(s.usdc_balance(s.protocol.id()).await?, before);
     Ok(())
 }

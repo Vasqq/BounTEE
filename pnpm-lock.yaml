@@ -171,16 +171,19 @@ importers:
       '@bountee/formats':
         specifier: workspace:*
         version: link:../formats/ts
+      '@noble/curves':
+        specifier: ^2.4.0
+        version: 2.4.0
       '@noble/hashes':
         specifier: ^2.4.0
         version: 2.4.0
+      '@scure/base':
+        specifier: 1.2.6
+        version: 1.2.6
       near-api-js:
         specifier: 7.3.1
         version: 7.3.1
     devDependencies:
-      '@scure/base':
-        specifier: 1.2.6
-        version: 1.2.6
       '@types/node':
         specifier: ^22
         version: 22.20.5
