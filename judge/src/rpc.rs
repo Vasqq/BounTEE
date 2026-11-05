@@ -1,5 +1,6 @@
 //! JSON-RPC over `wasi:http`, the only network the judge has (OutLayer gives HTTP to
-//! WASI Preview 2 jobs only; spec, judge Build). Used by block confirmation (`confirm.rs`).
+//! WASI Preview 2 jobs only; spec, judge Build). Used by block confirmation (`confirm.rs`)
+//! and the posting check (`posting.rs`).
 //!
 //! Every request carries short timeouts of its own: OutLayer cuts a request at 30 s and
 //! aborts the whole job on a second such timeout, so a slow RPC must end here first and
@@ -16,7 +17,39 @@ use serde_json::Value;
 /// `result`, or `None` for an RPC that didn't answer with one (unreachable, timed out,
 /// a non-200 status, a JSON-RPC error, or a body that isn't JSON).
 pub fn call_all(requests: &[(String, String)]) -> Vec<Option<Value>> {
+    replies(requests)
+        .into_iter()
+        .map(|reply| match reply {
+            Some(Reply::Result(result)) => Some(result),
+            _ => None,
+        })
+        .collect()
+}
+
+/// An RPC's answer to one request.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reply {
+    /// The response's `result` (never `null`).
+    Result(Value),
+    /// A JSON-RPC error: the response's `error` object, as a reverted `eth_call` answers.
+    Error(Value),
+}
+
+/// Post each JSON-RPC `body` to its URL, concurrently; each answer is the RPC's [`Reply`],
+/// or `None` for an RPC that gave neither (unreachable, timed out, a non-200 status, a body
+/// that isn't a JSON-RPC response).
+pub fn replies(requests: &[(String, String)]) -> Vec<Option<Reply>> {
     imp::call_all(requests)
+        .into_iter()
+        .map(|answer| {
+            let answer = answer?;
+            match (answer.get("result"), answer.get("error")) {
+                (Some(result), _) if !result.is_null() => Some(Reply::Result(result.clone())),
+                (_, Some(error)) if error.is_object() => Some(Reply::Error(error.clone())),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 #[cfg(target_os = "wasi")]
@@ -32,7 +65,8 @@ mod imp {
     const CONNECT_TIMEOUT_NS: u64 = 5 * SECOND_NS;
     const FIRST_BYTE_TIMEOUT_NS: u64 = 10 * SECOND_NS;
     const BETWEEN_BYTES_TIMEOUT_NS: u64 = 5 * SECOND_NS;
-    /// A header-only `eth_getBlockByNumber` answer is a few kilobytes; refuse floods.
+    /// A header-only `eth_getBlockByNumber` answer is a few kilobytes, and the posting
+    /// check's reads less; refuse floods.
     const MAX_BODY: usize = 1 << 20;
 
     pub fn call_all(requests: &[(String, String)]) -> Vec<Option<Value>> {
@@ -108,11 +142,7 @@ mod imp {
                 }
             }
         }
-        let answer: Value = serde_json::from_slice(&body).ok()?;
-        match answer.get("result") {
-            Some(result) if !result.is_null() => Some(result.clone()),
-            _ => None,
-        }
+        serde_json::from_slice(&body).ok()
     }
 }
 
