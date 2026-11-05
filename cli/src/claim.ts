@@ -42,13 +42,13 @@
 // and `retry_claim` (R14.1), the steps that need another method (`sign_pauses`,
 // `verify_pause`, `retry_payout`) are skipped, and `next_steps` names the command the
 // Whitehat runs with their own key for each.
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { actions } from "near-api-js";
-import { parseBlockRef, parseExploit, parseAccountProof, parseReplay, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
+import { parseBlockRef, parseExploit, parseAccountProof, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
 import { parseBountyId } from "./bounties.ts";
 import { parseRpcFlags } from "./broadcast.ts";
 import { claimCost, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
+import { proofsMatchingClaim, type ProofsSource } from "./claim-proofs.ts";
 import { KEYSTORE_API, NEAR_RPC, type Network } from "./endpoints.ts";
 import { formatNear, Near, parseNetwork } from "./near.ts";
 import { seal } from "./seal.ts";
@@ -93,26 +93,14 @@ function positional(args: string[]): string | undefined {
 const sameId = (a: BountyId, b: BountyId) => a.protocol === b.protocol && a.name === b.name;
 
 /**
- * The proofs a claim was filed with, as the exact text `submit_claim` carried: from `--job` or
- * `--evidence` if given, else read back from the claim's own transaction on NEAR (saved by
- * `claim` under `.bountee/claims/`, or `--tx`). The contract keeps only their sha256.
+ * Where the proofs a claim was filed with are read from: `--job` or `--evidence` if given,
+ * else the claim's own transactions on NEAR (saved by `claim` under `.bountee/claims/`, or
+ * `--tx`). The contract keeps only their sha256.
  */
-async function filedProofs(args: string[], near: Near, contract: string, claimId: number, whitehat: string): Promise<string> {
-  if (flag(args, "job")) return JSON.stringify(parseReplay(JSON.parse(readFileSync(flag(args, "job")!, "utf8")).replay).proofs);
-  if (flag(args, "evidence")) {
-    const evidence = JSON.parse(readFileSync(flag(args, "evidence")!, "utf8"));
-    return JSON.stringify((evidence.proofs as unknown[]).map(parseAccountProof));
-  }
-  const txs = flag(args, "tx")?.split(",") ?? loadClaimTxs(contract, claimId);
-  for (const hash of txs) {
-    const tx = await near.txStatus(hash, whitehat, 30).catch(() => null);
-    for (const a of tx?.transaction?.actions ?? []) {
-      const call = a.FunctionCall;
-      if (call?.method_name !== "submit_claim") continue;
-      return String(JSON.parse(Buffer.from(call.args, "base64").toString("utf8")).proofs);
-    }
-  }
-  throw new Error(`no saved transaction filed claim ${claimId}: pass --tx <its submit_claim transaction>, or --job / --evidence with the proofs it was filed with`);
+function filedProofsSource(args: string[], contract: string, claimId: number, whitehat: string): ProofsSource {
+  const file = flag(args, "job") ?? flag(args, "evidence");
+  if (file) return { file };
+  return { txs: flag(args, "tx")?.split(",") ?? loadClaimTxs(contract, claimId), signer: whitehat };
 }
 
 export interface ClaimResult {
@@ -241,11 +229,7 @@ async function retryClaim(args: string[], c: Context & { given?: BountyId }, onS
   if (c.given && !sameId(c.given, filed.bounty)) throw new Error(`claim ${claimId} is on ${filed.bounty.protocol}/${filed.bounty.name}, not ${c.given.protocol}/${c.given.name}`);
   if (filed.state !== "no_verdict") throw new Error(`claim ${claimId} is ${filed.state}: only a claim left with no verdict can be retried`);
 
-  const proofs = await filedProofs(args, c.near, c.contract, claimId, c.whitehat);
-  const digest = `0x${createHash("sha256").update(proofs).digest("hex")}`;
-  if (digest !== filed.proofs_sha256.toLowerCase()) {
-    throw new Error(`these proofs hash to ${digest}, but claim ${claimId} was filed with ${filed.proofs_sha256}: give the proofs it was filed with`);
-  }
+  const proofs = await proofsMatchingClaim(c.near, c.contract, { ...filed, id: claimId }, filedProofsSource(args, c.contract, claimId, c.whitehat));
   const out: ClaimResult = { bounty_contract: c.contract, retried: true, claim_id: claimId, block: filed.block };
   const fees = await c.near.view(c.contract, "fees");
   // The new job's input is the claim's own; no secret is stored again.

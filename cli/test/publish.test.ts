@@ -208,7 +208,7 @@ test("D7.1: a verdict that differs from the enclave's, or a claim whose proofs c
   const tampered = await bountee(["rerun", `${PROTOCOL}/vault-tampered`]);
   expect(tampered.code).toBe(1);
   expect(tampered.stdout).toBe("");
-  expect(JSON.parse(tampered.stderr).error).toMatch(/couldn't find claim 4's proofs in a submit_claim transaction at NEAR blocks 1990-2000/);
+  expect(JSON.parse(tampered.stderr).error).toMatch(/couldn't find claim 4's proofs \(sha256 0x[0-9a-f]{64}\) in a submit_claim call at NEAR blocks 1990-2000/);
 }, 300_000);
 
 test("D7: before publication there is nothing to re-run, and publish is refused before the delay", async () => {
@@ -234,5 +234,5 @@ test("D7.1: publish takes only the proofs the winning claim was filed with, chec
   writeFileSync(wrong, JSON.stringify(state.proofs.slice(1)));
   const r = await bountee(["publish", `${PROTOCOL}/vault-ready`, "--as", "anyone.testnet", "--proofs", wrong]);
   expect(r.code).toBe(1);
-  expect(JSON.parse(r.stderr).error).toMatch(/aren't the proofs the winning claim was filed with/);
+  expect(JSON.parse(r.stderr).error).toMatch(/these proofs hash to 0x[0-9a-f]{64}, but claim 3 was filed with 0x[0-9a-f]{64}: give the proofs it was filed with/);
 }, 120_000);
