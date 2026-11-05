@@ -12,8 +12,8 @@
 //! How a test drives it:
 //! - `script(answer)` queues an answer; each `request_execution` takes the next one.
 //!   `{"output": <json>}` returns that JSON (`null` for a refused job), `{"fail": true}`
-//!   makes `request_execution` itself fail. With no answer queued the job stays pending
-//!   (a yield) until a test calls `resolve(request_id, output)`.
+//!   hands the caller a failed promise (its deposit sent back). With no answer queued the
+//!   job stays pending (a yield) until a test calls `resolve(request_id, output)`.
 //! - `requests()` and `secret(owner, profile)` read back exactly what the caller sent.
 
 use near_sdk::json_types::U128;
@@ -132,7 +132,20 @@ impl TestOutlayer {
             fail: Some(true), ..
         }) = answer
         {
-            env::panic_str("test stand-in: request_execution failed as scripted");
+            // Fail the caller's promise without reverting this call, so the scripted answer
+            // is used up; the deposit goes back as a refused call's would.
+            Promise::new(env::predecessor_account_id())
+                .transfer(env::attached_deposit())
+                .detach();
+            let _ = Promise::new(env::current_account_id())
+                .function_call(
+                    "fail_as_scripted".to_owned(),
+                    Vec::new(),
+                    near_sdk::NearToken::from_yoctonear(0),
+                    Gas::from_tgas(3),
+                )
+                .as_return();
+            return;
         }
         let id = self.requests.len() as u64;
         self.requests.push(Request {
@@ -161,6 +174,12 @@ impl TestOutlayer {
                 let _ = promise.as_return();
             }
         }
+    }
+
+    /// The failed promise a `{"fail": true}` answer hands its caller.
+    #[private]
+    pub fn fail_as_scripted(&self) {
+        env::panic_str("test stand-in: request_execution failed as scripted");
     }
 
     /// Answer a pending job: `output` is the job's JSON, or `None` for a refused job.
