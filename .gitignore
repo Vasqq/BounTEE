@@ -43,3 +43,11 @@ node_modules/
 /cli/test/fixtures/*/broadcast/
 # bountee test saves its judged inputs here by default
 .bountee/
+
+# Impeccable design skill: its local runtime state (the engine itself caches in ~/.impeccable)
+.impeccable/config.local.json
+.impeccable/history/
+.impeccable/live/
+.impeccable/provider-smoke/
+**/.impeccable/hook.cache.json
+**/.impeccable/hook.pending.json
