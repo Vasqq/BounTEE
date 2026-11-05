@@ -2,7 +2,8 @@
 // BounTEE's command-line tool. Commands so far: `--version`, `help`, `init` (#16), `test`
 // (ticket #11), `broadcast` (ticket #13), `claim` (sealing and filing, #15; script path,
 // verdict, payout and pauses, #16; live progress and receipt, #26), `list`, `show` and
-// `status` (#26), `open-exploit` (#22). The rest (verify, balance, key, withdraw, post) land in the
+// `status` (#26), `post` (#17), `open-exploit` (#22). The rest (verify, balance, key,
+// withdraw) land in the
 // CLI tickets. Every command takes `--json` for machine-readable output (R14.5): the result
 // as one JSON document on stdout, an error as `{"error": …}` on stderr, and a claim's live
 // stages as one JSON line each on stderr.
@@ -14,7 +15,8 @@ import { initCommand } from "./init.ts";
 import { Near, NEAR_RPC, parseNetwork } from "./near.ts";
 import { exploitPublicKey, formatOpenExploit, openExploit } from "./open-exploit.ts";
 import { claimStatus, formatStage, formatStatus, loadClaimTxs, watchClaim } from "./status.ts";
-import { formatTestResult, testCommand } from "./test.ts";
+import { formatPostResult, post } from "./post.ts";
+import { formatReplayResult, formatTestResult, replayJob, testCommand } from "./test.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const args = process.argv.slice(2);
@@ -22,6 +24,7 @@ const json = args.includes("--json");
 const watch = args.includes("--watch");
 const publicKey = args.includes("--public-key");
 const rest = args.filter((a) => a !== "--json" && a !== "--watch" && a !== "--public-key");
+const noPreflight = rest.includes("--no-preflight");
 
 const NEAR_FLAGS = "[--contract <account>] [--network testnet|mainnet] [--near-rpc <url>]";
 /** Every command and its usage; `bountee help` prints them. */
@@ -31,10 +34,11 @@ const USAGES: Record<string, string> = {
   init: "bountee init [--network testnet|mainnet] [--account <name>.testnet] [--json]",
   list: `bountee list ${NEAR_FLAGS} [--json]`,
   show: `bountee show <protocol>/<name> ${NEAR_FLAGS} [--json]`,
-  test: "bountee test <foundry-script>[:<contract>] --bounty <rules.json | protocol/name> [--sig <fn>] [--out <job.json>] [--rpc <url>] [--block <n>] [--judge <wasm>] [--contract <account>] [--json]",
+  test: "bountee test <foundry-script>[:<contract>] --bounty <rules.json | protocol/name> [--sig <fn>] [--out <job.json>] [--rpc <url>] [--block <n>] [--judge <wasm>] [--contract <account>] [--json]  |  bountee test --job <saved job.json> [--judge <wasm>] [--json]",
   claim:
     "bountee claim [<foundry-script>[:<contract>]] --contract <account> --bounty <protocol>/<name> --as <account> [--sig <fn>] [--job <job.json>] [--exploit <exploit.json> --evidence <evidence.json>] [--network testnet|mainnet] [--rpc <NEAR rpc>] [--proof-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--outlayer-api <url>] [--timeout <secs>] [--interval <secs>] [--no-wait] [--no-broadcast] [--dry-run] [--json]",
   status: `bountee status <claim id> ${NEAR_FLAGS} [--rpc <chain id>=<url>[,...]] [--tx <hash>[,...]] [--outlayer-api <url>] [--watch [--timeout <secs>] [--interval <secs>]] [--json]`,
+  post: "bountee post <protocol>/<name> --rules <rules.json> --contract <account> [--network testnet|mainnet] [--near-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--no-preflight] [--json]",
   "open-exploit": `bountee open-exploit <protocol>/<name> (--wallet <Ethereum key file> | --key-file <saved exploit key>) [--public-key] [--as <account>] [--out <file>] ${NEAR_FLAGS} [--json]`,
   broadcast: "bountee broadcast <protocol>/<name> [--contract <account>] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]",
 };
@@ -96,6 +100,13 @@ try {
     print(result, formatBounty(result));
   } else if (command === "test") {
     const { positional, flags } = parse(rest.slice(1));
+    if (flags.job !== undefined) {
+      // A saved job (e.g. the demo's demo/fixtures/exploit.json), replayed offline (D19).
+      if (positional.length > 0 || flags.bounty !== undefined) fail(`test --job takes no script or --bounty\n${usage(command)}`, 2);
+      const result = replayJob({ job: flags.job, judge: flags.judge });
+      print(result, formatReplayResult(result));
+      process.exit(0);
+    }
     const script = positional[0];
     if (!script || !flags.bounty) fail(`test needs a script and --bounty\n${usage(command)}`, 2);
     const result = await testCommand({
@@ -146,6 +157,21 @@ try {
         })
       : await claimStatus(o);
     print(status, formatStatus(status));
+  } else if (command === "post") {
+    const { positional, flags } = parse(rest.slice(1).filter((a) => a !== "--no-preflight"));
+    const bounty = positional[0];
+    if (!bounty || !flags.rules || !flags.contract) fail(`post needs a bounty id, --rules and --contract\n${usage(command)}`, 2);
+    const result = await post({
+      bounty,
+      rules: flags.rules,
+      contract: flags.contract,
+      network: parseNetwork(flags.network),
+      nearRpc: flags["near-rpc"],
+      chainRpcs: flags["chain-rpc"] === undefined ? undefined : parseRpcFlags(flags["chain-rpc"].split(",")),
+      preflight: !noPreflight,
+    });
+    print(result, formatPostResult(result));
+    if (result.state !== "live") process.exit(1);
   } else if (command === "open-exploit") {
     const { positional, flags } = parse(rest.slice(1));
     if (!positional[0]) fail(`open-exploit needs a bounty id\n${usage(command)}`, 2);

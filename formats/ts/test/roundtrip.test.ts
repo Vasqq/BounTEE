@@ -9,7 +9,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import fc from "fast-check";
 import { beforeAll, expect, test } from "vitest";
-import { isAccountId, isBountyName, pauseRole, parseBountyId, parseClaim, parseExploit, parseJob, parseRules, parseSealedBundle, parseVerdict, REASONS, toJson } from "../src/index.ts";
+import { isAccountId, isBountyName, pauseRole, parseBountyId, parseClaim, parseExploit, parseJob, parsePostingCheckResult, parseRules, parseSealedBundle, parseVerdict, REASONS, toJson } from "../src/index.ts";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
 let echoBin = "";
@@ -113,7 +113,20 @@ const jobArb = fc.oneof(
       submitted_at_ns: uint(64n),
     }),
   }),
+  // #17: the enclave's posting check, as the bounty contract builds it.
+  fc.record({ posting_check: fc.record({ bounty: bountyId, rules: rulesArb }) }),
 );
+
+// #17: the posting check's answer, which the bounty contract reads and the tool shows.
+const postingCheckResultArb = fc.record({
+  failures: fc.array(
+    fc.record({
+      index: fc.integer({ min: 0, max: 2 ** 32 - 1 }),
+      reason: fc.constantFrom("chain_unconfirmed", "cannot_pause", "pause_gas_short"),
+    }),
+    { maxLength: 8 },
+  ),
+});
 
 const claimArb = fc.record({
   bounty: bountyId,
@@ -136,6 +149,7 @@ const formats = [
   ["exploit", exploitArb, parseExploit],
   ["job", jobArb, parseJob],
   ["sealed_bundle", sealedBundleArb, parseSealedBundle],
+  ["posting_check_result", postingCheckResultArb, parsePostingCheckResult],
 ] as const;
 
 test.each(formats.map((f) => [f[0], f]))("R1.2 %s: Rust writes back exactly what TypeScript wrote", (_k, f) => {

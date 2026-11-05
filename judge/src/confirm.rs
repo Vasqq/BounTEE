@@ -10,7 +10,8 @@
 //! - The block's timestamp more than [`RECENCY_LIMIT_SECS`] before the submission time,
 //!   or after it: INVALID, `stale_block`.
 //!
-//! Where the RPC addresses come from (R2.8 inspection, ticket #14): only [`rpcs_for`],
+//! Where the RPC addresses come from (R2.8 inspection, ticket #14; R12.5, #17, for the
+//! posting check in `posting.rs`, which uses the same function): only [`rpcs_for`],
 //! which reads the constant [`PINNED`] table compiled into the build. Nothing in the job
 //! input reaches it: [`confirm`] takes the chain ID and block, never a URL, and the job
 //! format (`bountee_formats::JudgeClaim`, `deny_unknown_fields`) has no field that could
@@ -97,7 +98,7 @@ fn decide(claim: B256, answers: &[B256]) -> Result<Result<(), Reason>, Unconfirm
 /// The RPC addresses for `chain_id`: the pinned table, the only source in the attested
 /// build.
 #[cfg(not(feature = "test-stand-in-rpcs"))]
-fn rpcs_for(chain_id: u64) -> Option<Vec<String>> {
+pub fn rpcs_for(chain_id: u64) -> Option<Vec<String>> {
     PINNED
         .iter()
         .find(|(id, _)| *id == chain_id)
@@ -107,7 +108,7 @@ fn rpcs_for(chain_id: u64) -> Option<Vec<String>> {
 /// TEST BUILD ONLY (seam J): the test stand-ins' addresses from `BOUNTEE_TEST_RPCS`, for
 /// any chain. Never compiled into the build OutLayer runs.
 #[cfg(feature = "test-stand-in-rpcs")]
-fn rpcs_for(_chain_id: u64) -> Option<Vec<String>> {
+pub fn rpcs_for(_chain_id: u64) -> Option<Vec<String>> {
     let _ = PINNED;
     let urls = std::env::var("BOUNTEE_TEST_RPCS").ok()?;
     Some(

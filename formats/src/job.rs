@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::claim::{AccountProof, BlockRef};
+use crate::posting::PostingCheck;
 use crate::primitives::{AccountId, Base64, Bytes, EvmAddress, PublicKey, SafeU64, Uint, U64};
 use crate::rules::{BountyId, Rules};
 
@@ -134,13 +135,14 @@ pub struct ReleaseOutput {
     pub released: Base64,
 }
 
-/// A job for the judge, its whole stdin: `{"replay": {...}}` (local runs),
-/// `{"judge_claim": {...}}` or `{"release": {...}}` (the enclave). The posting check joins
-/// this enum in #17.
+/// A job for the judge, its whole stdin: `{"replay": {...}}` (local runs), or
+/// `{"judge_claim": {...}}`, `{"posting_check": {...}}` and `{"release": {...}}` (the
+/// enclave).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Job {
     Replay(Replay),
     JudgeClaim(JudgeClaim),
+    PostingCheck(PostingCheck),
     Release(Release),
 }

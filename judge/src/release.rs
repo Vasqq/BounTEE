@@ -26,7 +26,7 @@ const VERSION: u8 = 1;
 const INFO: &[u8] = b"bountee-release-v1";
 
 /// The release's stdout, or `None` when nothing may be released.
-pub fn release(job: &Release) -> Option<String> {
+pub fn release(job: &Release) -> Option<ReleaseOutput> {
     let exploit = sealed::exploit(&job.whitehat)?.ok()?;
     let recipient = x25519_key(job.exploit_public_key.as_str())?;
     let released = ReleasedExploit {
@@ -38,9 +38,9 @@ pub fn release(job: &Release) -> Option<String> {
     let compressed = miniz_oxide::deflate::compress_to_vec(to_json(&released).as_bytes(), 9);
     let sealed = encrypt(&recipient, &compressed)?;
     let text = base64::engine::general_purpose::STANDARD.encode(sealed);
-    Some(to_json(&ReleaseOutput {
+    Some(ReleaseOutput {
         released: Base64::parse(&text).ok()?,
-    }))
+    })
 }
 
 /// The 32 bytes of an `x25519:<base58>` key.

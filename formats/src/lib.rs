@@ -5,7 +5,8 @@
 //!   header and state proofs, and the sealed exploit.
 //! - [`Job`]: the judge's stdin; [`Replay`] is a local replay of an [`Exploit`], the
 //!   transactions a Foundry script broadcasts; [`JudgeClaim`] is the enclave's claim job and
-//!   [`Release`] its release job, whose output [`ReleaseOutput`] holds a [`ReleasedExploit`].
+//!   [`Release`] its release job, whose output [`ReleaseOutput`] holds a [`ReleasedExploit`];
+//!   [`PostingCheck`] is its posting check, answered by a [`PostingCheckResult`].
 //! - [`Verdict`]: the judge's answer, PAYS, ZERO or INVALID with one coarse reason (R5.5).
 //! - [`pause_role`]: D25, a bounty's pause-role address under NEAR Chain Signatures.
 //!
@@ -21,6 +22,7 @@
 
 mod claim;
 mod job;
+mod posting;
 mod primitives;
 mod rules;
 mod verdict;
@@ -32,6 +34,10 @@ pub use claim::{AccountProof, BlockRef, Claim, StorageProof};
 pub use job::{
     Exploit, ExploitTransaction, Job, JudgeClaim, Release, ReleaseOutput, ReleasedExploit, Replay,
     SealedBundle,
+};
+pub use posting::{
+    pause_gas_per_pause, PostingCheck, PostingCheckResult, PostingFailure, PostingFailureReason,
+    PAUSE_GAS_LIMIT, PAUSE_L1_DATA_FEE_ALLOWANCE, PAUSE_MAX_FEE_PER_GAS,
 };
 pub use primitives::{
     is_account_id, is_bounty_name, AccountId, Base64, BountyName, Bytes, EvmAddress, FormatError,

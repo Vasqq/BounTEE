@@ -1,0 +1,14 @@
+# The judge's scenario chain (ticket #10): the demo protocol (demo/src) plus small
+# contracts, one per R4.10 scenario, that make-scenarios.ts deploys on anvil to make the
+# committed headers, proofs and exploits.
+[profile.default]
+src = "src"
+script = "script"
+out = "out"
+cache_path = "cache"
+broadcast = "broadcast"
+libs = []
+allow_paths = ["../../../../../demo/src"]
+remappings = ["demo/=../../../../../demo/src/"]
+solc_version = "0.8.28"
+evm_version = "cancun"

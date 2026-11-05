@@ -122,8 +122,10 @@ const token = (v: unknown): Token => (v === "native" ? "native" : evmAddress(v))
 
 export const parseBountyId = object<BountyId>({ protocol: accountId, name: bountyName });
 
+export const parseCoveredContract = object<CoveredContract>({ chain_id: safeU64, address: evmAddress });
+
 export const parseRules: (v: unknown) => Rules = object<Rules>({
-  covered_contracts: array(object<CoveredContract>({ chain_id: safeU64, address: evmAddress })),
+  covered_contracts: array(parseCoveredContract),
   proof_chain: safeU64,
   recency_limit_secs: u32,
   listed_tokens: array(object<ListedToken>({ token, price: uint })),
@@ -194,6 +196,12 @@ export interface JudgeClaim {
   submitted_at_ns: string;
 }
 
+/** The enclave's posting check, as the bounty contract requests it (#17; see posting.rs). */
+export interface PostingCheck {
+  bounty: BountyId;
+  rules: Rules;
+}
+
 /** The enclave's release job (#22, R6.1, R12.4; see job.rs). */
 export interface Release {
   bounty: BountyId;
@@ -203,7 +211,11 @@ export interface Release {
 }
 
 /** The judge's stdin. */
-export type Job = { replay: Replay } | { judge_claim: JudgeClaim } | { release: Release };
+export type Job =
+  | { replay: Replay }
+  | { judge_claim: JudgeClaim }
+  | { posting_check: PostingCheck }
+  | { release: Release };
 
 const evmAddressOrNull = (v: unknown): string | null => (v === null ? null : evmAddress(v));
 
@@ -233,6 +245,11 @@ export const parseJudgeClaim: (v: unknown) => JudgeClaim = object<JudgeClaim>({
   submitted_at_ns: u64,
 });
 
+export const parsePostingCheck: (v: unknown) => PostingCheck = object<PostingCheck>({
+  bounty: parseBountyId,
+  rules: parseRules,
+});
+
 export const parseRelease: (v: unknown) => Release = object<Release>({
   bounty: parseBountyId,
   claim_id: safeU64,
@@ -244,6 +261,9 @@ export const parseRelease: (v: unknown) => Release = object<Release>({
 export const parseJob = (v: unknown): Job => {
   if (typeof v === "object" && v !== null && !Array.isArray(v) && "judge_claim" in v) {
     return object<{ judge_claim: JudgeClaim }>({ judge_claim: parseJudgeClaim })(v);
+  }
+  if (typeof v === "object" && v !== null && !Array.isArray(v) && "posting_check" in v) {
+    return object<{ posting_check: PostingCheck }>({ posting_check: parsePostingCheck })(v);
   }
   if (typeof v === "object" && v !== null && !Array.isArray(v) && "release" in v) {
     return object<{ release: Release }>({ release: parseRelease })(v);
@@ -304,3 +324,33 @@ export const parseVerdict = (v: unknown): Verdict => {
 
 /** Write a parsed format as JSON, the same bytes the Rust crate writes. */
 export const toJson = (value: unknown): string => JSON.stringify(value);
+
+/** Gas limit and fee limit (wei) of every signed pause (see posting.rs). */
+export const PAUSE_GAS_LIMIT = 200_000n;
+export const PAUSE_MAX_FEE_PER_GAS = 1_000_000_000n;
+/** The L1 data fee an OP-stack chain such as Base charges on top of gas × fee: 0.00001 ETH. */
+export const PAUSE_L1_DATA_FEE_ALLOWANCE = 10_000_000_000_000n;
+/** The pause gas a pause-role address must hold per pause on a chain (R7.6): 0.00021 ETH. */
+export const PAUSE_GAS_PER_PAUSE = PAUSE_GAS_LIMIT * PAUSE_MAX_FEE_PER_GAS + PAUSE_L1_DATA_FEE_ALLOWANCE;
+
+/** Why a covered contract fails the posting check (see posting.rs). */
+export const POSTING_FAILURE_REASONS = ["chain_unconfirmed", "cannot_pause", "pause_gas_short"] as const;
+export type PostingFailureReason = (typeof POSTING_FAILURE_REASONS)[number];
+
+export interface PostingFailure {
+  /** The failing contract's place in the rules' `covered_contracts` (from 0). */
+  index: number;
+  reason: PostingFailureReason;
+}
+
+/** The posting check's answer: no failures passes (#17; see posting.rs). */
+export interface PostingCheckResult {
+  failures: PostingFailure[];
+}
+
+const postingFailureReason = (v: unknown): PostingFailureReason =>
+  POSTING_FAILURE_REASONS.find((r) => r === v) ?? fail("posting failure reason", v);
+
+export const parsePostingCheckResult: (v: unknown) => PostingCheckResult = object<PostingCheckResult>({
+  failures: array(object<PostingFailure>({ index: u32, reason: postingFailureReason })),
+});
