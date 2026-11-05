@@ -13,7 +13,7 @@ import { claim, formatClaimResult } from "./claim.ts";
 import { initCommand } from "./init.ts";
 import { Near, NEAR_RPC, parseNetwork } from "./near.ts";
 import { claimStatus, formatStage, formatStatus, loadClaimTxs, watchClaim } from "./status.ts";
-import { formatTestResult, testCommand } from "./test.ts";
+import { formatReplayResult, formatTestResult, replayJob, testCommand } from "./test.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const args = process.argv.slice(2);
@@ -29,7 +29,7 @@ const USAGES: Record<string, string> = {
   init: "bountee init [--network testnet|mainnet] [--account <name>.testnet] [--json]",
   list: `bountee list ${NEAR_FLAGS} [--json]`,
   show: `bountee show <protocol>/<name> ${NEAR_FLAGS} [--json]`,
-  test: "bountee test <foundry-script>[:<contract>] --bounty <rules.json | protocol/name> [--sig <fn>] [--out <job.json>] [--rpc <url>] [--block <n>] [--judge <wasm>] [--contract <account>] [--json]",
+  test: "bountee test <foundry-script>[:<contract>] --bounty <rules.json | protocol/name> [--sig <fn>] [--out <job.json>] [--rpc <url>] [--block <n>] [--judge <wasm>] [--contract <account>] [--json]  |  bountee test --job <saved job.json> [--judge <wasm>] [--json]",
   claim:
     "bountee claim [<foundry-script>[:<contract>]] --contract <account> --bounty <protocol>/<name> --as <account> [--sig <fn>] [--job <job.json>] [--exploit <exploit.json> --evidence <evidence.json>] [--network testnet|mainnet] [--rpc <NEAR rpc>] [--proof-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--outlayer-api <url>] [--timeout <secs>] [--interval <secs>] [--no-wait] [--no-broadcast] [--dry-run] [--json]",
   status: `bountee status <claim id> ${NEAR_FLAGS} [--rpc <chain id>=<url>[,...]] [--tx <hash>[,...]] [--outlayer-api <url>] [--watch [--timeout <secs>] [--interval <secs>]] [--json]`,
@@ -93,6 +93,13 @@ try {
     print(result, formatBounty(result));
   } else if (command === "test") {
     const { positional, flags } = parse(rest.slice(1));
+    if (flags.job !== undefined) {
+      // A saved job (e.g. the demo's demo/fixtures/exploit.json), replayed offline (D19).
+      if (positional.length > 0 || flags.bounty !== undefined) fail(`test --job takes no script or --bounty\n${usage(command)}`, 2);
+      const result = replayJob({ job: flags.job, judge: flags.judge });
+      print(result, formatReplayResult(result));
+      process.exit(0);
+    }
     const script = positional[0];
     if (!script || !flags.bounty) fail(`test needs a script and --bounty\n${usage(command)}`, 2);
     const result = await testCommand({
