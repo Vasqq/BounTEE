@@ -3,18 +3,22 @@
 //
 // Seams (written before the first test; also in the ticket's findings): T here drives the
 // tool against local stand-ins for NEAR's RPC (the bounty contract's views, the account's code
-// hash, OutLayer's register contract), FastNEAR's explorer API (the contract's transactions),
-// an EVM RPC (pause receipts) and OutLayer's attestation API. Deployment "day3b" is the Day-3
-// run's real record: claim 7's views, transaction logs and OutLayer attestation (an Intel-signed
-// TDX quote), as read from testnet on Nov 5. Deployment "bounty.bountee.testnet" is the judge's
+// hash, OutLayer's register contract, transactions and blocks), FastNEAR's explorer API (the
+// contract's transactions: an indexer, which may lie), an EVM RPC (pause receipts) and
+// OutLayer's attestation API. Deployment "day3b" is the Day-3 run's real record: claim 7's
+// views, its transaction as the explorer lists it and as NEAR's archival RPC gives it
+// (`EXPERIMENTAL_tx_status`, with the block its job was requested in), and OutLayer's
+// attestation (an Intel-signed TDX quote), as read from testnet on Nov 5. Deployment "bounty.bountee.testnet" is the judge's
 // committed fixture, with a publication the compiled judge's `publish` action wrote. The
 // rebuilt artefacts are passed in (`--judge-wasm`, `--contract-wasm`), so no Docker build runs
 // here; the live test (verify-testnet.test.ts) runs the real rebuild. Catches: R15.1 per layer,
 // each passing and failing (attestation: quote chain, report data, measurements, pinned build,
 // secret, output; rebuilt judge hash; payout; each pause landed and verified; the re-run, and
 // "not yet published" before publication; a re-run under another build than the pinned one
-// fails), with no keys on disk and no transaction sent; R15.2's comparison of the code hash;
-// R14.5. Misses: real chains, OutLayer and the Docker rebuild (live test).
+// fails; a lying explorer can make neither the payout nor the attestation pass, since what it
+// lists is read again from NEAR RPC), with no keys on disk and no transaction sent; R15.2's
+// comparison of the code hash; R14.5. Misses: real chains, OutLayer and the Docker rebuild
+// (live test).
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -38,6 +42,7 @@ const day3 = fixture("claim7-views.json");
 const DAY3 = day3.contract as string;
 const DAY3_BOUNTY = day3.bounty.id;
 const tx7 = fixture("claim7-tx.json");
+const rpc7 = fixture("claim7-rpc.json");
 const attestation7 = fixture("claim7-attestation.json");
 const PAUSE = day3.bounty.signed_pauses[0];
 const MEASUREMENTS = {
@@ -98,6 +103,9 @@ const codeHashes: Record<string, string> = {};
 /** account → transaction hashes in its history, newest first. */
 const histories: Record<string, string[]> = {};
 const transactions: Record<string, unknown> = {};
+/** What NEAR RPC holds: transactions by hash (`EXPERIMENTAL_tx_status`) and blocks by hash. */
+const nearTxs: Record<string, any> = {};
+const blocks: Record<string, { height: number }> = {};
 const receipts: Record<string, unknown> = {};
 const attestations: Record<string, unknown> = {};
 let measurementsApproved = true;
@@ -125,6 +133,18 @@ const server = createServer((req, res) => {
     if (url === "/evm") return reply({ jsonrpc: "2.0", id: msg.id, result: receipts[msg.params[0]] ?? null });
     // NEAR RPC
     const p = msg.params;
+    if (msg.method === "EXPERIMENTAL_tx_status") {
+      const t = nearTxs[p.tx_hash];
+      if (!t || t.transaction.signer_id !== p.sender_account_id) {
+        return reply({ jsonrpc: "2.0", id: msg.id, error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } } });
+      }
+      return reply({ jsonrpc: "2.0", id: msg.id, result: t });
+    }
+    if (msg.method === "block") {
+      const b = blocks[p.block_id];
+      if (!b) return reply({ jsonrpc: "2.0", id: msg.id, error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" } } });
+      return reply({ jsonrpc: "2.0", id: msg.id, result: { header: { hash: p.block_id, height: b.height } } });
+    }
     if (msg.method !== "query") {
       sent.push(msg.method);
       return reply({ jsonrpc: "2.0", id: msg.id, error: { name: "REFUSED", cause: { name: "the stand-in sends nothing" } } });
@@ -170,6 +190,8 @@ beforeAll(async () => {
   codeHashes[DAY3] = codeHash(readFileSync(fakeContract));
   histories[DAY3] = ["SomeOtherTx111111111111111111111111111111111", tx7.transaction.hash];
   transactions[tx7.transaction.hash] = tx7;
+  nearTxs[tx7.transaction.hash] = rpc7.tx_status;
+  Object.assign(blocks, rpc7.blocks);
   transactions["SomeOtherTx111111111111111111111111111111111"] = { transaction: { hash: "SomeOtherTx111111111111111111111111111111111" }, receipts: [] };
   attestations[tx7.transaction.hash] = attestation7;
   receipts[PAUSE.tx_hash] = { status: "0x1", blockNumber: "0x341c4b9", to: PAUSE.contract };
@@ -321,3 +343,41 @@ test("R15.1: before anyone wins, the attestation and payout are 'not yet' and th
   });
   expect(check(r.result, "rerun").detail).toMatch(/not yet published/);
 }, 120_000);
+
+test("R15.1: a lying explorer can't make the payout or the attestation pass: NEAR RPC is read again", async () => {
+  const bounty = `${DAY3_BOUNTY.protocol}/${DAY3_BOUNTY.name}`;
+  const hash = tx7.transaction.hash;
+  const truth = rpc7.tx_status;
+  const logged = (t: any, event: string) => t.receipts_outcome.find((o: any) => o.outcome.logs.some((l: string) => l.includes(`"event":"${event}"`)));
+
+  // It lists the real transaction, with the USDC transfer succeeding where NEAR says it failed.
+  const failed = structuredClone(truth);
+  logged(failed, "ft_transfer").outcome.status = { Failure: { ActionError: { index: 0, kind: { FunctionCallError: { ExecutionError: "refused" } } } } };
+  nearTxs[hash] = failed;
+  const unpaid = (await verify(bounty, DAY3)).result;
+  nearTxs[hash] = truth;
+  expect(check(unpaid, "payout")).toMatchObject({ status: "fail", detail: expect.stringMatching(/no .* transfer of 100000000 .* succeeded/) });
+
+  // It lists the real transaction, with the job requested by the bounty contract where NEAR
+  // says another account requested it.
+  const other = structuredClone(truth);
+  const request = logged(other, "execution_requested");
+  request.outcome.logs = request.outcome.logs.map((l: string) => l.replaceAll(`\\"predecessor_id\\":\\"${DAY3}\\"`, `\\"predecessor_id\\":\\"evil.testnet\\"`));
+  other.receipts.find((x: any) => x.receipt_id === request.id).predecessor_id = "evil.testnet";
+  nearTxs[hash] = other;
+  const misattributed = (await verify(bounty, DAY3)).result;
+  nearTxs[hash] = truth;
+  expect(check(misattributed, "attestation")).toMatchObject({ status: "fail", detail: expect.stringMatching(/requested by evil\.testnet, not the bounty contract/) });
+
+  // It hides the real transaction and lists a forged one NEAR never saw, holding the verdict,
+  // the job (attested, as OutLayer's API is asked for the forged hash) and the payout.
+  const FORGED = "Forged1111111111111111111111111111111111111";
+  const history = histories[DAY3]!;
+  histories[DAY3] = [FORGED];
+  transactions[FORGED] = { ...tx7, transaction: { ...tx7.transaction, hash: FORGED } };
+  attestations[FORGED] = { ...attestation7, transaction_hash: FORGED };
+  const forged = (await verify(bounty, DAY3)).result;
+  histories[DAY3] = history;
+  expect(statuses(forged)).toMatchObject({ attestation: "fail", payout: "fail" });
+  expect(sent).toEqual([]);
+}, 300_000);
