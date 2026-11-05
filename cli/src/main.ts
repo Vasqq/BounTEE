@@ -1,22 +1,27 @@
 #!/usr/bin/env node
 // BounTEE's command-line tool. Commands so far: `--version`, `init` (#16), `test` (ticket #11),
 // `broadcast` (ticket #13), `claim` (sealing and filing, #15; script path, verdict, payout and
-// pauses, #16). The rest (list, show, status, verify, balance, key, open-exploit, withdraw,
-// post) land in the CLI tickets; each takes `--json` for machine-readable output (R14.5).
+// pauses, #16), `post` (#17). The rest (list, show, status, verify, balance, key,
+// open-exploit, withdraw) land in the CLI tickets; each takes `--json` for machine-readable
+// output (R14.5).
 import { readFileSync } from "node:fs";
 import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadcast.ts";
 import { claim, formatClaimResult } from "./claim.ts";
 import { initCommand } from "./init.ts";
 import { parseNetwork } from "./near.ts";
+import { formatPostResult, post } from "./post.ts";
 import { formatTestResult, testCommand } from "./test.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const args = process.argv.slice(2);
 const json = args.includes("--json");
 const rest = args.filter((a) => a !== "--json");
+const noPreflight = rest.includes("--no-preflight");
 
 const BROADCAST_USAGE =
   "usage: bountee broadcast <protocol>/<name> [--contract <account>] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]";
+const POST_USAGE =
+  "usage: bountee post <protocol>/<name> --rules <rules.json> --contract <account> [--network testnet|mainnet] [--near-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--no-preflight] [--json]";
 const USAGE = "usage: bountee test <foundry-script>[:<contract>] --bounty <rules.json | protocol/name> [--sig <fn>] [--out <job.json>] [--rpc <url>] [--block <n>] [--judge <wasm>] [--contract <account>] [--json]";
 
 /** Positional arguments and `--name value` flags. */
@@ -76,6 +81,21 @@ try {
     });
     console.log(json ? JSON.stringify(result) : formatBroadcastResult(result));
     if (result.pauses.some((p) => p.sent === "failed")) process.exit(1);
+  } else if (rest[0] === "post") {
+    const { positional, flags } = parse(rest.slice(1).filter((a) => a !== "--no-preflight"));
+    const bounty = positional[0];
+    if (!bounty || !flags.rules || !flags.contract) fail(`post needs a bounty id, --rules and --contract\n${POST_USAGE}`, 2);
+    const result = await post({
+      bounty,
+      rules: flags.rules,
+      contract: flags.contract,
+      network: parseNetwork(flags.network),
+      nearRpc: flags["near-rpc"],
+      chainRpcs: flags["chain-rpc"] === undefined ? undefined : parseRpcFlags(flags["chain-rpc"].split(",")),
+      preflight: !noPreflight,
+    });
+    console.log(json ? JSON.stringify(result) : formatPostResult(result));
+    if (result.state !== "live") process.exit(1);
   } else if (rest[0] === "claim") {
     const r = await claim(rest.slice(1));
     console.log(json ? JSON.stringify(r) : formatClaimResult(r));
