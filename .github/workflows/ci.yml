@@ -19,21 +19,23 @@ jobs:
       # rustup installs each toolchain on first use from rust-toolchain.toml
       # (repo root: formats + judge; contract/: the bounty contract).
       - name: Rust caches
-        if: contains(fromJSON('["formats","j","c"]'), matrix.suite)
+        if: contains(fromJSON('["formats","j","c","t"]'), matrix.suite)
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             . -> target
             contract -> target
 
+      # Seam T runs the compiled judge under wasmtime too (`bountee test`, `rerun`).
       - name: wasmtime
-        if: matrix.suite == 'j'
+        if: contains(fromJSON('["j","t"]'), matrix.suite)
         uses: bytecodealliance/actions/wasmtime/setup@v1
         with:
           version: "v50.0.1"
 
+      # Seam T drives forge, anvil and cast as a Whitehat's machine does.
       - name: Foundry
-        if: matrix.suite == 'e'
+        if: contains(fromJSON('["e","t"]'), matrix.suite)
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.0.0
@@ -48,6 +50,15 @@ jobs:
       - name: Playwright browser
         if: matrix.suite == 'w'
         run: pnpm --filter @bountee/web exec playwright install --with-deps chromium
+
+      # The offline tests (D19) deny themselves the network with `unshare --user --net`, which
+      # Ubuntu 24.04's AppArmor refuses to unprivileged users. Allow it here; where no sandbox
+      # works, cli/test/offline.ts fails the tests rather than run them with the network on.
+      - name: Network sandbox for the offline tests
+        if: matrix.suite == 't'
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          unshare --user --map-root-user --net true
 
       - name: Test ${{ matrix.suite }}
         run: bash scripts/test-all.sh ${{ matrix.suite }}

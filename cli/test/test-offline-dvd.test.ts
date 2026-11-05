@@ -13,22 +13,11 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
+import { bounteeOffline } from "./offline.ts";
 
-const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
 const job = (name: string) => `${repo}demo/fixtures/dvd/${name}.json`;
-
-function bounteeOffline(args: string[]) {
-  const cmd = [entry, ...args];
-  const [bin, argv] =
-    process.platform === "darwin"
-      ? ["sandbox-exec", ["-p", "(version 1)(allow default)(deny network*)", process.execPath, ...cmd]]
-      : ["unshare", ["--user", "--map-root-user", "--net", process.execPath, ...cmd]];
-  const res = spawnSync(bin, argv, { encoding: "utf8", timeout: 300_000 });
-  if (res.error) throw new Error(`can't deny networking here: ${res.error.message}`);
-  return { code: res.status, stdout: res.stdout, stderr: res.stderr };
-}
 
 beforeAll(() => {
   const res = spawnSync("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], {
@@ -46,7 +35,7 @@ const levels = [
 ] as const;
 
 for (const [level, , exploitTxs, cheatTxs] of levels) {
-  test(`#27 D19 R2.9: bountee test on the DVD ${level} bounty's exploit returns PAYS offline`, () => {
+  test(`D19 R2.9: bountee test on the DVD ${level} bounty's exploit returns PAYS offline`, () => {
     const res = bounteeOffline(["test", "--job", job(`${level}-exploit`), "--json"]);
     expect(res.code, res.stderr).toBe(0);
     const out = JSON.parse(res.stdout);
@@ -54,7 +43,7 @@ for (const [level, , exploitTxs, cheatTxs] of levels) {
     expect(out.transactions).toBe(exploitTxs);
   });
 
-  test(`#27 D19 R4.2: bountee test on the DVD ${level} bounty's cheat returns ZERO offline`, () => {
+  test(`D19 R4.2: bountee test on the DVD ${level} bounty's cheat returns ZERO offline`, () => {
     const res = bounteeOffline(["test", "--job", job(`${level}-cheat`), "--json"]);
     expect(res.code, res.stderr).toBe(0);
     const out = JSON.parse(res.stdout);
@@ -65,7 +54,7 @@ for (const [level, , exploitTxs, cheatTxs] of levels) {
 
 // The jobs judge the adapted levels (the bounties), each at the same fixed block, and the
 // exploit and cheat of one bounty share its rules.
-test("#27: each DVD bounty's jobs cover its adapted level and share one block and rules", () => {
+test("D19 R4.2: each DVD bounty's offline jobs judge its adapted level, its exploit and cheat at one block under one set of rules", () => {
   const made = JSON.parse(readFileSync(`${repo}demo/fixtures/dvd/addresses.json`, "utf8"));
   for (const [level, contract] of levels) {
     const exploit = JSON.parse(readFileSync(job(`${level}-exploit`), "utf8")).replay;
