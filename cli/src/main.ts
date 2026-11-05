@@ -3,12 +3,14 @@
 // (ticket #11), `broadcast` (ticket #13), `claim` (sealing and filing, #15; script path,
 // verdict, payout and pauses, #16; live progress and receipt, #26), `list`, `show` and
 // `status` (#26), `post` (#17), `verify-pause` (#21), `open-exploit` (#22), `publish` and
-// `rerun` (#23), `key` (#25). The rest (verify, balance, withdraw) land in the CLI tickets.
+// `rerun` (#23), `key` (#25), `balance`, `sign-pauses`, `retry-payout` and `claim --retry`
+// (review fixes). The rest (verify, withdraw) land in the CLI tickets.
 // Every command takes `--json` for
 // machine-readable output (R14.5): the result
 // as one JSON document on stdout, an error as `{"error": …}` on stderr, and a claim's live
 // stages as one JSON line each on stderr.
 import { readFileSync } from "node:fs";
+import { balanceCommand, formatBalanceResult } from "./balance.ts";
 import { formatBounty, formatList, listBounties, parseBountyId, showBounty } from "./bounties.ts";
 import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadcast.ts";
 import { claim, formatClaimResult } from "./claim.ts";
@@ -17,6 +19,7 @@ import { formatKeyAdd, formatKeyRevoke, keyAdd, keyRevoke } from "./keys.ts";
 import { Near, NEAR_RPC, parseNetwork } from "./near.ts";
 import { exploitPublicKey, formatOpenExploit, openExploit } from "./open-exploit.ts";
 import { claimStatus, formatStage, formatStatus, loadClaimTxs, watchClaim } from "./status.ts";
+import { formatRetryResult, retryPayout, signPauses } from "./payout.ts";
 import { formatPostResult, post } from "./post.ts";
 import { formatPublishResult, formatRerunResult, publishExploit, rerunPublished } from "./publish.ts";
 import { formatReplayResult, formatTestResult, replayJob, testCommand } from "./test.ts";
@@ -40,7 +43,7 @@ const USAGES: Record<string, string> = {
   show: `bountee show <protocol>/<name> ${NEAR_FLAGS} [--json]`,
   test: "bountee test <foundry-script>[:<contract>] --bounty <rules.json | protocol/name> [--sig <fn>] [--out <job.json>] [--rpc <url>] [--block <n>] [--judge <wasm>] [--contract <account>] [--json]  |  bountee test --job <saved job.json> [--judge <wasm>] [--json]",
   claim:
-    "bountee claim [<foundry-script>[:<contract>]] --contract <account> --bounty <protocol>/<name> --as <account> [--sig <fn>] [--job <job.json>] [--exploit <exploit.json> --evidence <evidence.json>] [--network testnet|mainnet] [--rpc <NEAR rpc>] [--proof-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--outlayer-api <url>] [--timeout <secs>] [--interval <secs>] [--no-wait] [--no-broadcast] [--no-verify] [--verify-wait <secs>] [--dry-run] [--json]",
+    "bountee claim [<foundry-script>[:<contract>]] --contract <account> --bounty <protocol>/<name> --as <account> [--sig <fn>] [--job <job.json>] [--exploit <exploit.json> --evidence <evidence.json>] [--network testnet|mainnet] [--rpc <NEAR rpc>] [--proof-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--outlayer-api <url>] [--timeout <secs>] [--interval <secs>] [--no-wait] [--no-broadcast] [--no-verify] [--verify-wait <secs>] [--dry-run] [--json]  |  bountee claim --retry <claim id> --contract <account> --as <account> [--bounty <protocol>/<name>] [--tx <hash>[,...] | --job <job.json> | --evidence <evidence.json>] [--rpc <NEAR rpc>] [--timeout <secs>] [--no-wait] [--no-broadcast] [--no-verify] [--json]",
   status: `bountee status <claim id> ${NEAR_FLAGS} [--rpc <chain id>=<url>[,...]] [--tx <hash>[,...]] [--outlayer-api <url>] [--watch [--timeout <secs>] [--interval <secs>]] [--json]`,
   post: "bountee post <protocol>/<name> --rules <rules.json> --contract <account> [--network testnet|mainnet] [--near-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--no-preflight] [--json]",
   "open-exploit": `bountee open-exploit <protocol>/<name> (--wallet <Ethereum key file> | --key-file <saved exploit key>) [--public-key] [--as <account>] [--out <file>] ${NEAR_FLAGS} [--json]`,
@@ -49,6 +52,9 @@ const USAGES: Record<string, string> = {
   "verify-pause": `bountee verify-pause <protocol>/<name> --as <account> ${NEAR_FLAGS} [--chain <chain id>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]`,
   publish: `bountee publish <protocol>/<name> --as <account> --proofs <saved job.json | proofs.json> ${NEAR_FLAGS} [--json]`,
   rerun: `bountee rerun <protocol>/<name> [--judge <wasm>] [--out <job.json>] ${NEAR_FLAGS} [--json]`,
+  "sign-pauses": `bountee sign-pauses <protocol>/<name> --as <account> ${NEAR_FLAGS} [--json]`,
+  "retry-payout": `bountee retry-payout <protocol>/<name> --as <account> ${NEAR_FLAGS} [--json]`,
+  balance: `bountee balance [top-up <NEAR> | withdraw [<NEAR>]] --as <account> ${NEAR_FLAGS} [--json]`,
 };
 const usage = (command: string) => `usage: ${USAGES[command]}`;
 
@@ -144,13 +150,13 @@ try {
     if (result.pauses.some((p) => p.sent === "failed")) process.exit(1);
   } else if (command === "verify-pause") {
     const { positional, flags } = parse(rest.slice(1));
-    const m = /^([a-z0-9._-]+)\/([a-z0-9-]+)$/.exec(positional[0] ?? "");
-    if (!m || !flags.as) fail(`verify-pause needs a bounty id and --as\n${usage(command)}`, 2);
+    if (!positional[0] || !flags.as) fail(`verify-pause needs a bounty id and --as\n${usage(command)}`, 2);
+    const bounty = parseBountyId(positional[0]);
     const { near, contract } = nearFor(command, flags);
     const result = await verifyPauses({
       near,
       contract,
-      bounty: { protocol: m[1]!, name: m[2]! },
+      bounty,
       signer: flags.as,
       rpcs: flags.rpc === undefined ? undefined : parseRpcFlags(flags.rpc.split(",")),
       chains: flags.chain === undefined ? undefined : [Number(flags.chain)],
@@ -235,6 +241,25 @@ try {
     const r = await rerunPublished({ near, contract, bounty: parseBountyId(positional[0]), judge: flags.judge, out: flags.out });
     print(r, formatRerunResult(r));
     if (!r.same_verdict) process.exit(1);
+  } else if (command === "sign-pauses" || command === "retry-payout") {
+    const { positional, flags } = parse(rest.slice(1));
+    if (!positional[0] || !flags.as) fail(`${command} needs a bounty id and --as\n${usage(command)}`, 2);
+    const bounty = parseBountyId(positional[0]);
+    const { near, contract } = nearFor(command, flags);
+    const o = { near, contract, bounty, signer: flags.as };
+    const r = command === "sign-pauses" ? await signPauses(o) : await retryPayout(o);
+    print(r, formatRetryResult(command === "sign-pauses" ? "sign_pauses" : "retry_payout", r));
+    if (r.refused) process.exit(1);
+  } else if (command === "balance") {
+    const { positional, flags } = parse(rest.slice(1));
+    const [sub, amount] = positional;
+    const action = sub === undefined ? "show" : sub === "top-up" ? "top_up" : sub === "withdraw" ? "withdraw" : undefined;
+    if (!action || !flags.as || (action === "top_up" && amount === undefined) || (action === "show" && amount !== undefined)) {
+      fail(`balance takes nothing, top-up <NEAR> or withdraw [<NEAR>], and --as\n${usage(command)}`, 2);
+    }
+    const { near, contract } = nearFor(command, flags);
+    const r = await balanceCommand({ near, contract, account: flags.as, action, amount });
+    print(r, formatBalanceResult(r));
   } else if (command === "claim") {
     const r = await claim(rest.slice(1), showStage);
     print(r, formatClaimResult(r));

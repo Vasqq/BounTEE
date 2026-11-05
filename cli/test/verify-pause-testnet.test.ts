@@ -22,7 +22,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { actions } from "near-api-js";
-import { describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import { Near, events, tgas } from "../src/near.ts";
 import { defaultRpc } from "../src/chains.ts";
 
@@ -62,7 +62,8 @@ describe.runIf(RUN)("#21: a pause verified on NEAR by the MPC network", () => {
   const whitehat = process.env.WHITEHAT ?? "";
   let instance: any;
 
-  test("a fresh demo instance and its bounty, on this contract", async () => {
+  // Setup, not a requirement: a fresh demo instance and its bounty, on this contract (D21).
+  beforeAll(async () => {
     expect(whitehat, "set WHITEHAT").not.toBe("");
     if (process.env.INSTANCE) {
       instance = JSON.parse(readFileSync(process.env.INSTANCE, "utf8"));

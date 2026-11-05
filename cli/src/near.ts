@@ -60,6 +60,23 @@ export class Near {
     return r.permission !== "FullAccess";
   }
 
+  /**
+   * Whether the local key for `id` may call `method` on `contract` with nothing attached: a
+   * full-access key may; a function-call key (a claim key, #25) only within its receiver and methods.
+   */
+  async canCall(id: string, contract: string, method: string): Promise<boolean> {
+    const publicKey = KeyPair.fromString(loadKey(this.network, id)).getPublicKey().toString();
+    const r = await this.rpc<{ permission: "FullAccess" | { FunctionCall: { receiver_id: string; method_names: string[] } } }>("query", {
+      request_type: "view_access_key",
+      finality: "final",
+      account_id: id,
+      public_key: publicKey,
+    });
+    if (r.permission === "FullAccess") return true;
+    const p = r.permission.FunctionCall;
+    return p.receiver_id === contract && (p.method_names.length === 0 || p.method_names.includes(method));
+  }
+
   async rpc<T = any>(method: string, params: unknown): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       const res = await fetch(this.url, {
