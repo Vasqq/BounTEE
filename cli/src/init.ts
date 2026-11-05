@@ -9,7 +9,8 @@
 // mode 600, or BOUNTEE_CREDENTIALS_DIR) and is never printed.
 import { randomBytes } from "node:crypto";
 import { KeyPair } from "near-api-js";
-import { Near, formatNear, saveKey, type Network } from "./near.ts";
+import { type Network } from "./endpoints.ts";
+import { Near, formatNear, saveKey } from "./near.ts";
 
 const FAUCET_SERVICE = "https://helper.nearprotocol.com/account";
 

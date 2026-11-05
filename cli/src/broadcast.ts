@@ -6,7 +6,7 @@
 // twice is harmless. Verification on NEAR (R7.3's second half) is `verify-pause.ts`.
 import { parseBountyId } from "./bounties.ts";
 import { defaultRpcs, waitForEvmReceipt, type EvmReceipt } from "./chains.ts";
-import { NEAR_RPC } from "./near.ts";
+import { NEAR_RPC } from "./endpoints.ts";
 import { rpc } from "./proofs.ts";
 
 export interface BroadcastOptions {

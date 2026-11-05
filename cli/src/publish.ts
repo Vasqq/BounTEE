@@ -32,7 +32,7 @@ import {
   type Verdict,
 } from "@bountee/formats";
 import { actions } from "near-api-js";
-import { events, Near, NEAR_RPC, tgas } from "./near.ts";
+import { events, Near, tgas } from "./near.ts";
 import { runJudge } from "./proofs.ts";
 import { judgeWasm } from "./test.ts";
 
@@ -64,8 +64,6 @@ async function publicationOf(near: Near, contract: string, bounty: BountyId): Pr
   return { rules: view.rules, pub: view.state === "paid" ? pub : null };
 }
 
-/** Archival RPCs, for blocks an ordinary RPC no longer keeps (FastNEAR, checked Nov 5). */
-const ARCHIVAL_RPC = { testnet: "https://archival-rpc.testnet.fastnear.com", mainnet: "https://archival-rpc.mainnet.fastnear.com" } as const;
 /** How many blocks before the submission's block its transaction may sit in. */
 const TX_BLOCKS_BEFORE = 10;
 
@@ -98,7 +96,7 @@ export async function claimProofs(near: Near, contract: string, claimId: number)
     throw new Error(`${contract} doesn't record the block claim ${claimId} was submitted in: pass --proofs`);
   }
   const at = Number(claim.submitted_at_block);
-  const rpcs = near.url === NEAR_RPC[near.network] ? [near, new Near(near.network, ARCHIVAL_RPC[near.network])] : [near];
+  const rpcs = near.withArchive();
   const block = async (height: number): Promise<{ rpc: Near; chunks: string[] } | null> => {
     for (const rpc of rpcs) {
       try {

@@ -19,12 +19,6 @@ import { parseSealedBundle, toJson, type Exploit } from "@bountee/formats";
 /** The OutLayer secret the judge reads the sealed exploit from. */
 export const SECRET_NAME = "BOUNTEE_SEALED_EXPLOIT";
 
-/** OutLayer's keystore API (spec: testnet and mainnet hosts). */
-export const KEYSTORE_API = {
-  testnet: "https://testnet-api.outlayer.ai",
-  mainnet: "https://api.outlayer.ai",
-} as const;
-
 /**
  * The secret's value: base64(raw DEFLATE(JSON of the SealedBundle)). Compressed because the
  * secret's storage deposit is 0.00001 NEAR per byte.

@@ -49,8 +49,9 @@ import { parseBlockRef, parseExploit, parseAccountProof, parseReplay, type Bount
 import { parseBountyId } from "./bounties.ts";
 import { parseRpcFlags } from "./broadcast.ts";
 import { claimCost, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
-import { formatNear, Near, NEAR_RPC, parseNetwork, type Network } from "./near.ts";
-import { KEYSTORE_API, seal } from "./seal.ts";
+import { KEYSTORE_API, NEAR_RPC, type Network } from "./endpoints.ts";
+import { formatNear, Near, parseNetwork } from "./near.ts";
+import { seal } from "./seal.ts";
 import {
   claimStatus,
   formatReceipt,

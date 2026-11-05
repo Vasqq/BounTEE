@@ -22,7 +22,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { parseReplay, parseRules, toJson, type Exploit, type Rules, type Verdict } from "@bountee/formats";
 import { parseBountyId } from "./bounties.ts";
 import { proofRpcs } from "./chains.ts";
-import { NEAR_RPC } from "./near.ts";
+import { NEAR_RPC } from "./endpoints.ts";
 import { collectReplay, exploitFromBroadcast, rpc, runJudge } from "./proofs.ts";
 
 /** How far behind the head the claim's block is: a few seconds, since a public RPC can fail on the very latest. */

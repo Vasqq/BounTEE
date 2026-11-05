@@ -26,10 +26,11 @@ import type { BountyId, Verdict } from "@bountee/formats";
 import { checkQuote, OUTLAYER_REGISTER, type AttestationRecord } from "./attestation.ts";
 import { codeHash, reproducibleBuild, resolveRev, revFromSourceMetadata, sha256File } from "./build.ts";
 import { defaultRpc, evmReceipt, explorerTx } from "./chains.ts";
-import { type Near, type Network } from "./near.ts";
+import { KEYSTORE_API, NEAR_EXPLORER_TX, TX_API, type Network } from "./endpoints.ts";
+import { type Near } from "./near.ts";
+import { postJson } from "./proofs.ts";
 import { rerunPublished } from "./publish.ts";
-import { KEYSTORE_API } from "./seal.ts";
-import { loadClaimTxs, type ClaimView } from "./status.ts";
+import { loadClaimTxs, type BountyView, type ClaimView } from "./status.ts";
 
 export type CheckStatus = "pass" | "fail" | "not_yet" | "not_yet_published";
 
@@ -69,8 +70,6 @@ export interface VerifyOptions {
   txApi?: string;
 }
 
-export const TX_API = { testnet: "https://tx.test.fastnear.com", mainnet: "https://tx.main.fastnear.com" } as const;
-
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const bare = (hash: string | null | undefined) => (hash ?? "").toLowerCase().replace(/^0x/, "");
 
@@ -80,8 +79,22 @@ interface Tx {
   receipts: { id: string; executor_id: string; logs: string[]; ok: boolean }[];
 }
 
-function eventsOf(tx: Tx): { event: string; data: any; executor_id: string; ok: boolean }[] {
-  const out: { event: string; data: any; executor_id: string; ok: boolean }[] = [];
+/** A NEP-297 event's data: the fields each check reads are checked where they are read. */
+type EventData = Record<string, unknown>;
+
+/** The bounty contract's `config` view, the part `verify` reads. */
+interface ConfigView {
+  usdc: string;
+}
+
+/** The bounty contract's `published_exploit` view, the part `verify` reads. */
+interface PublicationView {
+  state: string;
+  publishable_from_ns?: string;
+}
+
+function eventsOf(tx: Tx): { event: string; data: EventData; executor_id: string; ok: boolean }[] {
+  const out: { event: string; data: EventData; executor_id: string; ok: boolean }[] = [];
   for (const r of tx.receipts) {
     for (const log of r.logs) {
       if (!log.startsWith("EVENT_JSON:")) continue;
@@ -96,17 +109,7 @@ function eventsOf(tx: Tx): { event: string; data: any; executor_id: string; ok: 
   return out;
 }
 
-async function post<T>(url: string, body: unknown): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    if (res.status === 429 && attempt < 5) {
-      await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
-      continue;
-    }
-    if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
-    return (await res.json()) as T;
-  }
-}
+const post = <T>(url: string, body: unknown) => postJson<T>(url, body, { backoffMs: 1000 });
 
 /** The contract's transactions, newest first, a page at a time, as the explorer API lists them. */
 async function* history(api: string, account: string): AsyncGenerator<string[]> {
@@ -123,19 +126,25 @@ async function* history(api: string, account: string): AsyncGenerator<string[]> 
   }
 }
 
+/** A transaction as FastNEAR's explorer API lists it. */
+interface IndexedTx {
+  transaction?: { hash?: string; signer_id?: string };
+  receipts?: { receipt?: { receipt_id?: string }; execution_outcome?: { id?: string; outcome?: { executor_id?: string; logs?: string[]; status?: object } } }[];
+}
+
 async function fetchTxs(api: string, hashes: string[]): Promise<Tx[]> {
   const out: Tx[] = [];
   for (let i = 0; i < hashes.length; i += 20) {
-    const r = await post<{ transactions: any[] }>(`${api}/v0/transactions`, { tx_hashes: hashes.slice(i, i + 20) });
+    const r = await post<{ transactions?: (IndexedTx | null)[] }>(`${api}/v0/transactions`, { tx_hashes: hashes.slice(i, i + 20) });
     for (const t of r.transactions ?? []) {
       if (!t) continue;
-      const receipts = (t.receipts ?? []).map((x: any) => ({
+      const receipts = (t.receipts ?? []).map((x) => ({
         id: x.execution_outcome?.id ?? x.receipt?.receipt_id ?? "",
         executor_id: x.execution_outcome?.outcome?.executor_id ?? "",
         logs: x.execution_outcome?.outcome?.logs ?? [],
         ok: !("Failure" in (x.execution_outcome?.outcome?.status ?? {})),
       }));
-      out.push({ hash: t.transaction?.hash, receipts });
+      out.push({ hash: t.transaction?.hash ?? "", receipts });
     }
   }
   return out;
@@ -168,7 +177,7 @@ async function findTxs(o: VerifyOptions, claimId: number, wantPayout: boolean): 
   return { judged, paid };
 }
 
-async function attestationCheck(o: VerifyOptions, bounty: any, claim: ClaimView & { id: number }, tx: Tx | null): Promise<Check> {
+async function attestationCheck(o: VerifyOptions, bounty: BountyView, claim: ClaimView & { id: number }, tx: Tx | null): Promise<Check> {
   if (!tx) return { check: "attestation", status: "fail", detail: "no transaction holds the winning claim's verdict" };
   const url = `${o.outlayerApi ?? KEYSTORE_API[o.network]}/attestations/by-tx/${tx.hash}`;
   const res = await fetch(url, { headers: { "User-Agent": "bountee-cli" } }).catch(() => null);
@@ -194,7 +203,7 @@ async function attestationCheck(o: VerifyOptions, bounty: any, claim: ClaimView 
     .filter((e) => e.event === "execution_requested")
     .map((e) => {
       try {
-        return JSON.parse(e.data.request_data);
+        return JSON.parse(String(e.data.request_data)) as { request_id?: number; predecessor_id?: string };
       } catch {
         return null;
       }
@@ -208,21 +217,21 @@ async function attestationCheck(o: VerifyOptions, bounty: any, claim: ClaimView 
     : { check: "attestation", status: "fail", detail: problems.join("; "), ...evidence };
 }
 
-function payoutCheck(o: VerifyOptions, bounty: any, claim: ClaimView, usdc: string, tx: Tx | null, claimId: number): Check {
+function payoutCheck(o: VerifyOptions, bounty: BountyView, claim: ClaimView, usdc: string, tx: Tx | null, claimId: number): Check {
   if (bounty.state !== "paid") return { check: "payout", status: "not_yet", detail: `the bounty is ${bounty.state}, not paid` };
   if (!tx) return { check: "payout", status: "fail", detail: `the bounty is paid, but no transaction shows claim ${claimId}'s payout` };
   const amount = String(bounty.rules.bounty_amount);
   const transfer = eventsOf(tx).find(
     (e) => e.event === "ft_transfer" && e.executor_id === usdc && e.ok && e.data?.new_owner_id === claim.whitehat && String(e.data?.amount) === amount,
   );
-  const link = `${o.network === "mainnet" ? "https://nearblocks.io/txns/" : "https://testnet.nearblocks.io/txns/"}${tx.hash}`;
+  const link = `${NEAR_EXPLORER_TX[o.network]}${tx.hash}`;
   return transfer
     ? { check: "payout", status: "pass", detail: `${amount} of ${usdc} moved to ${claim.whitehat}`, tx_hash: tx.hash, link }
     : { check: "payout", status: "fail", detail: `${tx.hash} records the payout, but no ${usdc} transfer of ${amount} to ${claim.whitehat} succeeded`, tx_hash: tx.hash };
 }
 
-async function pauseChecks(o: VerifyOptions, bounty: any): Promise<Check[]> {
-  const signed: any[] = bounty.signed_pauses ?? [];
+async function pauseChecks(o: VerifyOptions, bounty: BountyView): Promise<Check[]> {
+  const signed = bounty.signed_pauses ?? [];
   const verifications = await o.near.view<{ verified_pauses?: string[] }[]>(o.contract, "pause_verifications", { id: bounty.id }).catch(() => []);
   const checks: Check[] = [];
   for (const p of signed) {
@@ -234,12 +243,12 @@ async function pauseChecks(o: VerifyOptions, bounty: any): Promise<Check[]> {
       const r = await evmReceipt(url, p.tx_hash);
       if (!r) landed = { check: "pause_landed", status: "not_yet", detail: `the pause hasn't landed on chain ${p.chain_id}`, ...where };
       else if (r.status !== "success") landed = { check: "pause_landed", status: "fail", detail: `the pause reverted on chain ${p.chain_id}`, ...where };
-      else if ((r.to ?? "").toLowerCase() !== String(p.contract).toLowerCase()) {
+      else if ((r.to ?? "").toLowerCase() !== p.contract.toLowerCase()) {
         landed = { check: "pause_landed", status: "fail", detail: `the transaction landed, but called ${r.to}, not ${p.contract}`, ...where };
       } else landed = { check: "pause_landed", status: "pass", detail: `paused ${p.contract} on chain ${p.chain_id} in block ${r.block}`, block: r.block, ...where };
     }
     checks.push(landed);
-    const verified = verifications.some((c) => (c.verified_pauses ?? []).some((h) => h.toLowerCase() === String(p.tx_hash).toLowerCase()));
+    const verified = verifications.some((c) => (c.verified_pauses ?? []).some((h) => h.toLowerCase() === p.tx_hash.toLowerCase()));
     checks.push(
       verified
         ? { check: "pause_verified", status: "pass", detail: `NEAR records the pause on chain ${p.chain_id} verified by the MPC network`, ...where }
@@ -249,8 +258,8 @@ async function pauseChecks(o: VerifyOptions, bounty: any): Promise<Check[]> {
   return checks;
 }
 
-async function rerunCheck(o: VerifyOptions, bounty: any, judgeWasm: string): Promise<Check> {
-  let pub: any = null;
+async function rerunCheck(o: VerifyOptions, bounty: BountyView, judgeWasm: string): Promise<Check> {
+  let pub: PublicationView | null = null;
   let note = "";
   const r = await o.near.rpc<{ result?: number[]; error?: string }>("query", {
     request_type: "call_function",
@@ -281,9 +290,9 @@ async function rerunCheck(o: VerifyOptions, bounty: any, judgeWasm: string): Pro
 }
 
 export async function verify(o: VerifyOptions): Promise<VerifyResult> {
-  const bounty = await o.near.view<any>(o.contract, "bounty", { id: o.bounty });
+  const bounty = await o.near.view<BountyView | null>(o.contract, "bounty", { id: o.bounty });
   if (!bounty) throw new Error(`no bounty ${o.bounty.protocol}/${o.bounty.name} on ${o.contract}`);
-  const config = await o.near.view<any>(o.contract, "config");
+  const config = await o.near.view<ConfigView>(o.contract, "config");
   const checks: Check[] = [];
 
   // The rebuilt artefacts: given, or built at the commit the deployment names.
@@ -291,7 +300,7 @@ export async function verify(o: VerifyOptions): Promise<VerifyResult> {
   let judgeWasm = o.judgeWasm;
   let contractWasm = o.contractWasm;
   if (!judgeWasm || !contractWasm) {
-    const meta = await o.near.view<any>(o.contract, "contract_source_metadata").catch(() => null);
+    const meta = await o.near.view<unknown>(o.contract, "contract_source_metadata").catch(() => null);
     rev = resolveRev(o.rev ?? revFromSourceMetadata(meta) ?? "HEAD");
     const only = judgeWasm ? "contract" : contractWasm ? "judge" : undefined;
     const built = reproducibleBuild({ pin: o.contract, rev, only });

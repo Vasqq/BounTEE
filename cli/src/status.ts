@@ -13,10 +13,10 @@
 // the tool knows: the one `claim` sent and saved, or `--tx`.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { BlockRef, BountyId, Verdict } from "@bountee/formats";
+import type { BlockRef, BountyId, Rules, Verdict } from "@bountee/formats";
 import { defaultRpc, evmReceipt, explorerTx } from "./chains.ts";
-import { events, Near, NEAR_EXPLORER_TX, type Network } from "./near.ts";
-import { KEYSTORE_API } from "./seal.ts";
+import { KEYSTORE_API, NEAR_EXPLORER_TX, type Network } from "./endpoints.ts";
+import { events, Near } from "./near.ts";
 
 /**
  * The bounty contract's `claim` view (its `ClaimRecord`, contract/src/lib.rs), typed from the
@@ -31,9 +31,39 @@ export interface ClaimView {
   proofs_sha256: string;
   /** NEAR nanoseconds, decimal. */
   submitted_at_ns: string;
+  /** The NEAR block the submission ran in (decimal); absent on deployments from before #23's review. */
+  submitted_at_block?: string;
+  /** The NEAR block the claim's current step began at (decimal); absent on older deployments. */
+  step_started_at_block?: string;
   secret_profile: string;
   state: "storing" | "store_failed" | "judging" | "no_verdict" | "judged";
   verdict: Verdict | null;
+}
+
+/** A pause the bounty contract signed, as the `bounty` view lists it. */
+export interface SignedPauseView {
+  chain_id: number;
+  /** The covered contract it pauses. */
+  contract: string;
+  nonce: number;
+  /** The signed transaction, ready for `eth_sendRawTransaction`. */
+  tx: string;
+  tx_hash: string;
+}
+
+/** The bounty contract's `bounty` view (its `BountyView`, contract/src/lib.rs). */
+export interface BountyView {
+  id: BountyId;
+  rules: Rules;
+  state: "checking" | "check_failed" | "live" | "signing" | "paying" | "paid" | "withdrawn";
+  winning_claim: number | null;
+  signed_pauses: SignedPauseView[];
+  signing_pauses: boolean;
+  paying_out: boolean;
+  /** NEAR nanoseconds, decimal; null unless the payout waits behind an earlier claim. */
+  payout_waits_until_ns: string | null;
+  /** yoctoNEAR, decimal; absent on older deployments. */
+  posting_fee_left?: string;
 }
 
 export type Stage =

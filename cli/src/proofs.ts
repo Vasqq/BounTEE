@@ -52,22 +52,33 @@ export function exploitFromBroadcast(log: BroadcastLog): Exploit {
 
 // ---- JSON-RPC ----------------------------------------------------------------------------
 
-/** One JSON-RPC call. Public RPCs rate-limit bursts (HTTP 429), so those are retried. */
-export async function rpc<T>(url: string, method: string, params: unknown[] | object): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    });
-    if (res.status === 429 && attempt < 5) {
-      await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
+/**
+ * POST `body` as JSON and read the JSON answer. Public RPCs and APIs rate-limit bursts (HTTP
+ * 429), so those are retried with a doubling wait, `tries` times in all. Another HTTP error
+ * whose body isn't JSON is thrown; one with a JSON body (a JSON-RPC error) is returned.
+ */
+export async function postJson<T>(url: string, body: unknown, o: { tries?: number; backoffMs?: number } = {}): Promise<T> {
+  const tries = o.tries ?? 6;
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (res.status === 429 && attempt < tries) {
+      await new Promise((r) => setTimeout(r, (o.backoffMs ?? 500) * 2 ** (attempt - 1)));
       continue;
     }
-    const body = (await res.json()) as { result?: T; error?: { message: string } };
-    if (body.error || body.result === undefined) throw new Error(`${method}: ${body.error?.message ?? "no result"}`);
-    return body.result;
+    const text = await res.text();
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error(`${url}: HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
+    }
   }
+}
+
+/** One JSON-RPC call, retried while the RPC rate-limits it. */
+export async function rpc<T>(url: string, method: string, params: unknown[] | object): Promise<T> {
+  const body = await postJson<{ result?: T; error?: { message: string } }>(url, { jsonrpc: "2.0", id: 1, method, params });
+  if (body.error || body.result === undefined) throw new Error(`${method}: ${body.error?.message ?? "no result"}`);
+  return body.result;
 }
 
 const hexOf = (bytes: Uint8Array) => `0x${Buffer.from(bytes).toString("hex")}`;

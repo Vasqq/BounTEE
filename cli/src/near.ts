@@ -5,12 +5,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Account, JsonRpcProvider, KeyPair, type KeyPairString } from "near-api-js";
-
-/** FastNEAR: rpc.testnet.near.org now answers 429 "deprecated" (Nov 4). */
-export const NEAR_RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" } as const;
-export type Network = keyof typeof NEAR_RPC;
-/** A NEAR transaction's page on the explorer, for receipts' links. */
-export const NEAR_EXPLORER_TX = { testnet: "https://testnet.nearblocks.io/txns/", mainnet: "https://nearblocks.io/txns/" } as const;
+import { ARCHIVAL_RPC, NEAR_RPC, type Network } from "./endpoints.ts";
+import { postJson } from "./proofs.ts";
 
 export function parseNetwork(value: string | undefined): Network {
   const n = value ?? "testnet";
@@ -77,21 +73,18 @@ export class Near {
     return p.receiver_id === contract && (p.method_names.length === 0 || p.method_names.includes(method));
   }
 
+  /**
+   * This RPC, then the network's archival RPC when this is the network's default one (an
+   * RPC given with `--near-rpc` must keep what is asked of it).
+   */
+  withArchive(): Near[] {
+    return this.url === NEAR_RPC[this.network] ? [this, new Near(this.network, ARCHIVAL_RPC[this.network])] : [this];
+  }
+
   async rpc<T = any>(method: string, params: unknown): Promise<T> {
-    for (let attempt = 0; ; attempt++) {
-      const res = await fetch(this.url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      });
-      if (res.status === 429 && attempt < 6) {
-        await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
-        continue;
-      }
-      const body = (await res.json()) as { result?: T; error?: unknown };
-      if (body.error) throw new Error(JSON.stringify(body.error));
-      return body.result as T;
-    }
+    const body = await postJson<{ result?: T; error?: unknown }>(this.url, { jsonrpc: "2.0", id: 1, method, params }, { tries: 7, backoffMs: 1000 });
+    if (body.error) throw new Error(JSON.stringify(body.error));
+    return body.result as T;
   }
 
   async view<T = any>(contract: string, method: string, args: unknown = {}): Promise<T> {

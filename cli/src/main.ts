@@ -17,7 +17,8 @@ import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadc
 import { claim, formatClaimResult } from "./claim.ts";
 import { initCommand } from "./init.ts";
 import { formatKeyAdd, formatKeyRevoke, keyAdd, keyRevoke } from "./keys.ts";
-import { Near, NEAR_RPC, parseNetwork } from "./near.ts";
+import { NEAR_RPC } from "./endpoints.ts";
+import { Near, parseNetwork } from "./near.ts";
 import { exploitPublicKey, formatOpenExploit, openExploit } from "./open-exploit.ts";
 import { claimStatus, formatStage, formatStatus, loadClaimTxs, watchClaim } from "./status.ts";
 import { formatRetryResult, retryPayout, signPauses } from "./payout.ts";

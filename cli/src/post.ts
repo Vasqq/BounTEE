@@ -26,7 +26,8 @@ import { actions } from "near-api-js";
 import { PAUSE_GAS_PER_PAUSE, parseRules, type BountyId, type PostingFailure, type Rules } from "@bountee/formats";
 import { parseBountyId } from "./bounties.ts";
 import { defaultRpc } from "./chains.ts";
-import { events, formatNear, Near, NEAR_RPC, type Network, tgas } from "./near.ts";
+import { NEAR_RPC, type Network } from "./endpoints.ts";
+import { events, formatNear, Near, tgas } from "./near.ts";
 import { rpc } from "./proofs.ts";
 
 /** NEAR's Ethereum-wallet relayer caps a transaction at 270 Tgas, so the web app attaches that; so does the tool. */

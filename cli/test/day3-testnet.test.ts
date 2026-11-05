@@ -131,7 +131,8 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
     const head = Number(cast("block-number", "--rpc-url", RPC));
     const header = withNumber(job.header, head + 1_000_000);
     const block = { number: head + 1_000_000, hash: `0x${Buffer.from(keccak_256(Buffer.from(header.slice(2), "hex"))).toString("hex")}` };
-    const { seal, KEYSTORE_API } = await import("../src/seal.ts");
+    const { seal } = await import("../src/seal.ts");
+    const { KEYSTORE_API } = await import("../src/endpoints.ts");
     const sealed = await seal({ api: KEYSTORE_API.testnet, judgeHash: deployment.judge.hash.startsWith("0x") ? deployment.judge.hash : `0x${deployment.judge.hash}`, bountyContract: contract, whitehat, exploit: job.exploit });
     await ensureClaimBalance(near, contract, whitehat, milliNear(1200));
     const sub = await near.account(whitehat).callFunction({
