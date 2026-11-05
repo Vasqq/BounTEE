@@ -10,8 +10,10 @@
 // - payout: the bounty's USDC moved to the winning Whitehat, in a receipt that succeeded;
 // - pause_landed / pause_verified, per signed pause: it succeeded on its chain, against the
 //   covered contract; NEAR records it verified by the MPC network (R7.10);
-// - rerun: the published exploit, re-run from its published header and proofs under the
-//   rebuilt judge, gives the enclave's verdict. Before publication it is "not_yet_published".
+// - rerun: the published exploit, re-run from its published header and its claim's proofs
+//   (fetched from the claim's `submit_claim` transaction and checked against the recorded
+//   sha256, as `rerun` does: the contract keeps no copy) under the rebuilt judge, gives the
+//   enclave's verdict. Before publication it is "not_yet_published".
 //   A re-run counts only under the bounty's pinned build: the same verdict from another build
 //   proves nothing about the program the enclave ran, so it is a failure, naming both hashes.
 //
