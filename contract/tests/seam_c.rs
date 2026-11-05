@@ -2665,14 +2665,14 @@ impl Sandbox {
         anyhow::bail!("publication job {n} was never requested")
     }
 
-    /// Move the sandbox clock past `ns`.
-    async fn pass_time_to(&self, ns: u64) -> anyhow::Result<()> {
+    /// Move this node's clock (about 100 s a block) just past `ns`, in steps sized for that,
+    /// so a target hours away isn't overshot.
+    async fn pass_time_on_day_node_to(&self, ns: u64) -> anyhow::Result<()> {
         for _ in 0..400 {
             let now = now_ns(self).await?;
             if now > ns {
                 return Ok(());
             }
-            // About 100 s a block on this node; a little past the target, in one step.
             let blocks = (ns - now) / 100_000_000_000 + 2;
             self.worker.fast_forward(blocks.min(2_000)).await?;
         }
@@ -2722,12 +2722,12 @@ async fn d7_publication_is_refused_before_the_delay_and_open_to_anyone_after() -
     assert!(s.publish_requests().await?.is_empty());
 
     // Just before the day is up, still refused.
-    s.pass_time_to(from - 2 * 3_600_000_000_000).await?;
+    s.pass_time_on_day_node_to(from - 2 * 3_600_000_000_000).await?;
     let r = s.publish(&s.other, "vault", PROOFS).await?.await?;
     assert!(failure_text(&r).contains("disclosure delay"), "{r:?}");
 
     // After it, anyone may trigger it, but only with the proofs the claim was filed with.
-    s.pass_time_to(from).await?;
+    s.pass_time_on_day_node_to(from).await?;
     assert_eq!(s.published("vault").await?["state"], "publishable");
     let r = s
         .publish(&s.other, "vault", r#"[{"address":"0x00000000000000000000000000000000000000ab"}]"#)
@@ -2802,7 +2802,7 @@ async fn d7_a_failed_publication_keeps_nothing_and_can_be_asked_again() -> anyho
         .as_str()
         .unwrap()
         .parse()?;
-    s.pass_time_to(from).await?;
+    s.pass_time_on_day_node_to(from).await?;
     for answer in [
         json!({ "output": null }),
         json!({ "output": PAYS }),
