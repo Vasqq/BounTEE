@@ -86,14 +86,24 @@ impl ProvenState {
                     .iter()
                     .map(|n| hex(n.as_str()).map(Bytes::from))
                     .collect::<Option<Vec<_>>>()?;
+                let path = Nibbles::unpack(keccak256(key));
                 let expected = (!value.is_zero()).then(|| alloy_rlp::encode(value));
-                verify_proof(
-                    storage_root,
-                    Nibbles::unpack(keccak256(key)),
-                    expected,
-                    &nodes,
-                )
-                .ok()?;
+                // A zero slot is normally absent from the trie, but a trie can also hold
+                // it as a leaf of value zero (anvil writes one for a slot a transaction
+                // only read); both prove the slot is zero.
+                let zero_leaf = || {
+                    value.is_zero()
+                        && verify_proof(
+                            storage_root,
+                            path,
+                            Some(alloy_rlp::encode(U256::ZERO)),
+                            &nodes,
+                        )
+                        .is_ok()
+                };
+                if verify_proof(storage_root, path, expected, &nodes).is_err() && !zero_leaf() {
+                    return None;
+                }
                 storage.insert(U256::from_be_bytes(key.0), value);
             }
             let info = AccountInfo {

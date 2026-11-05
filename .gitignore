@@ -29,6 +29,9 @@ node_modules/
 /judge/tests/fixtures/chain/out/
 /judge/tests/fixtures/chain/cache/
 /judge/tests/fixtures/chain/broadcast/
+/judge/tests/fixtures/scenarios/chain/out/
+/judge/tests/fixtures/scenarios/chain/cache/
+/judge/tests/fixtures/scenarios/chain/broadcast/
 
 # bountee test fixture project (cli/test/fixtures): build output only
 /cli/test/fixtures/*/out/
