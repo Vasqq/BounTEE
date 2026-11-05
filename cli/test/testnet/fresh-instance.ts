@@ -8,7 +8,7 @@
 // 2. Deploys a new MockUSDC + DemoVault (demo/script/Deploy.s.sol, --broadcast), granting the
 //    pause role to that address.
 // 3. Funds the pause-role address with the gas its signed pause may burn at its fee limit
-//    (200,000 gas at 1 gwei = 0.0002 ETH; `fees()` on the contract).
+//    (200,000 gas at 1 gwei = 0.0002 ETH; `fees()` on the contract), plus Base's L1 data fee.
 // 4. Posts the bounty: one USDC `ft_transfer_call` carrying the rules, covering the vault.
 //
 // Writes the instance to $BOUNTEE_INSTANCE (default ~/.bountee-testnet/day3-instance.json)
@@ -61,7 +61,11 @@ const eth = (wei: bigint) => `${(Number(wei) / 1e18).toFixed(6)} ETH`;
 // ---- 0. Preflight --------------------------------------------------------------------------------
 
 const fees = await near.view(CONTRACT, "fees");
-const pauseGasWei = BigInt(fees.pause_gas_limit) * BigInt(fees.pause_max_fee_per_gas); // 0.0002 ETH (R7.6)
+// Gas limit at the fee limit (0.0002 ETH, R7.6), plus the L1 data fee an OP-stack chain such as
+// Base charges on top: its pool refuses a pause whose sender holds exactly gas x max fee (Day-3
+// run, Nov 5: "have 200000000000000 want 200000000001544"). 0.00001 ETH covers it many times over.
+const OP_STACK_L1_FEE_WEI = 10_000_000_000_000n;
+const pauseGasWei = BigInt(fees.pause_gas_limit) * BigInt(fees.pause_max_fee_per_gas) + OP_STACK_L1_FEE_WEI;
 const gasPrice = BigInt(cast("gas-price", "--rpc-url", RPC));
 // Deploy.s.sol plus the pause-gas transfer, ~3.2M gas: at 3x today's price (floor 0.05 gwei),
 // plus 0.00005 ETH of slack.

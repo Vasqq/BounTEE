@@ -13,7 +13,8 @@
 // ~/.bountee-testnet/day3-deployment.json from `testnet/deploy-system.ts`, the
 // Protocol's and attacker's keys in ~/.near-credentials/testnet, and the Base Sepolia
 // deployer in ~/.bountee-testnet/base-sepolia-deployer.env. WHITEHAT=<account> uses an
-// existing account instead of `init` (when NEAR's faucet is rate-limited). Every transaction
+// existing account instead of `init` (when NEAR's faucet is rate-limited); INSTANCE=<file> reuses
+// an unclaimed instance fresh-instance.ts wrote, after a failure past that step. Every transaction
 // hash is written to ~/.bountee-testnet/day3-evidence.json.
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -78,9 +79,14 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
       whitehat = out.account_id;
       record("D18 init account", whitehat);
     }
-    const r = await run(process.execPath, [freshInstance], { WHITEHAT: whitehat, CLAIMS: "3" });
-    expect(r.code, `${r.stderr}\n${r.stdout}`).toBe(0);
-    instance = JSON.parse(r.stdout.trim().split("\n").at(-1)!);
+    if (process.env.INSTANCE) {
+      // Re-running after a failure past this step: reuse the unclaimed instance, spend no ETH.
+      instance = JSON.parse(readFileSync(process.env.INSTANCE, "utf8"));
+    } else {
+      const r = await run(process.execPath, [freshInstance], { WHITEHAT: whitehat, CLAIMS: "3" });
+      expect(r.code, `${r.stderr}\n${r.stdout}`).toBe(0);
+      instance = JSON.parse(r.stdout.trim().split("\n").at(-1)!);
+    }
     record("D21 instance", { bounty: instance.bounty, vault: instance.vault, pause_role: instance.pause_role });
     record("D21 vault deploy txs", instance.deploy_txs);
     record("D21 pause gas tx", instance.pause_gas_tx);
