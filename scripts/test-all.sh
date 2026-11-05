@@ -32,6 +32,7 @@ for suite in "${suites[@]}"; do
     e)
       need forge "https://getfoundry.sh"
       run "seam E: demo contracts in Foundry" bash -c 'cd demo && forge soldeer install >/dev/null && forge test'
+      run "seam E: Damn Vulnerable DeFi levels in Foundry" bash -c 'cd demo/dvd && forge soldeer install >/dev/null && forge test'
       ;;
     *) echo "unknown suite: $suite (formats|j|c|t|w|e)" >&2; exit 2 ;;
   esac

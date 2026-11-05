@@ -17,6 +17,10 @@ node_modules/
 /demo/out/
 /demo/cache/
 /demo/dependencies/
+/demo/dvd/out/
+/demo/dvd/cache/
+/demo/dvd/dependencies/
+/demo/dvd/broadcast/
 
 # Secrets never live in the repo (shared testnet secrets: ~/.bountee-testnet/)
 .env
