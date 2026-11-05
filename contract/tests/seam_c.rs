@@ -2698,8 +2698,8 @@ async fn r6_2_a_posting_with_an_exploit_key_no_release_can_use_is_refused() -> a
 // Seam C here catches D7 (publication is refused before the payout and before the disclosure
 // delay has passed since it, and anyone may trigger it after; one at a time; the job is the
 // contract's own, with the winning claim's secret, R5.6), D7.1 at the contract (what is kept
-// is the claim's block, header and the very proofs it was filed with, beside the judge's
-// output) and R11.4 (the contract's own balance pays none of it). The sandbox clock stands in
+// is the claim's block, header, proofs sha256 and submission block, beside the judge's
+// output; it takes only the very proofs the claim was filed with) and R11.4 (the contract's own balance pays none of it). The sandbox clock stands in
 // for a day passing (`fast_forward`). It misses the real judge's output (seam J) and the
 // real OutLayer and a real day (no live run).
 
@@ -2795,7 +2795,8 @@ impl Sandbox {
 /// until the disclosure delay (one day here) has passed since it; then anyone may trigger it
 /// with the claim's proofs, and only those the claim was filed with. The contract requests
 /// the job itself, with the winning claim's secret, one at a time, and keeps the claim's
-/// block, header and proofs beside the judge's output, paid from the posting fee.
+/// block, header, proofs sha256 and submission block beside the judge's output, paid from
+/// the posting fee.
 #[tokio::test]
 async fn d7_publication_is_refused_before_the_delay_and_open_to_anyone_after() -> anyhow::Result<()>
 {
@@ -2866,7 +2867,8 @@ async fn d7_publication_is_refused_before_the_delay_and_open_to_anyone_after() -
     let r = s.publish(&s.protocol, "vault", PROOFS).await?.await?;
     assert!(failure_text(&r).contains("under way"), "{r:?}");
 
-    // What is kept: the judge's output with the claim's block, header and proofs (D7.1).
+    // What is kept: the judge's output with the claim's block, header, proofs sha256 and
+    // submission block, where its transaction carries the proofs (D7.1).
     s.resolve(job["id"].as_u64().unwrap(), Some(PUBLISHED)).await?;
     pending.await?.into_result()?;
     let published = s.wait_for_publication_state("vault", "published").await?;
@@ -2874,7 +2876,8 @@ async fn d7_publication_is_refused_before_the_delay_and_open_to_anyone_after() -
     assert_eq!(published["claim_id"], id);
     assert_eq!(published["block"], args["block"]);
     assert_eq!(published["header"], args["header"]);
-    assert_eq!(published["proofs"], PROOFS);
+    assert_eq!(published["proofs_sha256"], claim["proofs_sha256"]);
+    assert_eq!(published["submitted_at_block"], claim["submitted_at_block"]);
     assert_eq!(
         published["published"],
         "q1YqSi0uKcrMS1WyMjQwMDA1NDA0MjCwMjM2MDQ0Mlaq5QIA"
@@ -2885,6 +2888,72 @@ async fn d7_publication_is_refused_before_the_delay_and_open_to_anyone_after() -
     assert_eq!(s.publish_requests().await?.len(), 1);
 
     // R11.4: the posting fee paid for the job and the publication's storage.
+    let free_at_end = s.free_balance().await?;
+    assert!(
+        free_at_end >= free_at_start,
+        "{free_at_end} < {free_at_start}"
+    );
+    Ok(())
+}
+
+/// R11.4, D7, D7.1 (code review of #23): the posting fee covers the publication job of a
+/// claim with live-sized proofs (about 120 KB) with nothing attached, since the publication
+/// keeps no copy of the proofs: it keeps their sha256 and the block the claim was submitted
+/// in, whose `submit_claim` transaction carries them for anyone to fetch. The contract still
+/// takes only the claim's own proofs, and its own balance pays nothing.
+#[tokio::test]
+async fn r11_4_d7_1_a_live_sized_publication_is_paid_from_the_posting_fee() -> anyhow::Result<()>
+{
+    use sha2::Digest;
+    let s = Sandbox::start_with_days().await?;
+    let free_at_start = s.free_balance().await?;
+    s.post_one_day_delay("vault").await?;
+    s.top_up(&s.whitehat, NearToken::from_near(3)).await?;
+
+    let proof = json!({ "address": "0x00000000000000000000000000000000000000aa",
+        "account_proof": vec![format!("0x{}", "ab".repeat(532)); 110] });
+    let proofs = Value::Array(vec![proof]).to_string();
+    assert!(proofs.len() > 110_000, "{}", proofs.len());
+    let mut args = s.claim_args("vault");
+    args["proofs"] = Value::String(proofs.clone());
+    let before = s.sign_requests().await?.len();
+    let height_before = s.worker.view_block().await?.height();
+    s.script(json!({ "output": PAYS })).await?;
+    let claim = s.file(&s.whitehat, &args).await?;
+    let requests = s.wait_for_sign_requests(before + 1).await?;
+    s.answer_from(&requests, before, &s.pause_key("vault"), false)
+        .await?;
+    let id: u64 = claim.await?.into_result()?.json()?;
+    let height_after = s.worker.view_block().await?.height();
+    s.wait_for_bounty_state("vault", "paid").await?;
+
+    // The claim records the block its submission ran in.
+    let at: u64 = s.claim(id).await?["submitted_at_block"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    assert!(height_before < at && at <= height_after, "{height_before} < {at} <= {height_after}");
+
+    let from: u64 = s.published("vault").await?["publishable_from_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    s.pass_time_to(from).await?;
+    let r = s.publish(&s.other, "vault", PROOFS).await?.await?;
+    assert!(failure_text(&r).contains("proofs"), "{r:?}");
+    s.script(json!({ "output": PUBLISHED })).await?;
+    s.publish(&s.other, "vault", &proofs)
+        .await?
+        .await?
+        .into_result()?;
+    let published = s.published("vault").await?;
+    assert_eq!(published["state"], "published", "{published}");
+    assert_eq!(
+        published["proofs_sha256"],
+        format!("0x{}", hex::encode(sha2::Sha256::digest(proofs.as_bytes())))
+    );
+    assert_eq!(published["submitted_at_block"], at.to_string());
+    assert!(published.get("proofs").is_none(), "no copy of the proofs is kept");
     let free_at_end = s.free_balance().await?;
     assert!(
         free_at_end >= free_at_start,

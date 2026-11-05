@@ -204,6 +204,7 @@ impl Contract {
                 header,
                 proofs_sha256: sha256_hex(proofs.as_bytes()),
                 submitted_at_ns: U64(now),
+                submitted_at_block: U64(env::block_height()),
                 secret_profile: secret_profile.clone(),
                 state: ClaimState::Storing,
                 verdict: None,

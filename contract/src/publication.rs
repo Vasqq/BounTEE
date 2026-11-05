@@ -4,18 +4,21 @@
 //!
 //! [`Contract::publish_exploit`] is refused before the payout and before the delay. The
 //! caller passes the winning claim's proofs, the ones its `submit_claim` carried (the
-//! contract kept only their sha256, so it checks them against it); the contract requests a
-//! job running the pinned judge with the winning claim's own secret, and the judge writes
-//! the exploit in the clear. The contract keeps that output beside the claim's proofs; with
-//! the claim's block, header and verdict, already recorded, [`Contract::published_exploit`]
-//! returns everything a re-run needs (`bountee rerun`). Nothing else ever requests a job
-//! with a claim's secret after its verdict but the release, so a losing exploit is never
-//! published (R5.6).
+//! contract kept only their sha256, so it checks them against it), so the publication's own
+//! transaction carries them too; the contract requests a job running the pinned judge with
+//! the winning claim's own secret, and the judge writes the exploit in the clear. The
+//! contract keeps that output; with the claim's block, header, verdict, proofs sha256 and
+//! submission block, already recorded, [`Contract::published_exploit`] returns everything a
+//! re-run needs but the proofs themselves, which `bountee rerun` fetches from the claim's
+//! `submit_claim` transaction and checks against the sha256 (D7.1). Nothing else ever
+//! requests a job with a claim's secret after its verdict but the release, so a losing
+//! exploit is never published (R5.6).
 //!
-//! The job's deposit and the publication's storage come from the bounty's posting fee, or
-//! from NEAR attached to the call, which joins it (R11.4); the proofs of a live claim (about
-//! 120 KB) cost more storage than the posting fee leaves, so the caller attaches it. A
-//! publication that fails keeps nothing and can be asked again.
+//! The proofs are kept nowhere and not put in the job (the judge's publication needs none,
+//! and OutLayer would hold storage for a live claim's 120 KB of input), so the job's deposit
+//! and the small record are all the publication costs: the bounty's posting fee pays them
+//! (R11.4). NEAR attached to the call joins the posting fee. A publication that fails keeps
+//! nothing and can be asked again.
 
 use bountee_formats::{BlockRef, BountyId, Bytes, PublishOutput, Verdict, B256};
 use near_sdk::json_types::U64;
@@ -27,7 +30,7 @@ use crate::{emit, fees, gas, outlayer, BountyState, Contract, ContractExt};
 /// The most bytes a publication's output may take (as base64). A demo exploit's is about
 /// 300 bytes.
 pub const MAX_PUBLISHED_BYTES: u64 = 16 * 1024;
-/// Storage a publication record takes beyond its output and proofs.
+/// Storage a publication record takes beyond its output.
 const PUBLICATION_RECORD_BYTES: u64 = 200;
 /// A publication request older than this many blocks is treated as over (OutLayer's own
 /// timeout is about 200 blocks), so a lost callback never blocks a new one.
@@ -41,8 +44,6 @@ pub struct PublicationRecord {
     pub claim_id: u64,
     /// The block height the job under way was requested at.
     pub requested_at: Option<u64>,
-    /// The winning claim's proofs, as its `submit_claim` carried them.
-    pub proofs: String,
     /// The publication job's output: the winning exploit in the clear.
     pub published: Option<String>,
 }
@@ -73,10 +74,12 @@ pub struct PublicationView {
     pub block: BlockRef,
     /// The claim's block header, RLP-encoded.
     pub header: Bytes,
-    /// sha256 of the claim's proofs, recorded when it was filed.
+    /// sha256 of the claim's proofs, recorded when it was filed. The proofs themselves are in
+    /// the claim's `submit_claim` transaction (and in the publication's own).
     pub proofs_sha256: B256,
-    /// The claim's proofs, as it was filed with them; once requested.
-    pub proofs: Option<String>,
+    /// The NEAR block the claim's submission ran in, where its `submit_claim` transaction is
+    /// found (an archival RPC serves old blocks).
+    pub submitted_at_block: U64,
     /// The verdict the enclave gave.
     pub verdict: Option<Verdict>,
     /// The judge's publication (base64 of raw DEFLATE of a `ReleasedExploit`); once published.
@@ -94,13 +97,10 @@ fn storage_cost(bytes: u64) -> NearToken {
     NearToken::from_yoctonear(bytes as u128 * fees::STORAGE_PRICE_PER_BYTE)
 }
 
-/// What a publication request with `proofs_len` bytes of proofs holds from the posting fee:
-/// the job's deposit and the most the publication's storage can cost. The unused part goes
-/// back.
-pub fn publish_hold(proofs_len: u64) -> NearToken {
-    fees::JOB_DEPOSIT.saturating_add(storage_cost(
-        MAX_PUBLISHED_BYTES + PUBLICATION_RECORD_BYTES + proofs_len,
-    ))
+/// What a publication request holds from the posting fee: the job's deposit and the most
+/// the publication's storage can cost. The unused part goes back.
+pub fn publish_hold() -> NearToken {
+    fees::JOB_DEPOSIT.saturating_add(storage_cost(MAX_PUBLISHED_BYTES + PUBLICATION_RECORD_BYTES))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -116,10 +116,10 @@ impl Contract {
     /// Request the publication of a paid bounty's winning exploit (D7). Anyone may call, once
     /// the bounty's disclosure delay has passed since its payout; it is refused before that,
     /// while a publication is under way and once published. `proofs` are the winning claim's
-    /// proofs exactly as filed (public in its `submit_claim` transaction), kept with the
-    /// publication so anyone can re-run it (D7.1). Any NEAR attached joins the bounty's
-    /// posting fee, which pays for the job and the storage; `fees()` names the gas
-    /// (`min_publish_gas`) and the hold (`publish_hold`, plus `publish_hold_per_proof_byte`).
+    /// proofs exactly as filed (public in its `submit_claim` transaction), checked against the
+    /// claim's sha256 and not kept. The bounty's posting fee pays for the job and the
+    /// record's storage, and any NEAR attached joins it; `fees()` names the gas
+    /// (`min_publish_gas`) and the hold (`publish_hold`).
     #[payable]
     pub fn publish_exploit(&mut self, id: BountyId, proofs: String) -> Promise {
         let bounty = self
@@ -158,7 +158,7 @@ impl Contract {
             Self::gas_left(gas::TAIL) >= gas::release(),
             "attach more gas: see min_publish_gas in fees()"
         );
-        let hold = publish_hold(proofs.len() as u64);
+        let hold = publish_hold();
         bounty.draw_fee_or_refuse(hold, "the publication");
         let input = json!({ "publish": {
             "bounty": id,
@@ -172,7 +172,6 @@ impl Contract {
             PublicationRecord {
                 claim_id,
                 requested_at: Some(requested_at),
-                proofs,
                 published: None,
             },
         );
@@ -233,9 +232,7 @@ impl Contract {
         match output {
             Some(output) => {
                 let published = output.published.as_str().to_owned();
-                storage = storage_cost(
-                    published.len() as u64 + record.proofs.len() as u64 + PUBLICATION_RECORD_BYTES,
-                );
+                storage = storage_cost(published.len() as u64 + PUBLICATION_RECORD_BYTES);
                 record.requested_at = None;
                 record.published = Some(published);
                 let claim_id = record.claim_id;
@@ -257,7 +254,8 @@ impl Contract {
     }
 
     /// A paid bounty's publication: when it opens, and once published, the winning exploit
-    /// with the claim's block, header, proofs and verdict, for anyone to re-run (D7.1).
+    /// with the claim's block, header, verdict, proofs sha256 and submission block, for anyone
+    /// to re-run with the proofs from the claim's transaction (D7.1).
     /// `null` until the bounty is paid.
     pub fn published_exploit(&self, id: BountyId) -> Option<PublicationView> {
         let bounty = self.bounties.get(&id)?;
@@ -281,7 +279,7 @@ impl Contract {
             block: claim.block.clone(),
             header: claim.header.clone(),
             proofs_sha256: claim.proofs_sha256.clone(),
-            proofs: record.map(|r| r.proofs.clone()),
+            submitted_at_block: claim.submitted_at_block,
             verdict: claim.verdict.clone(),
             published: record.and_then(|r| r.published.clone()),
         })

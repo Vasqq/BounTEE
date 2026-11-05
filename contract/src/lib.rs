@@ -11,7 +11,7 @@
 //! - [`release`]: after the payout, the winning exploit is released to the Protocol's
 //!   exploit key by a job the contract requests (R6).
 //! - [`publication`]: once the disclosure delay has passed since the payout, anyone can have
-//!   the winning exploit published with the claim's header and proofs (D7, D7.1).
+//!   the winning exploit published beside the claim's header and proofs' sha256 (D7, D7.1).
 //! - [`verification`]: anyone can have a chain's landed pause verified by NEAR's MPC network;
 //!   off the money path.
 //! - [`outlayer`]: the exact OutLayer requests (secret, access rule, job).
@@ -307,6 +307,11 @@ pub struct ClaimRecord {
     pub proofs_sha256: B256,
     /// NEAR block time the contract recorded at submission (R2.8).
     pub submitted_at_ns: near_sdk::json_types::U64,
+    /// The NEAR block the submission ran in. The `submit_claim` transaction carrying the
+    /// claim's proofs is in a chunk of that block or one just before it, so anyone can fetch
+    /// them from NEAR RPC (an archival one for old blocks) and check them against
+    /// `proofs_sha256` (D7.1).
+    pub submitted_at_block: near_sdk::json_types::U64,
     /// The OutLayer secret profile holding this claim's sealed exploit; stored once, read by
     /// the claim's job and, for a winning claim, its release job.
     pub secret_profile: String,
@@ -401,8 +406,7 @@ impl Contract {
             "min_release_gas": gas::release(),
             "release_hold": release::release_hold(),
             "min_publish_gas": gas::release(),
-            "publish_hold": publication::publish_hold(0),
-            "publish_hold_per_proof_byte": U128(fees::STORAGE_PRICE_PER_BYTE),
+            "publish_hold": publication::publish_hold(),
             "claim_place_hold_ns": near_sdk::json_types::U64(claims::CLAIM_PLACE_HOLD_NS),
             "pause_gas_limit": pauses::PAUSE_GAS_LIMIT,
             "pause_max_fee_per_gas": U128(pauses::PAUSE_MAX_FEE_PER_GAS),
