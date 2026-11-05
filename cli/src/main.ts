@@ -3,8 +3,8 @@
 // (ticket #11), `broadcast` (ticket #13), `claim` (sealing and filing, #15; script path,
 // verdict, payout and pauses, #16; live progress and receipt, #26), `list`, `show` and
 // `status` (#26), `post` (#17), `verify-pause` (#21), `open-exploit` (#22), `publish` and
-// `rerun` (#23), `key` (#25), `balance`, `sign-pauses`, `retry-payout` and `claim --retry`
-// (review fixes). The rest (verify, withdraw) land in the CLI tickets.
+// `rerun` (#23), `key` (#25), `verify` and `build` (#24), `balance`, `sign-pauses`,
+// `retry-payout` and `claim --retry` (review fixes). The rest (withdraw) land in the CLI tickets.
 // Every command takes `--json` for
 // machine-readable output (R14.5): the result
 // as one JSON document on stdout, an error as `{"error": …}` on stderr, and a claim's live
@@ -12,6 +12,7 @@
 import { readFileSync } from "node:fs";
 import { balanceCommand, formatBalanceResult } from "./balance.ts";
 import { formatBounty, formatList, listBounties, parseBountyId, showBounty } from "./bounties.ts";
+import { formatBuildResult, reproducibleBuild } from "./build.ts";
 import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadcast.ts";
 import { claim, formatClaimResult } from "./claim.ts";
 import { initCommand } from "./init.ts";
@@ -23,7 +24,8 @@ import { formatRetryResult, retryPayout, signPauses } from "./payout.ts";
 import { formatPostResult, post } from "./post.ts";
 import { formatPublishResult, formatRerunResult, publishExploit, rerunPublished } from "./publish.ts";
 import { formatReplayResult, formatTestResult, replayJob, testCommand } from "./test.ts";
-import { formatVerifyResult, verifyPauses } from "./verify-pause.ts";
+import { formatVerifyResult as formatVerifyPauses, verifyPauses } from "./verify-pause.ts";
+import { formatVerifyResult, verify } from "./verify.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const args = process.argv.slice(2);
@@ -55,6 +57,8 @@ const USAGES: Record<string, string> = {
   "sign-pauses": `bountee sign-pauses <protocol>/<name> --as <account> ${NEAR_FLAGS} [--json]`,
   "retry-payout": `bountee retry-payout <protocol>/<name> --as <account> ${NEAR_FLAGS} [--json]`,
   balance: `bountee balance [top-up <NEAR> | withdraw [<NEAR>]] --as <account> ${NEAR_FLAGS} [--json]`,
+  build: "bountee build --contract <account> [--rev <commit>] [--only judge|contract] [--out-dir <dir>] [--json]",
+  verify: `bountee verify <protocol>/<name> ${NEAR_FLAGS} [--rev <commit>] [--judge-wasm <wasm> --contract-wasm <wasm>] [--rpc <chain id>=<url>[,...]] [--tx <hash>[,...]] [--outlayer-api <url>] [--tx-api <url>] [--json]`,
 };
 const usage = (command: string) => `usage: ${USAGES[command]}`;
 
@@ -162,7 +166,7 @@ try {
       chains: flags.chain === undefined ? undefined : [Number(flags.chain)],
       waitSecs: flags.wait === undefined ? undefined : Number(flags.wait),
     });
-    print(result, formatVerifyResult(result));
+    print(result, formatVerifyPauses(result));
     if (result.chains.some((c) => !c.verified)) process.exit(1);
   } else if (command === "status") {
     const { positional, flags } = parse(rest.slice(1));
@@ -260,6 +264,32 @@ try {
     const { near, contract } = nearFor(command, flags);
     const r = await balanceCommand({ near, contract, account: flags.as, action, amount });
     print(r, formatBalanceResult(r));
+  } else if (command === "build") {
+    const { flags } = parse(rest.slice(1));
+    const pin = flags.contract ?? process.env.BOUNTEE_CONTRACT;
+    if (!pin) fail(`build needs the bounty contract the judge answers to: pass --contract\n${usage(command)}`, 2);
+    if (flags.only !== undefined && flags.only !== "judge" && flags.only !== "contract") fail(`--only is judge or contract\n${usage(command)}`, 2);
+    const r = reproducibleBuild({ pin, rev: flags.rev, outDir: flags["out-dir"], only: flags.only as "judge" | "contract" | undefined });
+    print(r, formatBuildResult(r));
+  } else if (command === "verify") {
+    const { positional, flags } = parse(rest.slice(1));
+    if (!positional[0]) fail(`verify needs a bounty id\n${usage(command)}`, 2);
+    const { near, contract, network } = nearFor(command, flags);
+    const r = await verify({
+      near,
+      network,
+      contract,
+      bounty: parseBountyId(positional[0]),
+      rev: flags.rev,
+      judgeWasm: flags["judge-wasm"],
+      contractWasm: flags["contract-wasm"],
+      rpcs: flags.rpc ? parseRpcFlags(flags.rpc.split(",")) : undefined,
+      txs: flags.tx ? flags.tx.split(",") : undefined,
+      outlayerApi: flags["outlayer-api"],
+      txApi: flags["tx-api"],
+    });
+    print(r, formatVerifyResult(r));
+    if (!r.passed) process.exit(1);
   } else if (command === "claim") {
     const r = await claim(rest.slice(1), showStage);
     print(r, formatClaimResult(r));

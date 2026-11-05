@@ -63,16 +63,18 @@ export function explorerTx(chainId: number, hash: string): string | undefined {
   return base ? `${base}${hash}` : undefined;
 }
 
-/** A transaction's receipt on an EVM chain: whether it succeeded, and its block. */
+/** A transaction's receipt on an EVM chain: whether it succeeded, its block, and the address it called. */
 export interface EvmReceipt {
   status: "success" | "reverted";
   block: number;
+  /** null for a contract creation. */
+  to: string | null;
 }
 
 /** The transaction's receipt now, or null if it hasn't landed (or the RPC didn't answer). */
 export async function evmReceipt(url: string, hash: string): Promise<EvmReceipt | null> {
-  const r = await rpc<{ status: string; blockNumber: string } | null>(url, "eth_getTransactionReceipt", [hash]).catch(() => null);
-  return r ? { status: r.status === "0x1" ? "success" : "reverted", block: Number(r.blockNumber) } : null;
+  const r = await rpc<{ status: string; blockNumber: string; to?: string | null } | null>(url, "eth_getTransactionReceipt", [hash]).catch(() => null);
+  return r ? { status: r.status === "0x1" ? "success" : "reverted", block: Number(r.blockNumber), to: r.to ?? null } : null;
 }
 
 /** The transaction's receipt once it lands, read every `intervalMs`; null if not landed by `untilMs`. */

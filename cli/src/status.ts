@@ -136,7 +136,10 @@ const once = <T>(cache: Cache, key: string, f: () => Promise<T>): Promise<T> => 
 };
 
 /** Not landed yet, or the RPC didn't answer: either way not shown as landed. */
-const pauseReceipt = async (url: string | undefined, hash: string) => (url ? evmReceipt(url, hash) : null);
+const pauseReceipt = async (url: string | undefined, hash: string) => {
+  const r = url ? await evmReceipt(url, hash) : null;
+  return r ? { block: r.block, status: r.status } : null;
+};
 
 /**
  * Whether the contract records a verified pause for this transaction (R7.10): its
