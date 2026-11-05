@@ -7,3 +7,5 @@ The hackathon allows testnet-only entries, but we want the demo to move real mon
 - Expected mainnet spend is about $25–35 of the $50 budget, leaving room for one redeploy.
 - The demo protocol is deliberately vulnerable and holds real funds, so its balance stays at a few dollars and the window between funding it and the demo run stays short.
 - Every mainnet transaction still needs Liam's explicit yes.
+
+Amended by ADR-0018: one mainnet demo bounty, won by an AI agent; the expected spend is about $30 of the $50.
