@@ -91,6 +91,7 @@ impl Contract {
                 signing_since: None,
                 paying_out: false,
                 open_claims: Vec::new(),
+                paid_at_ns: None,
             },
         );
         // R12.3: these contracts are now covered by a pending bounty.

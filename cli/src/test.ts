@@ -93,7 +93,7 @@ function freePort(): Promise<number> {
   });
 }
 
-function judgeWasm(o: { judge?: string }): string {
+export function judgeWasm(o: { judge?: string }): string {
   if (o.judge) return resolve(o.judge);
   const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
   const wasm = `${repo}target/${target}/release/bountee-judge.wasm`;

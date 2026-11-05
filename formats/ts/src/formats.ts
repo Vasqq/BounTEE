@@ -210,12 +210,20 @@ export interface Release {
   exploit_public_key: string;
 }
 
+/** The enclave's publication job (#23, D7, D7.1; see job.rs). */
+export interface Publish {
+  bounty: BountyId;
+  claim_id: number;
+  whitehat: string;
+}
+
 /** The judge's stdin. */
 export type Job =
   | { replay: Replay }
   | { judge_claim: JudgeClaim }
   | { posting_check: PostingCheck }
-  | { release: Release };
+  | { release: Release }
+  | { publish: Publish };
 
 const evmAddressOrNull = (v: unknown): string | null => (v === null ? null : evmAddress(v));
 
@@ -257,6 +265,12 @@ export const parseRelease: (v: unknown) => Release = object<Release>({
   exploit_public_key: publicKey,
 });
 
+export const parsePublish: (v: unknown) => Publish = object<Publish>({
+  bounty: parseBountyId,
+  claim_id: safeU64,
+  whitehat: accountId,
+});
+
 /** One key naming the action, as serde writes a Rust enum. */
 export const parseJob = (v: unknown): Job => {
   if (typeof v === "object" && v !== null && !Array.isArray(v) && "judge_claim" in v) {
@@ -267,6 +281,9 @@ export const parseJob = (v: unknown): Job => {
   }
   if (typeof v === "object" && v !== null && !Array.isArray(v) && "release" in v) {
     return object<{ release: Release }>({ release: parseRelease })(v);
+  }
+  if (typeof v === "object" && v !== null && !Array.isArray(v) && "publish" in v) {
+    return object<{ publish: Publish }>({ publish: parsePublish })(v);
   }
   return object<{ replay: Replay }>({ replay: parseReplay })(v);
 };
@@ -307,6 +324,16 @@ export interface ReleaseOutput {
 }
 
 export const parseReleaseOutput: (v: unknown) => ReleaseOutput = object<ReleaseOutput>({ released: base64 });
+
+/**
+ * The publication job's stdout (#23, D7.1): the ReleasedExploit in the clear, as base64 of
+ * its raw DEFLATE'd JSON (BounTEE publication v1; see job.rs).
+ */
+export interface PublishOutput {
+  published: string;
+}
+
+export const parsePublishOutput: (v: unknown) => PublishOutput = object<PublishOutput>({ published: base64 });
 
 const outcomeOf = (v: unknown): Outcome =>
   v === "PAYS" || v === "ZERO" || v === "INVALID" ? v : fail("outcome", v);

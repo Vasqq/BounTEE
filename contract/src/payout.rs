@@ -74,6 +74,8 @@ impl Contract {
         match env::promise_result(0) {
             PromiseResult::Successful(_) => {
                 bounty.state = BountyState::Paid;
+                // The disclosure delay counts from here (D7, #23).
+                bounty.paid_at_ns = Some(env::block_timestamp());
                 emit(
                     "bounty_paid",
                     json!({ "bounty": bounty_id, "claim_id": claim_id, "amount": bounty.rules.bounty_amount }),

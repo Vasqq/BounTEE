@@ -7,6 +7,7 @@ import {
   parseClaim,
   parseExploit,
   parseJob,
+  parsePublishOutput,
   parseReleaseOutput,
   parseReleasedExploit,
   parseRules,
@@ -39,6 +40,7 @@ const parsers: Record<string, (v: unknown) => unknown> = {
   sealed_bundle: parseSealedBundle,
   released_exploit: parseReleasedExploit,
   release_output: parseReleaseOutput,
+  publish_output: parsePublishOutput,
 };
 
 describe("shared format cases", () => {

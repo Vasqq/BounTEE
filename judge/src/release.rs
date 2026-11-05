@@ -13,9 +13,14 @@
 //! encrypted to the exploit key as `formats/src/job.rs` describes (BounTEE release v1). Only
 //! the exploit key's holder can open it; the job's output, which lands on chain, holds
 //! nothing else.
+//!
+//! [`publish`] (#23) makes the same checks and writes the same [`ReleasedExploit`] in the
+//! clear, once the bounty contract has let the disclosure delay pass (D7).
 
 use base64::Engine;
-use bountee_formats::{to_json, Base64, Release, ReleaseOutput, ReleasedExploit};
+use bountee_formats::{
+    to_json, Base64, Publish, PublishOutput, Release, ReleaseOutput, ReleasedExploit,
+};
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::ChaCha20Poly1305;
 
@@ -40,6 +45,25 @@ pub fn release(job: &Release) -> Option<ReleaseOutput> {
     let text = base64::engine::general_purpose::STANDARD.encode(sealed);
     Some(ReleaseOutput {
         released: Base64::parse(&text).ok()?,
+    })
+}
+
+/// The publication's stdout (#23, D7, D7.1), or `None` when nothing may be published: the
+/// same checks as [`release`] (the pinned contract's job, the secret, a bundle sealed for
+/// `whitehat`), then the [`ReleasedExploit`] in the clear, as raw DEFLATE in base64. The
+/// bounty contract asks for it only once the disclosure delay has passed.
+pub fn publish(job: &Publish) -> Option<PublishOutput> {
+    let exploit = sealed::exploit(&job.whitehat)?.ok()?;
+    let published = ReleasedExploit {
+        bounty: job.bounty.clone(),
+        claim_id: job.claim_id,
+        whitehat: job.whitehat.clone(),
+        exploit,
+    };
+    let compressed = miniz_oxide::deflate::compress_to_vec(to_json(&published).as_bytes(), 9);
+    let text = base64::engine::general_purpose::STANDARD.encode(compressed);
+    Some(PublishOutput {
+        published: Base64::parse(&text).ok()?,
     })
 }
 

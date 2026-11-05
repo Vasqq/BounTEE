@@ -222,6 +222,7 @@ dependencies = [
  "bs58 0.5.1",
  "hex",
  "k256",
+ "near-sandbox",
  "near-sdk",
  "near-workspaces",
  "serde_json",

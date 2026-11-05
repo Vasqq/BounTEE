@@ -135,9 +135,33 @@ pub struct ReleaseOutput {
     pub released: Base64,
 }
 
+/// The enclave's publication job (#23, D7, D7.1): the bounty contract requests it, with the
+/// winning claim's secret, only once the bounty's disclosure delay has passed since its
+/// payout. The judge opens the sealed exploit, checks it was sealed for `whitehat`, and
+/// writes it in the clear as a [`PublishOutput`]. The claim's block, header and proofs are
+/// already the contract's, so the job carries none of them. Unknown fields are refused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Publish {
+    pub bounty: BountyId,
+    pub claim_id: SafeU64,
+    /// The winning claim's claimant, whose account the sealed exploit must name.
+    pub whitehat: AccountId,
+}
+
+/// The publication job's stdout: the [`ReleasedExploit`] in the clear, as base64 (padded) of
+/// the raw DEFLATE (RFC 1951) of its JSON (BounTEE publication v1). With the claim's block,
+/// header and proofs, which the bounty contract keeps beside it, anyone can re-run it as a
+/// [`Replay`] to the verdict the enclave gave (D7.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublishOutput {
+    pub published: Base64,
+}
+
 /// A job for the judge, its whole stdin: `{"replay": {...}}` (local runs), or
-/// `{"judge_claim": {...}}`, `{"posting_check": {...}}` and `{"release": {...}}` (the
-/// enclave).
+/// `{"judge_claim": {...}}`, `{"posting_check": {...}}`, `{"release": {...}}` and
+/// `{"publish": {...}}` (the enclave).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Job {
@@ -145,4 +169,5 @@ pub enum Job {
     JudgeClaim(JudgeClaim),
     PostingCheck(PostingCheck),
     Release(Release),
+    Publish(Publish),
 }

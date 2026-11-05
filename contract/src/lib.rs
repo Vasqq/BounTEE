@@ -9,6 +9,8 @@
 //! - [`payout`]: the whole bounty is paid to the Whitehat.
 //! - [`release`]: after the payout, the winning exploit is released to the Protocol's
 //!   exploit key by a job the contract requests (R6).
+//! - [`publication`]: once the disclosure delay has passed since the payout, anyone can have
+//!   the winning exploit published with the claim's header and proofs (D7, D7.1).
 //! - [`verification`]: anyone can have a chain's landed pause verified by NEAR's MPC network;
 //!   off the money path.
 //! - [`outlayer`]: the exact OutLayer requests (secret, access rule, job).
@@ -29,6 +31,7 @@ mod outlayer;
 mod pauses;
 mod payout;
 mod posting;
+mod publication;
 mod release;
 mod verification;
 
@@ -107,7 +110,7 @@ pub mod gas {
     /// For each pause's `sign` on the MPC contract, which asks for at least 15 Tgas and
     /// keeps 7 for its own yield callback (testnet config, Nov 4).
     pub const SIGN_PAUSE: Gas = Gas::from_tgas(20);
-    /// For a release job's callback (#22).
+    /// For a release job's callback (#22), and a publication job's (#23).
     pub const ON_RELEASED: Gas = Gas::from_tgas(15);
     /// What OutLayer's `request_execution` needs, most of it kept for its own callback
     /// (spike #4: about 55 Tgas).
@@ -161,6 +164,7 @@ enum Key {
     CoveredBy,
     Releases,
     SealedExploits,
+    Publications,
 }
 
 /// Where a bounty is in its life.
@@ -204,6 +208,9 @@ pub struct Bounty {
     /// as (claim ID, submission time). Each holds its place against a later PAYS for
     /// [`claims::CLAIM_PLACE_HOLD_NS`] from its submission (R2.6, R3.6).
     pub open_claims: Vec<(u64, u64)>,
+    /// When the payout's transfer succeeded (NEAR block time); the disclosure delay counts
+    /// from it (D7).
+    pub paid_at_ns: Option<u64>,
 }
 
 /// A bounty as its view returns it: every rule exactly as posted (R1.2).
@@ -282,6 +289,8 @@ pub struct Contract {
     /// The claim each sealed exploit (by sha256 of its ciphertext) was filed as, so the
     /// same one is never judged twice (R3.5).
     sealed_exploits: LookupMap<B256, u64>,
+    /// Each paid bounty's publication of its winning exploit, once asked for (#23).
+    publications: LookupMap<BountyId, publication::PublicationRecord>,
 }
 
 #[near]
@@ -321,6 +330,7 @@ impl Contract {
             covered_by: LookupMap::new(Key::CoveredBy),
             releases: LookupMap::new(Key::Releases),
             sealed_exploits: LookupMap::new(Key::SealedExploits),
+            publications: LookupMap::new(Key::Publications),
         }
     }
 
@@ -343,6 +353,9 @@ impl Contract {
             "min_retry_payout_gas": gas::payout(),
             "min_release_gas": gas::release(),
             "release_hold": release::release_hold(),
+            "min_publish_gas": gas::release(),
+            "publish_hold": publication::publish_hold(0),
+            "publish_hold_per_proof_byte": U128(fees::STORAGE_PRICE_PER_BYTE),
             "claim_place_hold_ns": near_sdk::json_types::U64(claims::CLAIM_PLACE_HOLD_NS),
             "pause_gas_limit": pauses::PAUSE_GAS_LIMIT,
             "pause_max_fee_per_gas": U128(pauses::PAUSE_MAX_FEE_PER_GAS),

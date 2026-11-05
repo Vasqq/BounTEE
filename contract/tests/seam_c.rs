@@ -48,13 +48,46 @@ struct Sandbox {
     protocol: Account,
     whitehat: Account,
     other: Account,
+    /// The sandbox node, when the test started its own ([`Sandbox::start_with_days`]).
+    _node: Option<near_sandbox::Sandbox>,
 }
 
 impl Sandbox {
     /// A sandbox with the stand-ins deployed and the bounty contract deployed, initialised
     /// and left keyless in one transaction, as the real deployment does (R2.1).
     async fn start() -> anyhow::Result<Self> {
-        let worker = near_workspaces::sandbox().await?;
+        Self::start_on(near_workspaces::sandbox().await?, None).await
+    }
+
+    /// The same, on a sandbox node whose `fast_forward` moves the clock about 100 s per
+    /// block, so a test can let days pass (the disclosure delay is at least one, D7). The
+    /// node advances block time by the mean of its least and greatest block production
+    /// delays per skipped block (nearcore's `sandbox_delta_time`); only the greatest is
+    /// raised, which a single validator never waits for, so blocks still come as fast.
+    async fn start_with_days() -> anyhow::Result<Self> {
+        let node = near_sandbox::Sandbox::start_sandbox_with_config(near_sandbox::SandboxConfig {
+            additional_accounts: vec![near_sandbox::GenesisAccount::default_with_name(
+                "registrar".parse()?,
+            )],
+            additional_config: Some(json!({
+                "consensus": { "max_block_production_delay": { "secs": 200, "nanos": 0 } },
+            })),
+            ..Default::default()
+        })
+        .await?;
+        let worker = near_workspaces::sandbox()
+            .rpc_addr(&node.rpc_addr)
+            .validator_key(near_workspaces::network::ValidatorKey::HomeDir(
+                node.home_dir.path().to_path_buf(),
+            ))
+            .await?;
+        Self::start_on(worker, Some(node)).await
+    }
+
+    async fn start_on(
+        worker: Worker<SandboxNet>,
+        node: Option<near_sandbox::Sandbox>,
+    ) -> anyhow::Result<Self> {
         let root = worker.root_account()?;
         let account = |name: &'static str, near: u128| {
             let root = root.clone();
@@ -130,6 +163,7 @@ impl Sandbox {
             protocol,
             whitehat,
             other,
+            _node: node,
         })
     }
 
@@ -2553,6 +2587,243 @@ async fn r6_2_a_posting_with_an_exploit_key_no_release_can_use_is_refused() -> a
         assert_eq!(s.bounty(name).await?, Value::Null, "{name}");
     }
     assert_eq!(s.usdc_balance(s.protocol.id()).await?, before);
+    Ok(())
+}
+
+// ---- publication (#23) ------------------------------------------------------------------
+//
+// Seam C here catches D7 (publication is refused before the payout and before the disclosure
+// delay has passed since it, and anyone may trigger it after; one at a time; the job is the
+// contract's own, with the winning claim's secret, R5.6), D7.1 at the contract (what is kept
+// is the claim's block, header and the very proofs it was filed with, beside the judge's
+// output) and R11.4 (the contract's own balance pays none of it). The sandbox clock stands in
+// for a day passing (`fast_forward`). It misses the real judge's output (seam J) and the
+// real OutLayer and a real day (no live run).
+
+/// What a publication job returns, as the stand-in answers it.
+const PUBLISHED: &str = r#"{"published":"q1YqSi0uKcrMS1WyMjQwMDA1NDA0MjCwMjM2MDQ0Mlaq5QIA"}"#;
+
+impl Sandbox {
+    /// `by` asks the contract to publish `name`'s winning exploit with `proofs`, without
+    /// waiting.
+    async fn publish(&self, by: &Account, name: &str, proofs: &str) -> anyhow::Result<Pending> {
+        Ok(by
+            .call(self.contract.id(), "publish_exploit")
+            .args_json(json!({
+                "id": { "protocol": self.protocol.id(), "name": name },
+                "proofs": proofs,
+            }))
+            .gas(tgas(150))
+            .transact_async()
+            .await?)
+    }
+
+    async fn published(&self, name: &str) -> anyhow::Result<Value> {
+        self.view(
+            "published_exploit",
+            json!({ "id": { "protocol": self.protocol.id(), "name": name } }),
+        )
+        .await
+    }
+
+    async fn wait_for_publication_state(&self, name: &str, state: &str) -> anyhow::Result<Value> {
+        for _ in 0..150 {
+            let r = self.published(name).await?;
+            if r["state"] == state {
+                return Ok(r);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        anyhow::bail!(
+            "{name}'s publication never reached {state}: {}",
+            self.published(name).await?
+        )
+    }
+
+    /// The job requests whose input is a publication.
+    async fn publish_requests(&self) -> anyhow::Result<Vec<Value>> {
+        Ok(self
+            .requests()
+            .await?
+            .into_iter()
+            .filter(|r| {
+                r["input_data"]
+                    .as_str()
+                    .is_some_and(|i| i.starts_with(r#"{"publish""#))
+            })
+            .collect())
+    }
+
+    async fn wait_for_publish_requests(&self, n: usize) -> anyhow::Result<Vec<Value>> {
+        for _ in 0..150 {
+            let r = self.publish_requests().await?;
+            if r.len() >= n {
+                return Ok(r);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        anyhow::bail!("publication job {n} was never requested")
+    }
+
+    /// Move the sandbox clock past `ns`.
+    async fn pass_time_to(&self, ns: u64) -> anyhow::Result<()> {
+        for _ in 0..400 {
+            let now = now_ns(self).await?;
+            if now > ns {
+                return Ok(());
+            }
+            // About 100 s a block on this node; a little past the target, in one step.
+            let blocks = (ns - now) / 100_000_000_000 + 2;
+            self.worker.fast_forward(blocks.min(2_000)).await?;
+        }
+        anyhow::bail!("the sandbox clock didn't reach {ns}")
+    }
+
+    /// A live bounty `name` whose disclosure delay is one day, the least the rules allow.
+    async fn post_one_day_delay(&self, name: &str) -> anyhow::Result<Value> {
+        let mut rules = valid_rules(self).await?;
+        rules["disclosure_delay_days"] = json!(1);
+        self.post(name, &rules).await?.into_result()?;
+        Ok(rules)
+    }
+}
+
+/// D7, D7.1, R5.6, R11.4: a winning exploit's publication is refused before the payout and
+/// until the disclosure delay (one day here) has passed since it; then anyone may trigger it
+/// with the claim's proofs, and only those the claim was filed with. The contract requests
+/// the job itself, with the winning claim's secret, one at a time, and keeps the claim's
+/// block, header and proofs beside the judge's output, paid from the posting fee.
+#[tokio::test]
+async fn d7_publication_is_refused_before_the_delay_and_open_to_anyone_after() -> anyhow::Result<()>
+{
+    let s = Sandbox::start_with_days().await?;
+    let free_at_start = s.free_balance().await?;
+    s.post_one_day_delay("vault").await?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+
+    // Before any winner: nothing to publish.
+    let r = s.publish(&s.other, "vault", PROOFS).await?.await?;
+    assert!(failure_text(&r).contains("not been paid"), "{r:?}");
+    assert_eq!(s.published("vault").await?, Value::Null);
+
+    // Paid, but the delay hasn't passed: refused, and the view says when it opens.
+    let id = s.pay_claim("vault").await?;
+    let paid_at = now_ns(&s).await?;
+    let r = s.publish(&s.other, "vault", PROOFS).await?.await?;
+    assert!(failure_text(&r).contains("disclosure delay"), "{r:?}");
+    let view = s.published("vault").await?;
+    assert_eq!(view["state"], "delayed");
+    let from: u64 = view["publishable_from_ns"].as_str().unwrap().parse()?;
+    assert!(
+        from > paid_at + DAY_NS - 60_000_000_000 && from <= paid_at + DAY_NS,
+        "one day after the payout: {from} vs paid at {paid_at}"
+    );
+    assert_eq!(view["published"], Value::Null);
+    assert!(s.publish_requests().await?.is_empty());
+
+    // Just before the day is up, still refused.
+    s.pass_time_to(from - 2 * 3_600_000_000_000).await?;
+    let r = s.publish(&s.other, "vault", PROOFS).await?.await?;
+    assert!(failure_text(&r).contains("disclosure delay"), "{r:?}");
+
+    // After it, anyone may trigger it, but only with the proofs the claim was filed with.
+    s.pass_time_to(from).await?;
+    assert_eq!(s.published("vault").await?["state"], "publishable");
+    let r = s
+        .publish(&s.other, "vault", r#"[{"address":"0x00000000000000000000000000000000000000ab"}]"#)
+        .await?
+        .await?;
+    assert!(failure_text(&r).contains("proofs"), "{r:?}");
+    assert!(s.publish_requests().await?.is_empty());
+
+    let pending = s.publish(&s.other, "vault", PROOFS).await?;
+    let job = s.wait_for_publish_requests(1).await?.remove(0);
+    assert_eq!(job["predecessor"], json!(s.contract.id()));
+    let source: Value = serde_json::from_str(job["source"].as_str().unwrap())?;
+    assert_eq!(source["WasmUrl"]["hash"], &JUDGE_BUILD_HASH[2..]);
+    let claim = s.claim(id).await?;
+    let secrets_ref: Value = serde_json::from_str(job["secrets_ref"].as_str().unwrap())?;
+    assert_eq!(
+        secrets_ref,
+        json!({ "profile": claim["secret_profile"], "account_id": s.contract.id() }),
+        "the winning claim's own secret"
+    );
+    let input: Value = serde_json::from_str(job["input_data"].as_str().unwrap())?;
+    assert_eq!(
+        input,
+        json!({ "publish": {
+            "bounty": { "protocol": s.protocol.id(), "name": "vault" },
+            "claim_id": id,
+            "whitehat": s.whitehat.id(),
+        } })
+    );
+
+    // One at a time.
+    assert_eq!(s.published("vault").await?["state"], "requested");
+    let r = s.publish(&s.protocol, "vault", PROOFS).await?.await?;
+    assert!(failure_text(&r).contains("under way"), "{r:?}");
+
+    // What is kept: the judge's output with the claim's block, header and proofs (D7.1).
+    s.resolve(job["id"].as_u64().unwrap(), Some(PUBLISHED)).await?;
+    pending.await?.into_result()?;
+    let published = s.wait_for_publication_state("vault", "published").await?;
+    let args = s.claim_args("vault");
+    assert_eq!(published["claim_id"], id);
+    assert_eq!(published["block"], args["block"]);
+    assert_eq!(published["header"], args["header"]);
+    assert_eq!(published["proofs"], PROOFS);
+    assert_eq!(
+        published["published"],
+        "q1YqSi0uKcrMS1WyMjQwMDA1NDA0MjCwMjM2MDQ0Mlaq5QIA"
+    );
+    assert_eq!(published["verdict"], serde_json::from_str::<Value>(PAYS)?);
+    let r = s.publish(&s.other, "vault", PROOFS).await?.await?;
+    assert!(failure_text(&r).contains("already published"), "{r:?}");
+    assert_eq!(s.publish_requests().await?.len(), 1);
+
+    // R11.4: the posting fee paid for the job and the publication's storage.
+    let free_at_end = s.free_balance().await?;
+    assert!(
+        free_at_end >= free_at_start,
+        "{free_at_end} < {free_at_start}"
+    );
+    Ok(())
+}
+
+/// D7: a publication job that fails or returns anything but a publication keeps nothing;
+/// anyone can ask again, and the next good answer is kept.
+#[tokio::test]
+async fn d7_a_failed_publication_keeps_nothing_and_can_be_asked_again() -> anyhow::Result<()> {
+    let s = Sandbox::start_with_days().await?;
+    s.post_one_day_delay("vault").await?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+    s.pay_claim("vault").await?;
+    let from: u64 = s.published("vault").await?["publishable_from_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    s.pass_time_to(from).await?;
+    for answer in [
+        json!({ "output": null }),
+        json!({ "output": PAYS }),
+        json!({ "output": RELEASED }),
+        json!({ "output": r#"{"published":"not base64!"}"# }),
+    ] {
+        s.script(answer.clone()).await?;
+        s.publish(&s.other, "vault", PROOFS)
+            .await?
+            .await?
+            .into_result()?;
+        let view = s.published("vault").await?;
+        assert_eq!(view["state"], "publishable", "{answer}");
+        assert_eq!(view["published"], Value::Null, "{answer}");
+    }
+    s.script(json!({ "output": PUBLISHED })).await?;
+    s.publish(&s.other, "vault", PROOFS)
+        .await?
+        .await?
+        .into_result()?;
+    assert_eq!(s.published("vault").await?["state"], "published");
     Ok(())
 }
 

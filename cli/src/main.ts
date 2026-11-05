@@ -2,7 +2,8 @@
 // BounTEE's command-line tool. Commands so far: `--version`, `help`, `init` (#16), `test`
 // (ticket #11), `broadcast` (ticket #13), `claim` (sealing and filing, #15; script path,
 // verdict, payout and pauses, #16; live progress and receipt, #26), `list`, `show` and
-// `status` (#26), `post` (#17), `verify-pause` (#21), `open-exploit` (#22). The rest (verify,
+// `status` (#26), `post` (#17), `verify-pause` (#21), `open-exploit` (#22), `publish` and
+// `rerun` (#23). The rest (verify,
 // balance, key, withdraw) land in the CLI tickets. Every command takes `--json` for
 // machine-readable output (R14.5): the result
 // as one JSON document on stdout, an error as `{"error": …}` on stderr, and a claim's live
@@ -16,6 +17,7 @@ import { Near, NEAR_RPC, parseNetwork } from "./near.ts";
 import { exploitPublicKey, formatOpenExploit, openExploit } from "./open-exploit.ts";
 import { claimStatus, formatStage, formatStatus, loadClaimTxs, watchClaim } from "./status.ts";
 import { formatPostResult, post } from "./post.ts";
+import { formatPublishResult, formatRerunResult, publishExploit, rerunPublished } from "./publish.ts";
 import { formatReplayResult, formatTestResult, replayJob, testCommand } from "./test.ts";
 import { formatVerifyResult, verifyPauses } from "./verify-pause.ts";
 
@@ -43,6 +45,8 @@ const USAGES: Record<string, string> = {
   "open-exploit": `bountee open-exploit <protocol>/<name> (--wallet <Ethereum key file> | --key-file <saved exploit key>) [--public-key] [--as <account>] [--out <file>] ${NEAR_FLAGS} [--json]`,
   broadcast: "bountee broadcast <protocol>/<name> [--contract <account>] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]",
   "verify-pause": `bountee verify-pause <protocol>/<name> --as <account> ${NEAR_FLAGS} [--chain <chain id>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]`,
+  publish: `bountee publish <protocol>/<name> --as <account> --proofs <saved job.json | proofs.json> ${NEAR_FLAGS} [--json]`,
+  rerun: `bountee rerun <protocol>/<name> [--judge <wasm>] [--out <job.json>] ${NEAR_FLAGS} [--json]`,
 };
 const usage = (command: string) => `usage: ${USAGES[command]}`;
 
@@ -202,6 +206,19 @@ try {
       const r = await openExploit(o);
       print(r, formatOpenExploit(r));
     }
+  } else if (command === "publish") {
+    const { positional, flags } = parse(rest.slice(1));
+    if (!positional[0] || !flags.as || !flags.proofs) fail(`publish needs a bounty id, --as and --proofs\n${usage(command)}`, 2);
+    const { near, contract } = nearFor(command, flags);
+    const r = await publishExploit({ near, contract, bounty: parseBountyId(positional[0]), as: flags.as, proofs: flags.proofs });
+    print(r, formatPublishResult(r));
+  } else if (command === "rerun") {
+    const { positional, flags } = parse(rest.slice(1));
+    if (!positional[0]) fail(`rerun needs a bounty id\n${usage(command)}`, 2);
+    const { near, contract } = nearFor(command, flags);
+    const r = await rerunPublished({ near, contract, bounty: parseBountyId(positional[0]), judge: flags.judge, out: flags.out });
+    print(r, formatRerunResult(r));
+    if (!r.same_verdict) process.exit(1);
   } else if (command === "claim") {
     const r = await claim(rest.slice(1), showStage);
     print(r, formatClaimResult(r));
