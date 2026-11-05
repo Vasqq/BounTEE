@@ -3552,21 +3552,24 @@ impl Sandbox {
 
     /// Fast-forward until a block's time is just past `ns`, on any node (an ordinary one
     /// moves its clock about a second a block, a day node about 100 s). Each step is capped
-    /// at the time left over the last measured time per block, so a long wait takes few
-    /// steps and no step overshoots by more than a block.
+    /// at the time left over the most time per block measured so far, and grows at most
+    /// fourfold, so one short measurement can't send a long step: a long wait takes few
+    /// steps and none overshoots by more than a block.
     async fn pass_time_to(&self, ns: u64) -> anyhow::Result<()> {
-        let mut per_block: Option<u64> = None;
+        let mut per_block: u64 = 1;
+        let mut last_step: u64 = 0;
         for _ in 0..1_000 {
             let before = now_ns(self).await?;
             if before > ns {
                 return Ok(());
             }
-            let step = per_block.map_or(1, |p| ((ns - before) / p).clamp(1, 5_000));
+            let step = ((ns - before) / per_block).clamp(1, (4 * last_step).clamp(1, 5_000));
             self.worker.fast_forward(step).await?;
             // Rounded up, and blocks produced meanwhile count too: it errs high, so the next
             // step errs short.
             let moved = now_ns(self).await?.saturating_sub(before);
-            per_block = Some(moved.div_ceil(step).max(1));
+            per_block = per_block.max(moved.div_ceil(step));
+            last_step = step;
         }
         anyhow::bail!("the sandbox clock didn't reach {ns}")
     }
