@@ -2,7 +2,7 @@
 //! and refuse what they must. The TypeScript side runs the same cases from the same file.
 
 use bountee_formats::{
-    from_json, to_json, BountyId, Claim, Exploit, Job, ReleaseOutput, ReleasedExploit, Rules,
+    from_json, to_json, BountyId, Claim, Exploit, Job, PublishOutput, ReleaseOutput, ReleasedExploit, Rules,
     SealedBundle, Verdict,
 };
 use serde_json::Value;
@@ -27,6 +27,7 @@ fn round_trip(kind: &str, value: &Value) -> Result<Value, String> {
         "sealed_bundle" => go::<SealedBundle>(value),
         "released_exploit" => go::<ReleasedExploit>(value),
         "release_output" => go::<ReleaseOutput>(value),
+        "publish_output" => go::<PublishOutput>(value),
         other => panic!("unknown kind {other}"),
     }
 }

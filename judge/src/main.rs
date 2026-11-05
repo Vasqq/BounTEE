@@ -14,6 +14,9 @@
 //! - `release`, the enclave (#22): [`release::release`] re-encrypts the winning claim's
 //!   sealed exploit to the Protocol's exploit key; stdout is a `ReleaseOutput`, not a
 //!   verdict. A release that may not happen exits with status 2 and writes nothing.
+//! - `publish`, the enclave (#23): [`release::publish`] writes the winning claim's exploit
+//!   in the clear once the bounty contract lets its disclosure delay pass; stdout is a
+//!   `PublishOutput`, and one that may not happen exits with status 2 and writes nothing.
 //!
 //! stdout carries only the verdict. A job that can't have a verdict (R2.6) exits with
 //! status 2 and nothing on stdout: OutLayer reports it as a failed job, which reaches the
@@ -78,6 +81,10 @@ fn main() {
             Some(output) => return write(&output),
             None => std::process::exit(NO_VERDICT),
         },
+        Ok(Job::Publish(job)) => match release::publish(&job) {
+            Some(output) => return write(&output),
+            None => std::process::exit(NO_VERDICT),
+        },
         Ok(Job::JudgeClaim(job)) => match claim::judge(&job, || sealed::exploit(&job.whitehat)) {
             Ok(verdict) => verdict,
             Err(_) => std::process::exit(NO_VERDICT),
@@ -102,6 +109,7 @@ fn is_enclave_job(input: &str) -> bool {
             v.get("judge_claim").is_some()
                 || v.get("posting_check").is_some()
                 || v.get("release").is_some()
+                || v.get("publish").is_some()
         })
         .unwrap_or(false)
 }
