@@ -178,12 +178,21 @@ impl Contract {
             .and_then(|c| self.claims.get(&c))
             .map(|c| &c.whitehat);
         let may_use_prepaid = winner == Some(&caller) || caller.as_str() == id.protocol.as_str();
-        let prepaid = may_use_prepaid
-            && record.prepaid_used < PREPAID_ATTEMPTS
-            && bounty.draw_fee(cost).is_ok();
-        let taken = if prepaid {
+        let taken = if may_use_prepaid && record.prepaid_used < PREPAID_ATTEMPTS {
+            // A prepaid attempt: the posting fee pays. Should what is left of it fall short,
+            // the caller attaches the shortfall, which joins it (R11.4).
+            let short = bounty
+                .fee_short_of(cost)
+                .unwrap_or(NearToken::from_yoctonear(0));
+            if deposit < short {
+                crate::refuse_shortfall("this verification", short);
+            }
+            bounty.fee_reserve = bounty.fee_reserve.saturating_add(short);
+            bounty
+                .draw_fee(cost)
+                .unwrap_or_else(|s| crate::refuse_shortfall("this verification", s));
             record.prepaid_used += 1;
-            NearToken::from_yoctonear(0)
+            short
         } else {
             require!(
                 deposit >= cost,

@@ -2259,6 +2259,53 @@ async fn r7_10_only_the_winner_or_the_protocol_use_the_prepaid_verification_atte
     Ok(())
 }
 
+/// R7.10, R11.4 (code review of #21): when the posting fee left can't pay for a prepaid
+/// attempt, the winning Whitehat's request is refused naming the shortfall to attach, not as
+/// if the prepaid attempts were used; attaching it pays for that prepaid attempt.
+#[tokio::test]
+async fn r7_10_a_prepaid_attempt_the_fee_cant_cover_names_the_shortfall() -> anyhow::Result<()> {
+    let none = NearToken::from_yoctonear(0);
+    let s = paid_two_chain_bounty().await?;
+    let fee = s.fee("verify_pause_fee_per_pause").await?.as_yoctonear();
+    s.set_posting_fee_left("vault", 1).await?;
+
+    // Arbitrum has one pause: the attempt costs one fee, one yoctoNEAR of which is left.
+    let short = fee - 1;
+    let r = s
+        .verify_pause(&s.whitehat, "vault", 421614, json!({}), none)
+        .await?
+        .await?;
+    let text = failure_text(&r);
+    assert!(
+        text.contains(&format!(
+            "the posting fee left can't pay for this verification: attach {short} yoctoNEAR"
+        )),
+        "{text}"
+    );
+    assert!(!text.contains("prepaid attempts are used"), "{text}");
+    assert!(s.verify_requests().await?.is_empty());
+
+    let call = s
+        .verify_pause(
+            &s.whitehat,
+            "vault",
+            421614,
+            json!({}),
+            NearToken::from_yoctonear(short),
+        )
+        .await?;
+    s.wait_for_verify_requests(1).await?;
+    s.worker.fast_forward(250).await?;
+    call.await?.into_result()?;
+    let v = s.wait_until_not_verifying("vault", 421614).await?;
+    assert_eq!(
+        (v["attempts"].clone(), v["prepaid_attempts_left"].clone()),
+        (json!(1), json!(2))
+    );
+    assert_eq!(s.posting_fee_left("vault").await?, 0);
+    Ok(())
+}
+
 // ---- posting check (#17) ----
 
 impl Sandbox {
