@@ -10,12 +10,13 @@
 //   -> its sealed exploit copied and sent straight to OutLayer: refused (R5.2)
 //
 // Runs only with BOUNTEE_DAY3_RUN=1 (it spends testnet NEAR and Base Sepolia ETH). Needs
-// ~/.bountee-testnet/day3-deployment.json from `testnet/deploy-system.ts`, the
+// $BOUNTEE_DAY3 (default ~/.bountee-testnet/day3-deployment.json) from `testnet/deploy-system.ts`, the
 // Protocol's and attacker's keys in ~/.near-credentials/testnet, and the Base Sepolia
 // deployer in ~/.bountee-testnet/base-sepolia-deployer.env. WHITEHAT=<account> uses an
 // existing account instead of `init` (when NEAR's faucet is rate-limited); INSTANCE=<file> reuses
 // an unclaimed instance fresh-instance.ts wrote, after a failure past that step. Every transaction
-// hash is written to ~/.bountee-testnet/day3-evidence.json.
+// hash is written to ~/.bountee-testnet/day3-evidence.json. The PAYS claim runs with `--no-verify`:
+// verifying its pause on NEAR waits for Base Sepolia's safe head (R7.10, verify-pause-testnet.test.ts).
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -60,7 +61,9 @@ function run(cmd: string, args: string[], env: Record<string, string> = {}): Pro
 const bountee = (args: string[], env: Record<string, string> = {}) => run(process.execPath, [entry, ...args], env);
 
 describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
-  const deployment = RUN ? JSON.parse(readFileSync(join(home, ".bountee-testnet", "day3-deployment.json"), "utf8")) : {};
+  // The file fresh-instance.ts reads too, so the bounty is posted on the contract this test checks.
+  const deploymentFile = process.env.BOUNTEE_DAY3 ?? join(home, ".bountee-testnet", "day3-deployment.json");
+  const deployment = RUN ? JSON.parse(readFileSync(deploymentFile, "utf8")) : {};
   const contract: string = deployment.contract;
   const usdc: string = deployment.usdc;
   let instance: any;
@@ -83,7 +86,7 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
       // Re-running after a failure past this step: reuse the unclaimed instance, spend no ETH.
       instance = JSON.parse(readFileSync(process.env.INSTANCE, "utf8"));
     } else {
-      const r = await run(process.execPath, [freshInstance], { WHITEHAT: whitehat, CLAIMS: "3" });
+      const r = await run(process.execPath, [freshInstance], { WHITEHAT: whitehat, CLAIMS: "3", BOUNTEE_DAY3: deploymentFile });
       expect(r.code, `${r.stderr}\n${r.stdout}`).toBe(0);
       instance = JSON.parse(r.stdout.trim().split("\n").at(-1)!);
     }
@@ -163,14 +166,28 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
 
   test("R3.10, D2, R7.4: the real demo exploit claimed through the tool is paid exactly once, and the vault reads paused", async () => {
     const before = { whitehat: await ft(whitehat), contract: await ft(contract) };
-    const r = await bountee(claimArgs("Exploit.s.sol"), { VAULT: instance.vault });
+    const r = await bountee([...claimArgs("Exploit.s.sol"), "--no-verify", "--timeout", "600"], { VAULT: instance.vault });
     expect(r.code, r.stderr || r.stdout).toBe(0);
     const out = JSON.parse(r.stdout);
     paysClaim = out;
     record("R3.10 PAYS claim", { claim_id: out.claim_id, tx: out.tx_hash, sign_pauses_tx: out.sign_pauses_tx });
     expect(out.local_verdict).toStrictEqual({ outcome: "PAYS", reason: "minimum_theft_reached" });
     expect(out.verdict).toStrictEqual(out.local_verdict); // D2
-    const bounty = await near.view(contract, "bounty", { id: { protocol: instance.protocol, name: instance.name } });
+    const id = { protocol: instance.protocol, name: instance.name };
+    let bounty = await near.view(contract, "bounty", { id });
+    // R2.6's earlier no-verdict claim holds its place for `claim_place_hold_ns` (R3.6), so the
+    // payout waits until then; afterwards anyone retries it through the tool.
+    let retryTx: string | undefined;
+    if (bounty.state === "paying" && bounty.payout_waits_until_ns) {
+      const waitMs = Number(BigInt(bounty.payout_waits_until_ns) / 1_000_000n) - Date.now() + 20_000;
+      record("R3.6 payout waits for the earlier claim until", new Date(Number(BigInt(bounty.payout_waits_until_ns) / 1_000_000n)).toISOString());
+      if (waitMs > 0) await new Promise((res) => setTimeout(res, waitMs));
+      const retried = await bountee(["retry-payout", instance.bounty, "--contract", contract, "--as", whitehat, "--json"]);
+      expect(retried.code, retried.stderr || retried.stdout).toBe(0);
+      retryTx = JSON.parse(retried.stdout).tx_hash;
+      record("R3.10 retry-payout tx", retryTx);
+      bounty = await near.view(contract, "bounty", { id });
+    }
     expect(bounty.state).toBe("paid");
     expect(bounty.winning_claim).toBe(out.claim_id);
     const amount = BigInt(instance.rules.bounty_amount);
@@ -202,9 +219,11 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
     expect(JSON.stringify(direct.status)).toMatch(/this bounty is closed/);
     expect(await ft(whitehat)).toBe(before.whitehat + amount);
     let paid = events(status).filter((e) => e.event === "bounty_paid").length;
-    if (out.sign_pauses_tx) paid += events(await near.txStatus(out.sign_pauses_tx, whitehat)).filter((e) => e.event === "bounty_paid").length;
+    for (const tx of [out.sign_pauses_tx, retryTx]) {
+      if (tx) paid += events(await near.txStatus(tx, whitehat)).filter((e) => e.event === "bounty_paid").length;
+    }
     expect(paid).toBe(1);
-  }, 900_000);
+  }, 5_400_000);
 
   test("R5.2: the PAYS claim's sealed exploit, copied and sent straight to OutLayer, is refused", async () => {
     expect(paysClaim).toBeDefined();
