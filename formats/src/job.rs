@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::claim::{AccountProof, BlockRef};
-use crate::primitives::{AccountId, Bytes, EvmAddress, SafeU64, Uint, U64};
+use crate::primitives::{AccountId, Base64, Bytes, EvmAddress, PublicKey, SafeU64, Uint, U64};
 use crate::rules::{BountyId, Rules};
 
 /// The exploit the judge replays: the transactions a Foundry script broadcasts, in order.
@@ -97,11 +97,50 @@ pub struct JudgeClaim {
     pub submitted_at_ns: U64,
 }
 
-/// A job for the judge, its whole stdin: `{"replay": {...}}` (local runs) or
-/// `{"judge_claim": {...}}` (the enclave). The posting check joins this enum in #17.
+/// The enclave's release job (#22, R6.1, R12.4): the bounty contract requests it, with the
+/// winning claim's secret, only after that claim's payout has succeeded. The judge opens the
+/// sealed exploit, checks it was sealed for `whitehat`, and re-encrypts it to
+/// `exploit_public_key`, the key recorded in the bounty's rules (an `x25519:` key), writing
+/// a [`ReleaseOutput`]. Unknown fields are refused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Release {
+    pub bounty: BountyId,
+    pub claim_id: SafeU64,
+    /// The winning claim's claimant, whose account the sealed exploit must name.
+    pub whitehat: AccountId,
+    /// The posting Protocol's exploit key, from the bounty's rules.
+    pub exploit_public_key: PublicKey,
+}
+
+/// What the Protocol opens with its exploit key (R6.2): the winning exploit and which claim
+/// it won. The release job writes it as JSON, compresses it with raw DEFLATE and encrypts it
+/// to the exploit key (BounTEE release v1): base64 of `0x01 | ephemeral X25519 public key
+/// (32) | nonce (12) | ChaCha20-Poly1305 ciphertext and tag`, keyed by HKDF-SHA256 (no salt,
+/// info `bountee-release-v1`) of the X25519 shared secret.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReleasedExploit {
+    pub bounty: BountyId,
+    pub claim_id: SafeU64,
+    pub whitehat: AccountId,
+    pub exploit: Exploit,
+}
+
+/// The release job's stdout: the [`ReleasedExploit`], encrypted to the exploit key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReleaseOutput {
+    pub released: Base64,
+}
+
+/// A job for the judge, its whole stdin: `{"replay": {...}}` (local runs),
+/// `{"judge_claim": {...}}` or `{"release": {...}}` (the enclave). The posting check joins
+/// this enum in #17.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Job {
     Replay(Replay),
     JudgeClaim(JudgeClaim),
+    Release(Release),
 }

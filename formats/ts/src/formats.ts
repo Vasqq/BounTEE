@@ -194,8 +194,16 @@ export interface JudgeClaim {
   submitted_at_ns: string;
 }
 
+/** The enclave's release job (#22, R6.1, R12.4; see job.rs). */
+export interface Release {
+  bounty: BountyId;
+  claim_id: number;
+  whitehat: string;
+  exploit_public_key: string;
+}
+
 /** The judge's stdin. */
-export type Job = { replay: Replay } | { judge_claim: JudgeClaim };
+export type Job = { replay: Replay } | { judge_claim: JudgeClaim } | { release: Release };
 
 const evmAddressOrNull = (v: unknown): string | null => (v === null ? null : evmAddress(v));
 
@@ -225,10 +233,20 @@ export const parseJudgeClaim: (v: unknown) => JudgeClaim = object<JudgeClaim>({
   submitted_at_ns: u64,
 });
 
+export const parseRelease: (v: unknown) => Release = object<Release>({
+  bounty: parseBountyId,
+  claim_id: safeU64,
+  whitehat: accountId,
+  exploit_public_key: publicKey,
+});
+
 /** One key naming the action, as serde writes a Rust enum. */
 export const parseJob = (v: unknown): Job => {
   if (typeof v === "object" && v !== null && !Array.isArray(v) && "judge_claim" in v) {
     return object<{ judge_claim: JudgeClaim }>({ judge_claim: parseJudgeClaim })(v);
+  }
+  if (typeof v === "object" && v !== null && !Array.isArray(v) && "release" in v) {
+    return object<{ release: Release }>({ release: parseRelease })(v);
   }
   return object<{ replay: Replay }>({ replay: parseReplay })(v);
 };
@@ -247,6 +265,28 @@ export const parseSealedBundle: (v: unknown) => SealedBundle = object<SealedBund
   whitehat: accountId,
   exploit: parseExploit,
 });
+
+/** What the Protocol opens with its exploit key (R6.2; the encryption is in job.rs). */
+export interface ReleasedExploit {
+  bounty: BountyId;
+  claim_id: number;
+  whitehat: string;
+  exploit: Exploit;
+}
+
+export const parseReleasedExploit: (v: unknown) => ReleasedExploit = object<ReleasedExploit>({
+  bounty: parseBountyId,
+  claim_id: safeU64,
+  whitehat: accountId,
+  exploit: parseExploit,
+});
+
+/** The release job's stdout: the ReleasedExploit, encrypted to the exploit key. */
+export interface ReleaseOutput {
+  released: string;
+}
+
+export const parseReleaseOutput: (v: unknown) => ReleaseOutput = object<ReleaseOutput>({ released: base64 });
 
 const outcomeOf = (v: unknown): Outcome =>
   v === "PAYS" || v === "ZERO" || v === "INVALID" ? v : fail("outcome", v);

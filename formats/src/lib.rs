@@ -4,7 +4,8 @@
 //! - [`Claim`]: what a Whitehat submits: the bounty, their account, the claim's block, its
 //!   header and state proofs, and the sealed exploit.
 //! - [`Job`]: the judge's stdin; [`Replay`] is a local replay of an [`Exploit`], the
-//!   transactions a Foundry script broadcasts; [`JudgeClaim`] is the enclave's claim job.
+//!   transactions a Foundry script broadcasts; [`JudgeClaim`] is the enclave's claim job and
+//!   [`Release`] its release job, whose output [`ReleaseOutput`] holds a [`ReleasedExploit`].
 //! - [`Verdict`]: the judge's answer, PAYS, ZERO or INVALID with one coarse reason (R5.5).
 //! - [`pause_role`]: D25, a bounty's pause-role address under NEAR Chain Signatures.
 //!
@@ -28,7 +29,10 @@ mod verdict;
 pub mod pause_role;
 
 pub use claim::{AccountProof, BlockRef, Claim, StorageProof};
-pub use job::{Exploit, ExploitTransaction, Job, JudgeClaim, Replay, SealedBundle};
+pub use job::{
+    Exploit, ExploitTransaction, Job, JudgeClaim, Release, ReleaseOutput, ReleasedExploit, Replay,
+    SealedBundle,
+};
 pub use primitives::{
     is_account_id, is_bounty_name, AccountId, Base64, BountyName, Bytes, EvmAddress, FormatError,
     PublicKey, SafeU64, Uint, B256, MAX_SAFE_INTEGER, U64,
