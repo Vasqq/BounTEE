@@ -45,7 +45,9 @@ interface PublicationView {
   header: string;
   proofs_sha256: string;
   /** The NEAR block the claim's submission ran in. */
-  submitted_at_block: string;
+  submitted_at_block?: string;
+  /** The proofs themselves, kept only by deployments from before the code review of #23. */
+  proofs?: string | null;
   verdict: unknown;
   published: string | null;
 }
@@ -90,8 +92,11 @@ function submitClaimArgs(tx: RpcTx, contract: string): string[] {
  * network's archival RPC; with `--near-rpc`, that RPC must keep the block.
  */
 export async function claimProofs(near: Near, contract: string, claimId: number): Promise<string> {
-  const claim = await near.view<{ proofs_sha256: string; submitted_at_block: string } | null>(contract, "claim", { claim_id: claimId });
+  const claim = await near.view<{ proofs_sha256: string; submitted_at_block?: string } | null>(contract, "claim", { claim_id: claimId });
   if (!claim) throw new Error(`${contract} has no claim ${claimId}`);
+  if (claim.submitted_at_block === undefined) {
+    throw new Error(`${contract} doesn't record the block claim ${claimId} was submitted in: pass --proofs`);
+  }
   const at = Number(claim.submitted_at_block);
   const rpcs = near.url === NEAR_RPC[near.network] ? [near, new Near(near.network, ARCHIVAL_RPC[near.network])] : [near];
   const block = async (height: number): Promise<{ rpc: Near; chunks: string[] } | null> => {
@@ -204,7 +209,12 @@ export async function rerunPublished(o: { near: Near; contract: string; bounty: 
     const opens = pub ? `; anyone may publish it from ${when(pub.publishable_from_ns)}` : "";
     throw new Error(`${label(o.bounty)}'s winning exploit is not yet published${opens}`);
   }
-  const proofs = o.proofs ? proofsFrom(o.proofs) : await claimProofs(o.near, o.contract, pub.claim_id);
+  // A deployment from before the code review of #23 still keeps the proofs in its publication.
+  const proofs = o.proofs
+    ? proofsFrom(o.proofs)
+    : typeof pub.proofs === "string"
+      ? pub.proofs
+      : await claimProofs(o.near, o.contract, pub.claim_id);
   if (sha256(proofs) !== pub.proofs_sha256) {
     throw new Error(`these proofs (sha256 ${sha256(proofs)}) aren't the ones the claim was filed with (${pub.proofs_sha256})`);
   }
