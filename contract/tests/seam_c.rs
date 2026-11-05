@@ -1872,7 +1872,7 @@ async fn a_failed_or_missing_transaction_is_never_recorded_as_verified() -> anyh
         .await?;
     assert!(failure_text(&r).contains("already under way"), "{r:?}");
     s.worker.fast_forward(250).await?;
-    call.await?;
+    call.await?.into_result()?;
     let v = s.wait_until_not_verifying("vault", 84532).await?;
     assert_eq!(v["verified"], false, "{v}");
     assert_eq!(v["verified_pauses"], json!([]));
@@ -1887,7 +1887,7 @@ async fn a_failed_or_missing_transaction_is_never_recorded_as_verified() -> anyh
     s.respond_verify(2, verified_answer(&expected_payload_hash(6, &other_tx)))
         .await?;
     s.respond_verify(3, json!({ "payload_hash": 7 })).await?;
-    call.await?;
+    call.await?.into_result()?;
     let v = s.wait_until_not_verifying("vault", 84532).await?;
     assert_eq!(v["verified"], false, "{v}");
     assert_eq!(v["verified_pauses"], json!([]));
@@ -1905,7 +1905,7 @@ async fn a_failed_or_missing_transaction_is_never_recorded_as_verified() -> anyh
     s.respond_verify(4, verified_answer(&expected_payload_hash(6, &first)))
         .await?;
     s.worker.fast_forward(250).await?;
-    call.await?;
+    call.await?.into_result()?;
     let v = s.wait_until_not_verifying("vault", 84532).await?;
     assert_eq!(v["verified"], false, "{v}");
     assert_eq!(v["verified_pauses"], json!([format!("0x{first}")]));
