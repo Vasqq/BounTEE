@@ -1,0 +1,84 @@
+{
+ "contract": "day3b.bountee-spike2.testnet",
+ "bounty": {
+  "id": {
+   "protocol": "bountee-spike4.testnet",
+   "name": "demo-202611050342"
+  },
+  "rules": {
+   "covered_contracts": [
+    {
+     "chain_id": 84532,
+     "address": "0xc4da6cc0546a3225ad6da2fe38b928f9ed4ba094"
+    }
+   ],
+   "proof_chain": 84532,
+   "recency_limit_secs": 300,
+   "listed_tokens": [
+    {
+     "token": "0x5ef8dfea67683724e53698f0e9162eb2c3689e24",
+     "price": "1"
+    },
+    {
+     "token": "native",
+     "price": "0"
+    }
+   ],
+   "seed": {
+    "native": "1000000000000000000",
+    "tokens": []
+   },
+   "bounty_amount": "100000000",
+   "minimum_theft": "1000000000",
+   "end_date_ns": "1796442141731000000",
+   "disclosure_delay_days": 30,
+   "exploit_public_key": "x25519:BvcnVkZZ98AyydmC32UrjcUUKA5YpUydb2v2jm76HBnB",
+   "judge_build_hash": "0xc4222111c3523dae3bd7b3002fb63ddf254231bd9f437c497acf4d5962a1df45"
+  },
+  "state": "paid",
+  "winning_claim": 7,
+  "signed_pauses": [
+   {
+    "chain_id": 84532,
+    "contract": "0xc4da6cc0546a3225ad6da2fe38b928f9ed4ba094",
+    "nonce": 0,
+    "tx": "0x02f87183014a348083989680843b9aca0083030d4094c4da6cc0546a3225ad6da2fe38b928f9ed4ba09480848456cb59c001a0fef71aba5b29e674199a825023cab188ce6ac78b0a7105ccc24ebd983d6db568a0332ef27cde07afc1dd32a55aae8bca4d8543dbc776ccb92bc4360feabbc08b1b",
+    "tx_hash": "0xd186466b87bc2fb785c2d4aed14682a60747d9ebe43c29b656cb31958ba37846"
+   }
+  ],
+  "signing_pauses": false,
+  "paying_out": false
+ },
+ "claim": {
+  "bounty": {
+   "protocol": "bountee-spike4.testnet",
+   "name": "demo-202611050342"
+  },
+  "whitehat": "bts1-white-1104.testnet",
+  "block": {
+   "number": 54643662,
+   "hash": "0xa86d6042c0643966abd036460fe0ad46964cd50d2cc7dc281b11ae02d6dff93d"
+  },
+  "header": "0xf90279a007a104a8abd7658d0f61015db6c7543837bf74a2433ed81fd4a433346a7fdc35a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347944200000000000000000000000000000000000011a0ec8cae70890a004940b892455157575b03269f10a5227dbe17da837a59450725a0a5622cb83f34af680d4a6b32166d1f664668c7f44e5511c6def78250a1927d7ea00c54cd3e19bbcddef85c6e77bea5385cc9ca650c2326b5f01726594048d752d1b901003401000404040000010000000440408000404000040006002404012000080012408a040140200001000004110000000000010000c6560002012002020028000800101000801080408020c00808040200006000080010282802404000420000180800000023080000020a000121000a0000001008004000400200001c000000000070004424040000801442010000001180000c82802010006028000400508030020000001000800080c041400400100400140010808c00000022021800004102002002028011044080810830240000010010000882003021500000100408200400141304000206800041044008a200008000008100800000008040002024040080840341cbce8407270e008316696e846aebfce99101000003e80000000f00000000004c4b40a0935bbb01d5a1528b72e6111d65fe4c375bffb7a981f98780c0bdda2116b414ff880000000000000000834c4b40a0b3c47d8368e8284db85d7fdfaca088db8a5200a01f3a7c8d79ccce8d5bd5fba483113cf680a0df5aa2a501ccfc4f598df3bded73149db4158cf43b70fba81f7da73d8e8601e9a0e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "proofs_sha256": "0xa9721134bc117b791657e9f89c3bfba98f4f875c4814f84d1404107f647bc772",
+  "submitted_at_ns": "1793850608584544984",
+  "secret_profile": "c7",
+  "state": "judged",
+  "verdict": {
+   "outcome": "PAYS",
+   "reason": "minimum_theft_reached"
+  }
+ },
+ "config": {
+  "outlayer": "outlayer.testnet",
+  "mpc": "v1.signer-prod.testnet",
+  "mpc_root_public_key": "secp256k1:4NfTiv3UsGahebgTaHyD9vF8KYKMBnfd6kh94mK6xv8fGBiJB8TBtFMP5WWXz6B89Ac1fbpzPwAvoyQebemHFwx3",
+  "usdc": "ft.bountee-spike4.testnet",
+  "judge_build_hash": "0xc4222111c3523dae3bd7b3002fb63ddf254231bd9f437c497acf4d5962a1df45",
+  "judge_wasm_url": "https://test.fastfs.io/bountee-spike2.testnet/outlayer.testnet/c4222111c3523dae3bd7b3002fb63ddf254231bd9f437c497acf4d5962a1df45.wasm",
+  "seed": {
+   "native": "1000000000000000000",
+   "tokens": []
+  }
+ }
+}

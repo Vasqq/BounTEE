@@ -1,28 +1,25 @@
 // What the testnet deploy scripts share (deploy-system.ts, deploy-sealing.ts): build the
 // judge and upload it to OutLayer's FastFS, the bounty contract's configuration, and its
 // keyless deployment.
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { actions, PublicKey } from "near-api-js";
 import { pauseRole } from "@bountee/formats";
+import { reproducibleBuild } from "../../src/build.ts";
 import { Near, milliNear, tgas } from "../../src/near.ts";
 
 export const root = fileURLToPath(new URL("../../../", import.meta.url));
 export const near = new Near("testnet", process.env.NEAR_TESTNET_RPC);
 
-/** Build the attested judge (no features), pinned to `pinnedTo` as its only caller. */
+/**
+ * Build the attested judge (no features), pinned to `pinnedTo` as its only caller, with the
+ * reproducible build (`bountee build`, R15.2) of the checkout's HEAD commit, so anyone
+ * rebuilds the hash the deployment pins.
+ */
 export function buildJudge(pinnedTo: string): { wasm: Buffer; hash: string } {
-  const target = readFileSync(join(root, "judge/wasm-target"), "utf8").trim();
-  execFileSync("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], {
-    cwd: root,
-    stdio: "inherit",
-    env: { ...process.env, BOUNTEE_BOUNTY_CONTRACT: pinnedTo },
-  });
-  const wasm = readFileSync(join(root, `target/${target}/release/bountee-judge.wasm`));
-  return { wasm, hash: createHash("sha256").update(wasm).digest("hex") };
+  const built = reproducibleBuild({ pin: pinnedTo, only: "judge" }).judge!;
+  return { wasm: readFileSync(built.wasm), hash: built.sha256 };
 }
 
 /**
@@ -77,8 +74,8 @@ export async function deployKeyless(contract: string, config: ReturnType<typeof 
   const keys = await near.provider.viewAccessKeyList({ accountId: contract });
   let tx: string | undefined;
   if (keys.keys.length > 0) {
-    execFileSync("cargo", ["near", "build", "non-reproducible-wasm"], { cwd: join(root, "contract"), stdio: "inherit" });
-    const code = readFileSync(join(root, "contract/target/near/bountee_contract.wasm"));
+    // The reproducible build of HEAD (R15.2); its NEP-330 metadata names the commit.
+    const code = readFileSync(reproducibleBuild({ pin: contract, only: "contract" }).contract!.wasm);
     const r = await near.account(contract).signAndSendTransaction({
       receiverId: contract,
       actions: [
