@@ -151,8 +151,7 @@ impl Contract {
 
         let cost = fees::VERIFY_PAUSE.saturating_mul(pending.len() as u128);
         let deposit = env::attached_deposit();
-        let taken = if record.attempts < PREPAID_ATTEMPTS && bounty.fee_reserve >= cost {
-            bounty.fee_reserve = bounty.fee_reserve.saturating_sub(cost);
+        let taken = if record.attempts < PREPAID_ATTEMPTS && bounty.draw_fee(cost).is_ok() {
             NearToken::from_yoctonear(0)
         } else {
             require!(

@@ -111,16 +111,8 @@ impl Contract {
             Self::gas_left(gas::TAIL) >= gas::release(),
             "attach more gas: see min_release_gas in fees()"
         );
-        bounty.fee_reserve = bounty.fee_reserve.saturating_add(env::attached_deposit());
         let hold = release_hold();
-        require!(
-            bounty.fee_reserve >= hold,
-            &format!(
-                "the posting fee left can't pay for a release: attach {} yoctoNEAR",
-                hold.saturating_sub(bounty.fee_reserve).as_yoctonear()
-            )
-        );
-        bounty.fee_reserve = bounty.fee_reserve.saturating_sub(hold);
+        bounty.draw_fee_or_refuse(hold, "a release");
         let rules = bounty.rules.clone();
         let claim = self
             .claims

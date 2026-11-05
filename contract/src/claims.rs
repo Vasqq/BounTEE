@@ -430,8 +430,16 @@ impl Contract {
             return PromiseOrValue::Value(());
         }
         match self.start_pause_signing(&bounty_id) {
-            Some(p) => p.into(),
-            None => PromiseOrValue::Value(()),
+            Ok(p) => p.into(),
+            Err(crate::pauses::NotSigning::Short(short)) => {
+                // Waits for a `sign_pauses` that attaches the shortfall (R11.4).
+                emit(
+                    "pause_signing_waiting",
+                    json!({ "bounty": bounty_id, "claim_id": claim_id, "posting_fee_short": short }),
+                );
+                PromiseOrValue::Value(())
+            }
+            Err(crate::pauses::NotSigning::NoPauses) => PromiseOrValue::Value(()),
         }
     }
 }

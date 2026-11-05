@@ -219,6 +219,46 @@ pub struct Bounty {
     pub paid_at_ns: Option<u64>,
 }
 
+impl Bounty {
+    /// Take `cost` from what is left of this bounty's posting fee, or, if that can't cover it,
+    /// take nothing and return the shortfall. Every cost a bounty runs up after its posting is
+    /// drawn here, so the contract's own balance pays none of it (R11.4).
+    pub(crate) fn draw_fee(&mut self, cost: NearToken) -> Result<(), NearToken> {
+        if let Some(short) = self.fee_short_of(cost) {
+            return Err(short);
+        }
+        self.fee_reserve = self.fee_reserve.saturating_sub(cost);
+        Ok(())
+    }
+
+    /// How much the posting fee left is short of `cost`, if it is.
+    pub(crate) fn fee_short_of(&self, cost: NearToken) -> Option<NearToken> {
+        (self.fee_reserve < cost).then(|| cost.saturating_sub(self.fee_reserve))
+    }
+
+    /// The NEAR attached to this call joins the bounty's posting fee.
+    pub(crate) fn add_attached_to_fee(&mut self) {
+        self.fee_reserve = self.fee_reserve.saturating_add(env::attached_deposit());
+    }
+
+    /// For a call anyone may pay toward: the NEAR attached joins the posting fee, then `cost`
+    /// is drawn, or the call is refused naming what to attach for `what`.
+    pub(crate) fn draw_fee_or_refuse(&mut self, cost: NearToken, what: &str) {
+        self.add_attached_to_fee();
+        if let Err(short) = self.draw_fee(cost) {
+            refuse_shortfall(what, short);
+        }
+    }
+}
+
+/// Refuse a call because the posting fee left can't pay for `what`.
+pub(crate) fn refuse_shortfall(what: &str, short: NearToken) -> ! {
+    env::panic_str(&format!(
+        "the posting fee left can't pay for {what}: attach {} yoctoNEAR",
+        short.as_yoctonear()
+    ))
+}
+
 /// A bounty as its view returns it: every rule exactly as posted (R1.2).
 #[near(serializers = [json])]
 pub struct BountyView {

@@ -1718,6 +1718,55 @@ async fn a_failed_payout_transfer_is_retried_to_the_same_winner_exactly_once() -
     Ok(())
 }
 
+/// R11.4 (code review of #12): a payout retry draws the winner's USDC registration and the
+/// transfer's yoctoNEAR from the bounty's posting fee. Retried again and again against a
+/// token that refuses, the posting fee runs out; then a retry is refused unless its caller
+/// attaches the shortfall, so the contract's own balance pays for none of them.
+#[tokio::test]
+async fn r11_4_repeated_payout_retries_never_take_the_contracts_own_balance(
+) -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let free_at_start = s.free_balance().await?;
+    s.post("vault", &valid_rules(&s).await?).await?.into_result()?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+    s.refuse_transfers(true).await?;
+    s.judge_pays("vault").await?;
+    s.wait_for_bounty_state("vault", "paying").await?;
+    s.wait_until_not_paying_out("vault").await?;
+
+    // The posting fee (0.5 NEAR) covers a few dozen 0.0125 NEAR retries at most.
+    let mut refused = None;
+    for n in 0..60 {
+        let r = s.retry_payout(&s.other, "vault").await?.await?;
+        if r.is_failure() {
+            refused = Some(failure_text(&r));
+            break;
+        }
+        s.wait_until_not_paying_out("vault").await?;
+        let free = s.free_balance().await?;
+        assert!(free >= free_at_start, "retry {n}: {free} < {free_at_start}");
+    }
+    let refused = refused.expect("the retries never ran out of the posting fee");
+    assert!(refused.contains("can't pay for the payout: attach"), "{refused}");
+    assert_eq!(s.bounty("vault").await?["state"], "paying");
+
+    // A caller who attaches the shortfall pays for the retry, and the winner is paid.
+    s.refuse_transfers(false).await?;
+    s.other
+        .call(s.contract.id(), "retry_payout")
+        .args_json(json!({ "id": { "protocol": s.protocol.id(), "name": "vault" } }))
+        .deposit(NearToken::from_millinear(20))
+        .gas(tgas(100))
+        .transact()
+        .await?
+        .into_result()?;
+    s.wait_for_bounty_state("vault", "paid").await?;
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    let free = s.free_balance().await?;
+    assert!(free >= free_at_start, "{free} < {free_at_start}");
+    Ok(())
+}
+
 // ---- pause verification (ticket #21) ----
 //
 // Seam C with the MPC stand-in's `verify_foreign_transaction`. The expected payload hash is

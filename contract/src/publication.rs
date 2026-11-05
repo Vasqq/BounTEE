@@ -158,16 +158,8 @@ impl Contract {
             Self::gas_left(gas::TAIL) >= gas::release(),
             "attach more gas: see min_publish_gas in fees()"
         );
-        bounty.fee_reserve = bounty.fee_reserve.saturating_add(env::attached_deposit());
         let hold = publish_hold(proofs.len() as u64);
-        require!(
-            bounty.fee_reserve >= hold,
-            &format!(
-                "the posting fee left can't pay for the publication: attach {} yoctoNEAR",
-                hold.saturating_sub(bounty.fee_reserve).as_yoctonear()
-            )
-        );
-        bounty.fee_reserve = bounty.fee_reserve.saturating_sub(hold);
+        bounty.draw_fee_or_refuse(hold, "the publication");
         let input = json!({ "publish": {
             "bounty": id,
             "claim_id": claim_id,

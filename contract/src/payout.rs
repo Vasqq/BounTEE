@@ -28,11 +28,14 @@ impl Contract {
     /// claims (R3.6). Anyone may call; it sends the same whole amount to the winning claim's
     /// Whitehat and no one else, and is refused while a transfer is under way, while an
     /// earlier claim still holds its place, or once the bounty is paid, so it never pays
-    /// twice or out of order. Attach the gas `fees()` names as `min_retry_payout_gas`.
+    /// twice or out of order. Attach the gas `fees()` names as `min_retry_payout_gas`. The
+    /// payout's NEAR comes from the bounty's posting fee; once that can't cover it, the call
+    /// is refused unless it attaches the shortfall, which joins the posting fee (R11.4).
+    #[payable]
     pub fn retry_payout(&mut self, id: BountyId) -> Promise {
         let bounty = self
             .bounties
-            .get(&id)
+            .get_mut(&id)
             .unwrap_or_else(|| env::panic_str("no such bounty"));
         require!(
             bounty.state == BountyState::Paying && !bounty.paying_out,
@@ -51,7 +54,9 @@ impl Contract {
             Self::gas_left(gas::TAIL) >= gas::payout(),
             "attach more gas: see min_retry_payout_gas in fees()"
         );
+        bounty.add_attached_to_fee();
         self.pay_out(claim_id)
+            .unwrap_or_else(|short| crate::refuse_shortfall("the payout", short))
     }
 
     /// After the payout's transfer: the bounty is paid, or, if the transfer failed, stays
@@ -119,32 +124,40 @@ impl Contract {
             );
             return PromiseOrValue::Value(());
         }
-        self.pay_out(claim_id).into()
+        match self.pay_out(claim_id) {
+            Ok(p) => p.into(),
+            Err(short) => {
+                // Waits for a `retry_payout` that attaches the shortfall (R11.4).
+                emit(
+                    "payout_waiting",
+                    json!({ "bounty": id, "claim_id": claim_id, "posting_fee_short": short }),
+                );
+                PromiseOrValue::Value(())
+            }
+        }
     }
 
     /// Pay the whole bounty amount to the claim's Whitehat, registering them with USDC
     /// first if needed (R3.2, R2.7). No allowlist and no identity check (D9). The NEAR it
-    /// attaches comes from the bounty's posting fee. The caller has checked the bounty is
-    /// `paying` this claim with no transfer under way.
-    pub(crate) fn pay_out(&mut self, claim_id: u64) -> Promise {
+    /// attaches comes from the bounty's posting fee; if that can't cover it, nothing starts
+    /// and the shortfall comes back. The caller has checked the bounty is `paying` this claim
+    /// with no transfer under way.
+    pub(crate) fn pay_out(&mut self, claim_id: u64) -> Result<Promise, NearToken> {
         let claim = self.claims.get(&claim_id).expect("a judged claim").clone();
         let bounty = self
             .bounties
             .get_mut(&claim.bounty)
             .expect("the claim's bounty");
+        let one_yocto = NearToken::from_yoctonear(1);
+        bounty.draw_fee(fees::USDC_REGISTRATION.saturating_add(one_yocto))?;
         bounty.paying_out = true;
         let amount = bounty
             .rules
             .bounty_amount
             .to_u128()
             .expect("checked at posting");
-        let one_yocto = NearToken::from_yoctonear(1);
-        bounty.fee_reserve = bounty
-            .fee_reserve
-            .saturating_sub(fees::USDC_REGISTRATION)
-            .saturating_sub(one_yocto);
         let usdc = self.config.usdc.clone();
-        ext_ft::ext(usdc.clone())
+        Ok(ext_ft::ext(usdc.clone())
             .with_attached_deposit(fees::USDC_REGISTRATION)
             .with_static_gas(gas::USDC_STORAGE_DEPOSIT)
             .with_unused_gas_weight(0)
@@ -165,6 +178,6 @@ impl Contract {
                     .with_static_gas(gas::ON_PAID)
                     .with_unused_gas_weight(0)
                     .on_paid(claim_id),
-            )
+            ))
     }
 }

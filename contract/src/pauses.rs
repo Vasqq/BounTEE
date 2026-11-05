@@ -51,6 +51,19 @@ pub const SIGNING_STALE_BLOCKS: u64 = 300;
 const SECP256K1_DOMAIN: u64 = 0;
 const TWEAK_DERIVATION_PREFIX: &str = "near-mpc-recovery v0.1.0 epsilon derivation:";
 
+/// The most storage one stored signed pause takes (about 390 bytes: its transaction as hex,
+/// its hash, chain, contract and nonce); the posting fee must cover this much per pause
+/// before a signing starts.
+const SIGNED_PAUSE_BYTES: u64 = 512;
+
+/// Why a pause signing didn't start.
+pub(crate) enum NotSigning {
+    /// The bounty has no PAYS claim waiting for its pauses, or a signing is under way.
+    NoPauses,
+    /// The posting fee left is this much short of the signatures and their storage.
+    Short(NearToken),
+}
+
 /// A signed pause, stored for anyone to broadcast.
 #[near(serializers = [json, borsh])]
 #[derive(Clone, Debug, PartialEq)]
@@ -231,11 +244,13 @@ impl Contract {
 
     /// Retry signing the pauses of a bounty whose winning claim isn't paid yet because
     /// signing failed or timed out (R2.5). Anyone may call; attach the gas `fees()` names
-    /// as `min_sign_pauses_gas`. The MPC deposits come from the bounty's posting fee.
+    /// as `min_sign_pauses_gas`. The MPC deposits and the signed pauses' storage come from the
+    /// bounty's posting fee; should that run short, attach the shortfall, which joins it.
+    #[payable]
     pub fn sign_pauses(&mut self, id: BountyId) -> Promise {
         let bounty = self
             .bounties
-            .get(&id)
+            .get_mut(&id)
             .unwrap_or_else(|| env::panic_str("no such bounty"));
         require!(
             bounty.state == BountyState::Signing,
@@ -250,8 +265,12 @@ impl Contract {
             Self::gas_left(gas::TAIL) >= needed,
             "attach more gas: see min_sign_pauses_gas in fees()"
         );
-        self.start_pause_signing(&id)
-            .unwrap_or_else(|| env::panic_str("this bounty has no winning claim"))
+        bounty.add_attached_to_fee();
+        match self.start_pause_signing(&id) {
+            Ok(p) => p,
+            Err(NotSigning::NoPauses) => env::panic_str("this bounty has no winning claim"),
+            Err(NotSigning::Short(short)) => crate::refuse_shortfall("the pause signatures", short),
+        }
     }
 
     /// After every pause's `sign`: store them all and pay if each one recovers to the
@@ -312,9 +331,18 @@ impl Contract {
         self.bounties.flush();
         let stored = env::storage_usage().saturating_sub(before) as u128;
         let bounty = self.bounties.get_mut(&id).expect("still here");
-        bounty.fee_reserve = bounty.fee_reserve.saturating_sub(NearToken::from_yoctonear(
-            stored * crate::fees::STORAGE_PRICE_PER_BYTE,
-        ));
+        let storage = NearToken::from_yoctonear(stored * crate::fees::STORAGE_PRICE_PER_BYTE);
+        if let Err(short) = bounty.draw_fee(storage) {
+            // Checked before signing started, so this can't happen; were it to, nothing is
+            // stored and the claim waits for a `sign_pauses` that attaches the shortfall.
+            bounty.signed_pauses = Vec::new();
+            bounty.state = BountyState::Signing;
+            emit(
+                "pause_signing_waiting",
+                json!({ "bounty": id, "claim_id": claim_id, "posting_fee_short": short }),
+            );
+            return PromiseOrValue::Value(());
+        }
         emit(
             "pauses_signed",
             json!({ "bounty": id, "claim_id": claim_id, "pauses": summary }),
@@ -333,21 +361,28 @@ impl crate::Bounty {
 
 impl Contract {
     /// Request a signature for every pause of a bounty whose PAYS claim is waiting, then
-    /// [`Contract::on_pauses_signed`]. `None` if it has no winning claim or is already
-    /// signing. The caller makes sure enough gas is left.
-    pub(crate) fn start_pause_signing(&mut self, id: &BountyId) -> Option<Promise> {
+    /// [`Contract::on_pauses_signed`]. Refused if it has no winning claim or is already
+    /// signing, or if the posting fee left can't pay for the signatures and their storage.
+    /// The caller makes sure enough gas is left.
+    pub(crate) fn start_pause_signing(&mut self, id: &BountyId) -> Result<Promise, NotSigning> {
         let mpc = self.config.mpc.clone();
-        let bounty = self.bounties.get_mut(id)?;
+        let bounty = self.bounties.get_mut(id).ok_or(NotSigning::NoPauses)?;
         if bounty.state != BountyState::Signing || bounty.signing_in_flight() {
-            return None;
+            return Err(NotSigning::NoPauses);
         }
-        bounty.winning_claim?;
+        bounty.winning_claim.ok_or(NotSigning::NoPauses)?;
         let path = path(id);
         let txs = pause_txs(&bounty.rules);
         let one_yocto = NearToken::from_yoctonear(1);
-        bounty.fee_reserve = bounty
-            .fee_reserve
-            .saturating_sub(one_yocto.saturating_mul(txs.len() as u128));
+        let deposits = one_yocto.saturating_mul(txs.len() as u128);
+        // The signed pauses' storage is drawn when they are stored; make sure now that the
+        // posting fee will cover it, so a signing it can't pay for never starts (R11.4).
+        let storage = crate::fees::STORAGE_PRICE_PER_BYTE * (SIGNED_PAUSE_BYTES * txs.len() as u64) as u128;
+        let needed = deposits.saturating_add(NearToken::from_yoctonear(storage));
+        if let Some(short) = bounty.fee_short_of(needed) {
+            return Err(NotSigning::Short(short));
+        }
+        bounty.draw_fee(deposits).map_err(NotSigning::Short)?;
         let started_at = env::block_height();
         bounty.signing_since = Some(started_at);
         let mut joined: Option<Promise> = None;
@@ -369,8 +404,8 @@ impl Contract {
                 Some(p) => p.and(sign),
             });
         }
-        Some(
-            joined?.then(
+        Ok(
+            joined.ok_or(NotSigning::NoPauses)?.then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(gas::ON_PAUSES_SIGNED)
                     .with_unused_gas_weight(0)
