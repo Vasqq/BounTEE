@@ -2,7 +2,18 @@
 // and refuse what they must. Same cases as formats/tests/fixtures.rs, from the same file.
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { parseBountyId, parseClaim, parseExploit, parseJob, parseRules, parseSealedBundle, parseVerdict, toJson } from "../src/index.ts";
+import {
+  parseBountyId,
+  parseClaim,
+  parseExploit,
+  parseJob,
+  parseReleaseOutput,
+  parseReleasedExploit,
+  parseRules,
+  parseSealedBundle,
+  parseVerdict,
+  toJson,
+} from "../src/index.ts";
 
 interface Case {
   kind: string;
@@ -26,6 +37,8 @@ const parsers: Record<string, (v: unknown) => unknown> = {
   exploit: parseExploit,
   job: parseJob,
   sealed_bundle: parseSealedBundle,
+  released_exploit: parseReleasedExploit,
+  release_output: parseReleaseOutput,
 };
 
 describe("shared format cases", () => {

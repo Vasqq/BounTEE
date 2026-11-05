@@ -8,6 +8,8 @@
 //!   signed by NEAR Chain Signatures, checked and stored, and only then is it paid.
 //! - [`payout`]: the whole bounty is paid to the Whitehat.
 //! - [`withdrawal`]: after the end date, an unclaimed bounty goes back to its Protocol.
+//! - [`release`]: after the payout, the winning exploit is released to the Protocol's
+//!   exploit key by a job the contract requests (R6).
 //! - [`verification`]: anyone can have a chain's landed pause verified by NEAR's MPC network;
 //!   off the money path.
 //! - [`outlayer`]: the exact OutLayer requests (secret, access rule, job).
@@ -28,6 +30,7 @@ mod outlayer;
 mod pauses;
 mod payout;
 mod posting;
+mod release;
 mod verification;
 mod withdrawal;
 
@@ -106,6 +109,11 @@ pub mod gas {
     /// For each pause's `sign` on the MPC contract, which asks for at least 15 Tgas and
     /// keeps 7 for its own yield callback (testnet config, Nov 4).
     pub const SIGN_PAUSE: Gas = Gas::from_tgas(20);
+    /// For a release job's callback (#22).
+    pub const ON_RELEASED: Gas = Gas::from_tgas(15);
+    /// What OutLayer's `request_execution` needs, most of it kept for its own callback
+    /// (spike #4: about 55 Tgas).
+    pub const REQUEST_JOB: Gas = Gas::from_tgas(60);
     /// For checking and storing the signed pauses, then the payout's three steps.
     pub const ON_PAUSES_SIGNED: Gas = Gas::from_tgas(50);
     /// What the claim's job is left at least, before gas is kept back to sign pauses.
@@ -124,6 +132,11 @@ pub mod gas {
                 + ON_PAID.as_gas()
                 + TAIL.as_gas(),
         )
+    }
+
+    /// Gas to request a release job and keep its result, from the call that starts it.
+    pub const fn release() -> Gas {
+        Gas::from_gas(REQUEST_JOB.as_gas() + ON_RELEASED.as_gas() + TAIL.as_gas())
     }
 
     /// Gas to verify `n` pauses on one chain, from the call that starts it.
@@ -149,6 +162,7 @@ enum Key {
     PauseVerifications,
     CoveredBy,
     SealedExploits,
+    Releases,
 }
 
 /// Where a bounty is in its life.
@@ -246,7 +260,8 @@ pub struct ClaimRecord {
     pub proofs_sha256: B256,
     /// NEAR block time the contract recorded at submission (R2.8).
     pub submitted_at_ns: near_sdk::json_types::U64,
-    /// The OutLayer secret profile holding this claim's sealed exploit; used once.
+    /// The OutLayer secret profile holding this claim's sealed exploit; stored once, read by
+    /// the claim's job and, for a winning claim, its release job.
     pub secret_profile: String,
     pub state: ClaimState,
     pub verdict: Option<Verdict>,
@@ -271,6 +286,8 @@ pub struct Contract {
     /// The claim each sealed exploit (by sha256 of its ciphertext) was filed as, so the
     /// same one is never judged twice (R3.5).
     sealed_exploits: LookupMap<B256, u64>,
+    /// Each paid bounty's release of its winning exploit (#22).
+    releases: LookupMap<BountyId, release::ReleaseRecord>,
 }
 
 #[near]
@@ -309,6 +326,7 @@ impl Contract {
             pause_verifications: LookupMap::new(Key::PauseVerifications),
             covered_by: LookupMap::new(Key::CoveredBy),
             sealed_exploits: LookupMap::new(Key::SealedExploits),
+            releases: LookupMap::new(Key::Releases),
         }
     }
 
@@ -331,6 +349,8 @@ impl Contract {
             "min_retry_payout_gas": gas::payout(),
             "min_withdraw_bounty_gas": gas::payout(),
             "claim_place_hold_ns": near_sdk::json_types::U64(claims::CLAIM_PLACE_HOLD_NS),
+            "min_release_gas": gas::release(),
+            "release_hold": release::release_hold(),
             "pause_gas_limit": pauses::PAUSE_GAS_LIMIT,
             "pause_max_fee_per_gas": U128(pauses::PAUSE_MAX_FEE_PER_GAS),
             "pause_max_priority_fee_per_gas": U128(pauses::PAUSE_MAX_PRIORITY_FEE_PER_GAS),

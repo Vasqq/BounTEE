@@ -25,6 +25,13 @@ alloy-rlp = { version = "0.3", default-features = false, features = ["std"] }
 # Opening the sealed exploit (#15): base64, then raw DEFLATE; both pure Rust.
 base64 = "0.23"
 miniz_oxide = "0.8"
+# The release (#22): the winning exploit re-encrypted to the Protocol's X25519 exploit key
+# (ECIES: X25519, HKDF-SHA256, ChaCha20-Poly1305); all pure Rust, no default features.
+x25519-dalek = { version = "2", default-features = false }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+hkdf = "0.12"
+sha2 = { version = "0.10", default-features = false }
+bs58 = { version = "0.5", default-features = false, features = ["alloc"] }
 
 # wasi:http, the job's only network (block confirmation, R2.8). Only the WebAssembly
 # build has it; the host build `cargo test` makes alongside the tests answers no RPC.
