@@ -121,6 +121,8 @@ pub mod gas {
 #[derive(BorshStorageKey)]
 #[near]
 enum Key {
+    /// Stays first (prefix 0): `bountee list` finds every bounty by this prefix with NEAR
+    /// RPC's `view_state`, since the map has no index (`cli/src/bounties.ts`).
     Bounties,
     Claims,
     PostingFees,
