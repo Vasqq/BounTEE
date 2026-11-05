@@ -4,7 +4,7 @@
 //! [`Contract::retry_payout`] the same transfer to the same Whitehat (R2.4).
 //!
 //! USDC leaves the contract only here, as the payout (R2.3); the Protocol's withdrawal
-//! after the end date is the only other path, in its own ticket.
+//! after the end date (`withdrawal`) is the only other path.
 
 use bountee_formats::BountyId;
 use near_sdk::json_types::{U128, U64};

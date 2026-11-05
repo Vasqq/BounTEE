@@ -3079,3 +3079,325 @@ async fn r11_3_a_whitehat_tops_up_and_withdraws_their_claim_balance() -> anyhow:
     assert!(failure_text(&r).contains("nothing to withdraw"), "{r:?}");
     Ok(())
 }
+
+// ---- withdrawal (ticket #19) ----
+//
+// Seam C. The end date is passed by fast-forwarding the sandbox's blocks. Misses: real
+// Circle USDC and real gas (seam T).
+
+/// How far ahead a short bounty ends: long enough for its posting to land first.
+const SHORT_END_NS: u64 = 20_000_000_000;
+
+impl Sandbox {
+    /// `by` asks to withdraw the Protocol's bounty `name`, and waits for every receipt.
+    async fn withdraw_bounty(
+        &self,
+        by: &Account,
+        name: &str,
+    ) -> anyhow::Result<ExecutionFinalResult> {
+        Ok(by
+            .call(self.contract.id(), "withdraw_bounty")
+            .args_json(json!({ "id": { "protocol": self.protocol.id(), "name": name } }))
+            .gas(tgas(100))
+            .transact()
+            .await?)
+    }
+
+    /// A live bounty that ends `SHORT_END_NS` from now, covering `address`.
+    async fn post_short(&self, name: &str, address: &str) -> anyhow::Result<()> {
+        let mut rules = rules(self, SHORT_END_NS, now_ns(self).await?);
+        rules["covered_contracts"][0]["address"] = json!(address);
+        self.post(name, &rules).await?.into_result()?;
+        assert_eq!(self.bounty(name).await?["state"], "live");
+        Ok(())
+    }
+
+    /// Move the sandbox's clock past the bounty's end date.
+    async fn pass_end_date(&self, name: &str) -> anyhow::Result<()> {
+        let end: u64 = self.bounty(name).await?["rules"]["end_date_ns"]
+            .as_str()
+            .unwrap()
+            .parse()?;
+        self.pass_time_to(end).await
+    }
+
+    /// Fast-forward until a block's time is past `ns`, in steps sized from how much time
+    /// the last step moved, so a long wait takes few steps.
+    async fn pass_time_to(&self, ns: u64) -> anyhow::Result<()> {
+        let mut step = 20;
+        loop {
+            let before = now_ns(self).await?;
+            if before > ns {
+                return Ok(());
+            }
+            self.worker.fast_forward(step).await?;
+            let moved = now_ns(self).await?.saturating_sub(before).max(1);
+            let per_block = moved / step;
+            step = ((ns - before).saturating_sub(moved) / per_block.max(1) + 5).clamp(5, 5_000);
+        }
+    }
+}
+
+const VAULT_W: &str = "0x00000000000000000000000000000000000000c1";
+
+/// R10.1, R9.1, R12.3: before the end date even the posting Protocol is refused; after it,
+/// with no payout made, the Protocol withdraws the whole bounty amount, exactly once. ZERO
+/// and INVALID claims, resolved, don't stand in the way. A withdrawn bounty takes no more
+/// claims and frees its covered contracts.
+#[tokio::test]
+async fn r9_1_r10_1_after_the_end_date_the_protocol_withdraws_the_whole_amount(
+) -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let start = s.usdc_balance(s.protocol.id()).await?;
+    s.post_short("vault", VAULT_W).await?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+    for verdict in [ZERO, INVALID] {
+        s.script(json!({ "output": verdict })).await?;
+        s.submit_claim(&s.whitehat, "vault").await?.into_result()?;
+    }
+
+    let r = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert!(failure_text(&r).contains("hasn't ended"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+    assert_eq!(s.bounty("vault").await?["state"], "live");
+
+    s.pass_end_date("vault").await?;
+    s.withdraw_bounty(&s.protocol, "vault")
+        .await?
+        .into_result()?;
+    assert_eq!(s.bounty("vault").await?["state"], "withdrawn");
+    assert_eq!(s.usdc_balance(s.protocol.id()).await?, start);
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+
+    // Exactly once.
+    let r = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert!(failure_text(&r).contains("withdrawn"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.protocol.id()).await?, start);
+
+    let r = s.submit_claim(&s.whitehat, "vault").await?;
+    assert!(r.is_failure(), "{r:?}");
+
+    // R12.3: its covered contract is free for a new bounty.
+    s.post_short("vault-again", VAULT_W).await?;
+    Ok(())
+}
+
+/// R9.2: after the end date, anyone but the posting Protocol is refused, the Whitehat
+/// included, and nothing moves; the Protocol then withdraws.
+#[tokio::test]
+async fn r9_2_anyone_but_the_posting_protocol_is_refused() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    s.post_short("vault", VAULT_W).await?;
+    s.pass_end_date("vault").await?;
+
+    for who in [&s.whitehat, &s.other] {
+        let r = s.withdraw_bounty(who, "vault").await?;
+        assert!(failure_text(&r).contains("only the posting Protocol"), "{r:?}");
+        assert_eq!(s.usdc_balance(who.id()).await?, 0);
+    }
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+    assert_eq!(s.bounty("vault").await?["state"], "live");
+
+    s.withdraw_bounty(&s.protocol, "vault")
+        .await?
+        .into_result()?;
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    Ok(())
+}
+
+/// One hour: how long a claim with no verdict holds its place, from its submission (the
+/// `claim_place_hold_ns` the contract's `fees()` shows; #18's value).
+const PLACE_HOLD_NS: u64 = 3_600_000_000_000;
+
+/// R10.2: after the end date, a withdrawal is refused while any claim is unresolved: a
+/// claim whose job is still running, and a claim whose job gave no verdict while it still
+/// holds its place for a retry. Once the first is judged ZERO and the second's place has
+/// lapsed, the Protocol withdraws.
+#[tokio::test]
+async fn r10_2_a_withdrawal_waits_for_every_unresolved_claim() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    s.post_short("vault", VAULT_W).await?;
+    s.top_up(&s.whitehat, NearToken::from_near(2)).await?;
+    assert_eq!(
+        s.fees().await?["claim_place_hold_ns"],
+        PLACE_HOLD_NS.to_string()
+    );
+
+    // A claim with no verdict, then a claim whose job is left running.
+    s.script(json!({ "output": null })).await?;
+    let no_verdict: u64 = s
+        .submit_claim(&s.whitehat, "vault")
+        .await?
+        .into_result()?
+        .json()?;
+    let submitted: u64 = s.claim(no_verdict).await?["submitted_at_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    let running = s
+        .whitehat
+        .call(s.contract.id(), "submit_claim")
+        .args_json(s.claim_args("vault"))
+        .gas(tgas(300))
+        .transact_async()
+        .await?;
+    let jobs = s.wait_for_requests(3).await?;
+    s.pass_end_date("vault").await?;
+    assert_eq!(s.claim(1).await?["state"], "judging");
+
+    let r = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert!(failure_text(&r).contains("unresolved"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+
+    // The running claim is judged; the no-verdict claim still holds its place.
+    s.resolve(jobs[2]["id"].as_u64().unwrap(), Some(ZERO)).await?;
+    running.await?.into_result()?;
+    let r = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert!(failure_text(&r).contains("unresolved"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+
+    // Its place lapses: nothing is left unresolved.
+    s.pass_time_to(submitted + PLACE_HOLD_NS).await?;
+    s.withdraw_bounty(&s.protocol, "vault")
+        .await?
+        .into_result()?;
+    assert_eq!(s.bounty("vault").await?["state"], "withdrawn");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    Ok(())
+}
+
+/// R10.2, R9.1: a PAYS claim waiting for its pause signatures past the end date blocks the
+/// withdrawal; once it is paid, no withdrawal is possible at all.
+#[tokio::test]
+async fn r10_2_a_pays_claim_waiting_for_its_pause_signatures_blocks_the_withdrawal(
+) -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    s.post_short("vault", VAULT_W).await?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+    let claim = s.submit_pays("vault").await?;
+    s.sign_request_payload(0).await?;
+    s.pass_end_date("vault").await?;
+    // The signature request also times out unanswered: the claim waits for a retry.
+    s.worker.fast_forward(250).await?;
+    let id: u64 = claim.await?.into_result()?.json()?;
+    s.wait_until_not_signing("vault").await?;
+    assert_eq!(s.bounty("vault").await?["state"], "signing");
+
+    let r = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert!(failure_text(&r).contains("closed"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+
+    let retry = s.sign_pauses("vault").await?;
+    let payload = s.sign_request_payload(1).await?;
+    s.respond(1, mpc::answer(&s.pause_key("vault"), &payload, false))
+        .await?;
+    retry.await?.into_result()?;
+    s.wait_for_bounty_state("vault", "paid").await?;
+    assert_eq!(s.bounty("vault").await?["winning_claim"], id);
+
+    let r = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert!(failure_text(&r).contains("closed"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    Ok(())
+}
+
+/// R9.1, R2.3: a withdrawal whose USDC transfer the token refuses moves nothing and leaves
+/// the bounty ended and live with its USDC held, so the Protocol can withdraw again; the
+/// retry pays the whole amount once.
+#[tokio::test]
+async fn r9_1_a_refused_withdrawal_transfer_can_be_withdrawn_again() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let start = s.usdc_balance(s.protocol.id()).await?;
+    s.post_short("vault", VAULT_W).await?;
+    s.pass_end_date("vault").await?;
+
+    s.refuse_transfers(true).await?;
+    let _ = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert_eq!(s.bounty("vault").await?["state"], "live");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+    assert_eq!(
+        s.usdc_balance(s.protocol.id()).await?,
+        start - BOUNTY_AMOUNT
+    );
+
+    s.refuse_transfers(false).await?;
+    s.withdraw_bounty(&s.protocol, "vault")
+        .await?
+        .into_result()?;
+    assert_eq!(s.bounty("vault").await?["state"], "withdrawn");
+    assert_eq!(s.usdc_balance(s.protocol.id()).await?, start);
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    Ok(())
+}
+
+/// R10.2 with retries (#18): a claim filed before the end date may be retried after it,
+/// even once its place has lapsed; while that retry's job runs the withdrawal is refused,
+/// and once the claim is judged ZERO the Protocol withdraws. Once withdrawn, the claim can't
+/// be retried.
+#[tokio::test]
+async fn r10_2_a_retried_claim_blocks_the_withdrawal_while_it_is_judged() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    s.post_short("vault", VAULT_W).await?;
+    s.top_up(&s.whitehat, NearToken::from_near(2)).await?;
+    s.script(json!({ "output": null })).await?;
+    let id: u64 = s
+        .submit_claim(&s.whitehat, "vault")
+        .await?
+        .into_result()?
+        .json()?;
+    let submitted: u64 = s.claim(id).await?["submitted_at_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    s.pass_time_to(submitted + PLACE_HOLD_NS).await?;
+    assert_eq!(s.claim(id).await?["state"], "no_verdict");
+
+    // No answer scripted: the retry's job stays running.
+    let retry = s
+        .whitehat
+        .call(s.contract.id(), "retry_claim")
+        .args_json(json!({ "claim_id": id, "proofs": PROOFS }))
+        .gas(tgas(300))
+        .transact_async()
+        .await?;
+    let jobs = s.wait_for_requests(3).await?;
+    assert_eq!(s.claim(id).await?["state"], "judging");
+    let r = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert!(failure_text(&r).contains("unresolved"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+
+    s.resolve(jobs[2]["id"].as_u64().unwrap(), Some(ZERO)).await?;
+    retry.await?.into_result()?;
+    s.withdraw_bounty(&s.protocol, "vault")
+        .await?
+        .into_result()?;
+    assert_eq!(s.bounty("vault").await?["state"], "withdrawn");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    Ok(())
+}
+
+/// R10.2 with ordering (#18): a PAYS claim whose payout waits behind an earlier claim with
+/// no verdict blocks the withdrawal after the end date, as does the earlier claim.
+#[tokio::test]
+async fn r10_2_a_pays_claim_waiting_for_its_payout_blocks_the_withdrawal() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    s.post_short("vault", VAULT_W).await?;
+    s.top_up(&s.whitehat, NearToken::from_near(2)).await?;
+    s.script(json!({ "output": null })).await?;
+    s.submit_claim(&s.whitehat, "vault").await?.into_result()?;
+    let winner = s.judge_pays("vault").await?;
+    // Every pause is signed; the payout waits behind the earlier claim's place.
+    let bounty = s.wait_for_bounty_state("vault", "paying").await?;
+    assert_eq!(bounty["paying_out"], false, "{bounty}");
+    assert!(bounty["payout_waits_until_ns"].is_string(), "{bounty}");
+    assert_eq!(bounty["winning_claim"], winner);
+    s.pass_end_date("vault").await?;
+
+    let r = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert!(failure_text(&r).contains("closed"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+    assert_eq!(s.usdc_balance(s.protocol.id()).await?, 9 * BOUNTY_AMOUNT);
+    Ok(())
+}
+

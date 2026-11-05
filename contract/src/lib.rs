@@ -7,6 +7,7 @@
 //! - [`pauses`]: a PAYS verdict closes the bounty; a pause for every covered contract is
 //!   signed by NEAR Chain Signatures, checked and stored, and only then is it paid.
 //! - [`payout`]: the whole bounty is paid to the Whitehat.
+//! - [`withdrawal`]: after the end date, an unclaimed bounty goes back to its Protocol.
 //! - [`release`]: after the payout, the winning exploit is released to the Protocol's
 //!   exploit key by a job the contract requests (R6).
 //! - [`verification`]: anyone can have a chain's landed pause verified by NEAR's MPC network;
@@ -31,6 +32,7 @@ mod payout;
 mod posting;
 mod release;
 mod verification;
+mod withdrawal;
 
 /// What the contract is pinned to at deployment and never changes (R1.3).
 #[near(serializers = [json, borsh])]
@@ -182,6 +184,9 @@ pub enum BountyState {
     Paying,
     /// The whole bounty was paid to the winning claim (R3.2).
     Paid,
+    /// Ended unclaimed: its Protocol withdrew the whole amount (R9.1). Takes no claims and
+    /// covers no contract.
+    Withdrawn,
 }
 
 #[near(serializers = [borsh])]
@@ -201,8 +206,9 @@ pub struct Bounty {
     /// retry can send a second transfer beside it.
     pub paying_out: bool,
     /// Claims on this bounty with no verdict yet (storing, judging, or waiting for a retry),
-    /// as (claim ID, submission time). Each holds its place against a later PAYS for
-    /// [`claims::CLAIM_PLACE_HOLD_NS`] from its submission (R2.6, R3.6).
+    /// as (claim ID, submission time). Each holds its place against a later PAYS, and
+    /// against the bounty's withdrawal, for [`claims::CLAIM_PLACE_HOLD_NS`] from its
+    /// submission (R2.6, R3.6, R10.2); one being judged blocks the withdrawal at any age.
     pub open_claims: Vec<(u64, u64)>,
 }
 
@@ -341,6 +347,7 @@ impl Contract {
             "min_sign_pauses_gas_per_contract": gas::SIGN_PAUSE,
             "min_sign_pauses_gas_base": gas::pause_signing(0),
             "min_retry_payout_gas": gas::payout(),
+            "min_withdraw_bounty_gas": gas::payout(),
             "min_release_gas": gas::release(),
             "release_hold": release::release_hold(),
             "claim_place_hold_ns": near_sdk::json_types::U64(claims::CLAIM_PLACE_HOLD_NS),
