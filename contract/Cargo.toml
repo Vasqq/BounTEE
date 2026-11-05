@@ -27,6 +27,16 @@ rust-version.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# The reproducible build (R15.2): `cargo near build reproducible-wasm` builds the committed
+# tree in this pinned image, so anyone rebuilds the code hash a deployment shows, and records
+# the image, command and commit in the contract's NEP-330 `contract_source_metadata`.
+# `bountee build` runs it (with the judge's own pinned build) for any commit.
+[package.metadata.near.reproducible_build]
+image = "sourcescan/cargo-near:0.20.3-rust-1.86.0"
+image_digest = "sha256:a84b7c401a856b6bbbe1975f235b6a8011540a24dfbde248531cccb4b2fdbadf"
+passed_env = []
+container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "--locked"]
+
 [dependencies]
 # `unstable` for env::ecrecover, the host function that checks and derives pause keys.
 near-sdk = { workspace = true, features = ["unstable"] }
