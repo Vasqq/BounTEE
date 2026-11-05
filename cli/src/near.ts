@@ -9,6 +9,8 @@ import { Account, JsonRpcProvider, KeyPair, type KeyPairString } from "near-api-
 /** FastNEAR: rpc.testnet.near.org now answers 429 "deprecated" (Nov 4). */
 export const NEAR_RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" } as const;
 export type Network = keyof typeof NEAR_RPC;
+/** A NEAR transaction's page on the explorer, for receipts' links. */
+export const NEAR_EXPLORER_TX = { testnet: "https://testnet.nearblocks.io/txns/", mainnet: "https://nearblocks.io/txns/" } as const;
 
 export function parseNetwork(value: string | undefined): Network {
   const n = value ?? "testnet";

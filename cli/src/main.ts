@@ -1,26 +1,43 @@
 #!/usr/bin/env node
-// BounTEE's command-line tool. Commands so far: `--version`, `init` (#16), `test` (ticket #11),
-// `broadcast` (ticket #13), `claim` (sealing and filing, #15; script path, verdict, payout and
-// pauses, #16), `verify-pause` (#21). The rest (list, show, status, verify, balance, key, open-exploit, withdraw,
-// post) land in the CLI tickets; each takes `--json` for machine-readable output (R14.5).
+// BounTEE's command-line tool. Commands so far: `--version`, `help`, `init` (#16), `test`
+// (ticket #11), `broadcast` (ticket #13), `claim` (sealing and filing, #15; script path,
+// verdict, payout and pauses, #16; live progress and receipt, #26), `list`, `show` and
+// `status` (#26), `verify-pause` (#21). The rest (verify, balance, key, open-exploit, withdraw, post) land in the
+// CLI tickets. Every command takes `--json` for machine-readable output (R14.5): the result
+// as one JSON document on stdout, an error as `{"error": …}` on stderr, and a claim's live
+// stages as one JSON line each on stderr.
 import { readFileSync } from "node:fs";
+import { formatBounty, formatList, listBounties, parseBountyId, showBounty } from "./bounties.ts";
 import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadcast.ts";
 import { claim, formatClaimResult } from "./claim.ts";
 import { initCommand } from "./init.ts";
 import { Near, NEAR_RPC, parseNetwork } from "./near.ts";
+import { claimStatus, formatStage, formatStatus, loadClaimTxs, watchClaim } from "./status.ts";
 import { formatTestResult, testCommand } from "./test.ts";
 import { formatVerifyResult, verifyPauses } from "./verify-pause.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const args = process.argv.slice(2);
 const json = args.includes("--json");
-const rest = args.filter((a) => a !== "--json");
+const watch = args.includes("--watch");
+const rest = args.filter((a) => a !== "--json" && a !== "--watch");
 
-const BROADCAST_USAGE =
-  "usage: bountee broadcast <protocol>/<name> [--contract <account>] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]";
-const VERIFY_USAGE =
-  "usage: bountee verify-pause <protocol>/<name> --contract <account> --as <account> [--chain <chain id>] [--network testnet|mainnet] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]";
-const USAGE = "usage: bountee test <foundry-script>[:<contract>] --bounty <rules.json | protocol/name> [--sig <fn>] [--out <job.json>] [--rpc <url>] [--block <n>] [--judge <wasm>] [--contract <account>] [--json]";
+const NEAR_FLAGS = "[--contract <account>] [--network testnet|mainnet] [--near-rpc <url>]";
+/** Every command and its usage; `bountee help` prints them. */
+const USAGES: Record<string, string> = {
+  "--version": "bountee --version [--json]",
+  help: "bountee help [--json]",
+  init: "bountee init [--network testnet|mainnet] [--account <name>.testnet] [--json]",
+  list: `bountee list ${NEAR_FLAGS} [--json]`,
+  show: `bountee show <protocol>/<name> ${NEAR_FLAGS} [--json]`,
+  test: "bountee test <foundry-script>[:<contract>] --bounty <rules.json | protocol/name> [--sig <fn>] [--out <job.json>] [--rpc <url>] [--block <n>] [--judge <wasm>] [--contract <account>] [--json]",
+  claim:
+    "bountee claim [<foundry-script>[:<contract>]] --contract <account> --bounty <protocol>/<name> --as <account> [--sig <fn>] [--job <job.json>] [--exploit <exploit.json> --evidence <evidence.json>] [--network testnet|mainnet] [--rpc <NEAR rpc>] [--proof-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--outlayer-api <url>] [--timeout <secs>] [--interval <secs>] [--no-wait] [--no-broadcast] [--no-verify] [--verify-wait <secs>] [--dry-run] [--json]",
+  status: `bountee status <claim id> ${NEAR_FLAGS} [--rpc <chain id>=<url>[,...]] [--tx <hash>[,...]] [--outlayer-api <url>] [--watch [--timeout <secs>] [--interval <secs>]] [--json]`,
+  broadcast: "bountee broadcast <protocol>/<name> [--contract <account>] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]",
+  "verify-pause": `bountee verify-pause <protocol>/<name> --as <account> ${NEAR_FLAGS} [--chain <chain id>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]`,
+};
+const usage = (command: string) => `usage: ${USAGES[command]}`;
 
 /** Positional arguments and `--name value` flags. */
 function parse(argv: string[]) {
@@ -43,17 +60,43 @@ function fail(message: string, code = 1): never {
   process.exit(code);
 }
 
+/** The bounty contract and NEAR connection the read commands share. */
+function nearFor(command: string, flags: Record<string, string>) {
+  const contract = flags.contract ?? process.env.BOUNTEE_CONTRACT;
+  if (!contract) fail(`${command} needs the bounty contract's account: pass --contract or set BOUNTEE_CONTRACT\n${usage(command)}`, 2);
+  const network = parseNetwork(flags.network);
+  return { contract, network, near: new Near(network, flags["near-rpc"] ?? NEAR_RPC[network]) };
+}
+
+const print = (result: unknown, text: string) => console.log(json ? JSON.stringify(result) : text);
+const showStage = (s: Parameters<typeof formatStage>[0]) => console.error(json ? JSON.stringify(s) : formatStage(s));
+
 try {
-  if (rest[0] === "--version") {
-    console.log(json ? JSON.stringify({ name: "bountee", version: pkg.version }) : `bountee ${pkg.version}`);
-  } else if (rest[0] === "init") {
+  const command = rest[0];
+  if (command === "--version") {
+    print({ name: "bountee", version: pkg.version }, `bountee ${pkg.version}`);
+  } else if (command === "help" || command === undefined) {
+    const commands = Object.entries(USAGES).map(([name, u]) => ({ name, usage: u }));
+    print({ commands }, commands.map((c) => c.usage).join("\n"));
+  } else if (command === "init") {
     const { flags } = parse(rest.slice(1));
     const result = await initCommand({ network: parseNetwork(flags.network), account: flags.account });
-    console.log(json ? JSON.stringify(result) : result.message);
-  } else if (rest[0] === "test") {
+    print(result, result.message);
+  } else if (command === "list") {
+    const { flags } = parse(rest.slice(1));
+    const { near, contract } = nearFor(command, flags);
+    const result = await listBounties(near, contract);
+    print(result, formatList(result));
+  } else if (command === "show") {
+    const { positional, flags } = parse(rest.slice(1));
+    if (!positional[0]) fail(`show needs a bounty id\n${usage(command)}`, 2);
+    const { near, contract } = nearFor(command, flags);
+    const result = await showBounty(near, contract, parseBountyId(positional[0]));
+    print(result, formatBounty(result));
+  } else if (command === "test") {
     const { positional, flags } = parse(rest.slice(1));
     const script = positional[0];
-    if (!script || !flags.bounty) fail(`test needs a script and --bounty\n${USAGE}`, 2);
+    if (!script || !flags.bounty) fail(`test needs a script and --bounty\n${usage(command)}`, 2);
     const result = await testCommand({
       script,
       bounty: flags.bounty,
@@ -65,11 +108,11 @@ try {
       contract: flags.contract,
       nearRpc: flags["near-rpc"],
     });
-    console.log(json ? JSON.stringify(result) : formatTestResult(result));
-  } else if (rest[0] === "broadcast") {
+    print(result, formatTestResult(result));
+  } else if (command === "broadcast") {
     const { positional, flags } = parse(rest.slice(1));
     const bounty = positional[0];
-    if (!bounty) fail(`broadcast needs a bounty id\n${BROADCAST_USAGE}`, 2);
+    if (!bounty) fail(`broadcast needs a bounty id\n${usage(command)}`, 2);
     const result = await broadcastCommand({
       bounty,
       contract: flags.contract,
@@ -77,16 +120,15 @@ try {
       rpcs: flags.rpc === undefined ? undefined : parseRpcFlags(flags.rpc.split(",")),
       waitSecs: flags.wait === undefined ? undefined : Number(flags.wait),
     });
-    console.log(json ? JSON.stringify(result) : formatBroadcastResult(result));
+    print(result, formatBroadcastResult(result));
     if (result.pauses.some((p) => p.sent === "failed")) process.exit(1);
-  } else if (rest[0] === "verify-pause") {
+  } else if (command === "verify-pause") {
     const { positional, flags } = parse(rest.slice(1));
     const m = /^([a-z0-9._-]+)\/([a-z0-9-]+)$/.exec(positional[0] ?? "");
-    const contract = flags.contract ?? process.env.BOUNTEE_CONTRACT;
-    if (!m || !contract || !flags.as) fail(`verify-pause needs a bounty id, --contract and --as\n${VERIFY_USAGE}`, 2);
-    const network = parseNetwork(flags.network);
+    if (!m || !flags.as) fail(`verify-pause needs a bounty id and --as\n${usage(command)}`, 2);
+    const { near, contract } = nearFor(command, flags);
     const result = await verifyPauses({
-      near: new Near(network, flags["near-rpc"] ?? NEAR_RPC[network]),
+      near,
       contract,
       bounty: { protocol: m[1]!, name: m[2]! },
       signer: flags.as,
@@ -94,16 +136,39 @@ try {
       chains: flags.chain === undefined ? undefined : [Number(flags.chain)],
       waitSecs: flags.wait === undefined ? undefined : Number(flags.wait),
     });
-    console.log(json ? JSON.stringify(result) : formatVerifyResult(result));
+    print(result, formatVerifyResult(result));
     if (result.chains.some((c) => !c.verified)) process.exit(1);
-  } else if (rest[0] === "claim") {
-    const r = await claim(rest.slice(1));
-    console.log(json ? JSON.stringify(r) : formatClaimResult(r));
+  } else if (command === "status") {
+    const { positional, flags } = parse(rest.slice(1));
+    const claimId = Number(positional[0]);
+    if (!positional[0] || !Number.isSafeInteger(claimId) || claimId < 0) fail(`status needs a claim id\n${usage(command)}`, 2);
+    const { near, contract, network } = nearFor(command, flags);
+    const o = {
+      contract,
+      claimId,
+      network,
+      near,
+      rpcs: flags.rpc === undefined ? undefined : parseRpcFlags(flags.rpc.split(",")),
+      outlayerApi: flags["outlayer-api"],
+      txs: flags.tx === undefined ? loadClaimTxs(contract, claimId) : flags.tx.split(","),
+    };
+    // Followed live (--watch), each stage goes to stderr as it's reached; stdout carries the
+    // final status alone.
+    const status = watch
+      ? await watchClaim(o, showStage, {
+          timeoutSecs: flags.timeout === undefined ? 1800 : Number(flags.timeout),
+          intervalSecs: flags.interval === undefined ? undefined : Number(flags.interval),
+        })
+      : await claimStatus(o);
+    print(status, formatStatus(status));
+  } else if (command === "claim") {
+    const r = await claim(rest.slice(1), showStage);
+    print(r, formatClaimResult(r));
     // A claim with no verdict, or a PAYS whose pause didn't go out, isn't done.
     if (r.state && r.state !== "judged") process.exit(1);
     if (r.broadcast?.pauses.some((p) => p.sent === "failed")) process.exit(1);
   } else {
-    fail(`unknown command: ${rest.join(" ") || "(none)"}`, 2);
+    fail(`unknown command: ${rest.join(" ")}\n${Object.values(USAGES).join("\n")}`, 2);
   }
 } catch (e) {
   fail((e as Error).message);

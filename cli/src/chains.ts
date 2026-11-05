@@ -7,6 +7,14 @@ export interface Chain {
   rpcs: string[];
   /** Those known to serve `eth_getProof` at recent blocks, for `test` (spec, RPCs). */
   proofRpcs: string[];
+  /** A block explorer's page for a transaction, for receipts' links. */
+  explorerTx: string;
+  /**
+   * The RPCs the judge's build pins for this chain as a proof chain (`judge/src/confirm.rs`
+   * `PINNED`; at least two must agree, ADR-0014), shown as a trusted party. The judge build,
+   * named by its hash, is what binds them; keep this list equal to it.
+   */
+  judgeRpcs?: string[];
 }
 
 export const CHAINS: Record<number, Chain> = {
@@ -14,10 +22,17 @@ export const CHAINS: Record<number, Chain> = {
     name: "Base Sepolia",
     rpcs: ["https://sepolia.base.org", "https://84532.rpc.thirdweb.com"],
     proofRpcs: ["https://sepolia.base.org", "https://84532.rpc.thirdweb.com"],
+    explorerTx: "https://sepolia.basescan.org/tx/",
+    judgeRpcs: ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com", "https://base-sepolia.gateway.tenderly.co"],
   },
-  421614: { name: "Arbitrum Sepolia", rpcs: ["https://sepolia-rollup.arbitrum.io/rpc"], proofRpcs: [] },
-  8453: { name: "Base", rpcs: ["https://mainnet.base.org"], proofRpcs: [] },
-  42161: { name: "Arbitrum One", rpcs: ["https://arb1.arbitrum.io/rpc"], proofRpcs: [] },
+  421614: {
+    name: "Arbitrum Sepolia",
+    rpcs: ["https://sepolia-rollup.arbitrum.io/rpc"],
+    proofRpcs: [],
+    explorerTx: "https://sepolia.arbiscan.io/tx/",
+  },
+  8453: { name: "Base", rpcs: ["https://mainnet.base.org"], proofRpcs: [], explorerTx: "https://basescan.org/tx/" },
+  42161: { name: "Arbitrum One", rpcs: ["https://arb1.arbitrum.io/rpc"], proofRpcs: [], explorerTx: "https://arbiscan.io/tx/" },
 };
 
 /** The chain's default public RPC, if BounTEE knows the chain. */
@@ -33,4 +48,10 @@ export function defaultRpcs(): Record<number, string> {
 /** RPCs that serve proofs for the chain, in order of preference; empty if none is known. */
 export function proofRpcs(chainId: number): string[] {
   return CHAINS[chainId]?.proofRpcs ?? [];
+}
+
+/** A link to the transaction on the chain's explorer, if BounTEE knows the chain. */
+export function explorerTx(chainId: number, hash: string): string | undefined {
+  const base = CHAINS[chainId]?.explorerTx;
+  return base ? `${base}${hash}` : undefined;
 }
