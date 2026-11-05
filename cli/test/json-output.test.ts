@@ -33,4 +33,5 @@ test("R14.5: every command the tool lists takes --json, and fails in JSON", () =
     expect(JSON.parse(r.stderr), c.name).toHaveProperty("error");
     expect(r.stdout, c.name).toBe("");
   }
-});
+  // One node start per command, about 20 of them: half a second each on a CI runner.
+}, 120_000);
