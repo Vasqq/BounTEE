@@ -174,7 +174,7 @@ Nobody holds a key to the bounty: not the Protocol, not the Whitehat, not us. Ju
 - Sealed and paused first, no patch window; pauses signed before payout and broadcast together; the payout doesn't wait for them (ADR-0001).
 - USDC on NEAR, held by the keyless bounty contract (ADR-0002).
 - Every bounty includes the pause; granting it proves control (ADR-0003).
-- Build on testnet; the final demo on mainnet with a few dollars; every mainnet transaction needs Liam's yes (ADR-0004).
+- Build and rehearse on testnet; every proof shown to judges is a mainnet deployment or transaction (README, landing page, video, Verify), and no testnet transaction is cited as evidence; every mainnet transaction needs Liam's yes (ADR-0004, ADR-0017).
 - Open payouts, no KYC (ADR-0005).
 - One payout rule: theft from the covered contracts; one bounty amount and one minimum theft (ADR-0006).
 - A prepaid claim balance for Whitehats and a prepaid posting fee for Protocols, so the keyless contract never pays anyone's costs (ADR-0007).
@@ -199,7 +199,7 @@ Nobody holds a key to the bounty: not the Protocol, not the Whitehat, not us. Ju
 - Tests verify requirements, not code. Every test names the requirement IDs it proves; every LLR has a verification; status comes from evidence, as requirements.md's "How to read the tables" defines it. Tickets list the requirement IDs they implement; commits name their ticket.
 - Tests follow Matt Pocock's `/tdd`: behaviour through public interfaces at the agreed seams, written red-then-green while each ticket is built. No tests of internals, no tautological tests.
 - Seams: J (the judge, the same compiled build the enclave runs, including its posting check, run locally and offline from committed block headers and proofs, with no keys or funds), C (the bounty contract in a local NEAR sandbox, with stand-ins for OutLayer and the MPC network, including its foreign-chain verification; the stand-ins answer with success and failure alike, including failures testnet can't trigger at will, live only in the test folder and are named as test stand-ins), T (the command-line tool, driven by committed scripts on testnet, chain state read back with `cast` and NEAR RPC), W (the web app, driven by committed Playwright specs in a browser), E (the demo contracts with Foundry).
-- That the real services behave as the seam C stand-ins assume is proven at seam T (R3.10, R4.11, R7.4, R7.10). Mainnet-only features (D12, D16) are verified by a recorded mainnet run under Liam's yes.
+- That the real services behave as the seam C stand-ins assume is proven at seam T (R3.10, R4.11, R7.4, R7.10). Live runs are rehearsed on testnet and verified by a mainnet run under Liam's yes (ADR-0017); the mainnet-only features (D12, D16) have no testnet rehearsal.
 - The full two-chain run happens at the Day-3 checkpoint, at demo-ready and before the video; day to day uses J, C and T on one chain; a setup script reports every balance a run needs and stops before starting, naming what to top up, if any would run dry. One mainnet pass of the end-to-end tests runs before the demo, with Liam's yes.
 - The repo is greenfield; there is no prior art in it.
 
@@ -221,7 +221,7 @@ Nobody holds a key to the bounty: not the Protocol, not the Whitehat, not us. Ju
 ## Further Notes
 
 - **Dates (UTC):** Day-3 checkpoint Fri Nov 6: the core loop on one testnet chain from a clean checkout (post, claim with a real exploit carrying its own recent-state proofs, theft rule in the enclave, test-USDC payout to a fresh account, pause), plus the sealing spike, including a copied exploit sent straight to OutLayer being refused. Demo-ready Sun Nov 8. Feature freeze Wed Nov 11. Submission Fri Nov 13; Nov 14, 23:59 is the hard close.
-- **Cut order** (ADR-0011): "Fund from Base"; the historical hack replay; all but one Damn Vulnerable DeFi bounty; `withdraw` to another chain; the web posting flow; mainnet. Never cut: sealing, the theft rule, the pause on Base and Arbitrum, the keyless payout, the landing story, Verify, the claim key. Fallbacks: committed snapshots (the tests 3–5 pattern: the whole snapshot committed by hash at posting, no chain proofs, the Protocol named as trusted for it matching the chain) if recent-state claims slip; "landed" with an explorer link if pause verification slips.
+- **Cut order** (ADR-0011, ADR-0017): "Fund from Base"; the historical hack replay; all but one Damn Vulnerable DeFi bounty; `withdraw` to another chain; the web posting flow. Never cut: mainnet (ADR-0017), sealing, the theft rule, the pause on Base and Arbitrum, the keyless payout, the landing story, Verify, the claim key. Fallbacks: committed snapshots (the tests 3–5 pattern: the whole snapshot committed by hash at posting, no chain proofs, the Protocol named as trusted for it matching the chain) if recent-state claims slip; "landed" with an explorer link if pause verification slips.
 - **First spikes, settled on testnet Nov 4; no fallback triggered:**
   - `verify_foreign_transaction` from a contract works: request, cost and time are under "Verify a pause".
   - OutLayer exposes the job's caller as `NEAR_PREDECESSOR_ID`, and an access rule can name the bounty contract as the only caller: a direct job with a copied ciphertext, a different build, and rule changes on a keyless owner were all refused (ADR-0012).

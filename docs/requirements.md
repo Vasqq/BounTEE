@@ -29,6 +29,7 @@ This document uses SHALL and SHALL NOT for every requirement. A SHOULD or MAY ca
   - **E:** the demo contracts.
 - **Method:** **T** test, **I** inspection (a recorded review of an artefact), **A** analysis (a recorded measurement or argument). "T, I" means both are needed: a test for the behaviour and an inspection that no other path exists.
 - An LLR is **verified** when its tests pass, or its inspection or analysis is recorded. An HLR is **done** when all its LLRs are verified.
+- **Mainnet is the evidence (ADR-0017).** An LLR verified by a live run (seam T against real services, or an analysis of a recorded run) is verified by a mainnet run. Testnet runs come first as rehearsals and are never cited as evidence.
 
 ## R1 · The rules are fixed when the bounty is posted
 
@@ -76,7 +77,7 @@ This document uses SHALL and SHALL NOT for every requirement. A SHOULD or MAY ca
 | R3.7 | The bounty contract SHALL refuse claims submitted after the end date. | C | T |
 | R3.8 | The judge SHALL compute the score as the smaller of gain and loss, and SHALL set the score to zero when either gain or loss is zero or negative. Gain SHALL be the value of the attacker holdings (R4.8) at the end of the replay minus the value of the seed (R4.7). Loss SHALL be the value of the covered contracts' holdings in the state at the claim's block minus the value of their holdings at the end of the replay. A value SHALL be the sum, over the listed tokens, of each token's amount held times its posting price (R4.9). The chain's native coin SHALL count only when it is a listed token, valued by account balance. Prices SHALL be per smallest unit of the token, and all value arithmetic SHALL be exact integer arithmetic. For a replay not ended as INVALID, it SHALL return PAYS when the score is equal to or greater than the minimum theft, and ZERO when the score is below it. | J | T |
 | R3.9 | Given the same block header, proofs, exploit and rules, the judge SHALL always return the same verdict and output. (That the enclave agrees with the local run is D2.) | J | T |
-| R3.10 | A real exploit of the demo protocol, claimed on testnet through the command-line tool, SHALL be paid exactly once, end to end. | T | T |
+| R3.10 | A real exploit of the demo protocol, claimed on mainnet through the command-line tool, SHALL be paid exactly once, end to end. | T | T |
 | R3.11 | The judge SHALL return INVALID for a malformed exploit. | J | T |
 | R3.12 | The bounty contract SHALL refuse claims on a bounty whose posting check hasn't passed. | C | T |
 | R3.13 | After a ZERO or INVALID verdict, the bounty contract SHALL keep the bounty open to further claims, including a new claim from the same Whitehat. | C | T |
@@ -99,7 +100,7 @@ This document uses SHALL and SHALL NOT for every requirement. A SHOULD or MAY ca
 | R4.8 | The judge SHALL treat as attacker holdings the fresh accounts plus every contract they create during the replay, and nothing else, so value held at the end by contracts the fresh accounts created counts as gain. | J | T |
 | R4.9 | The judge SHALL value only listed tokens, at posting prices, and SHALL NOT let anything read during the replay change any value. | J | T |
 | R4.10 | The judge SHALL return the expected outcome for every scenario in the R4.10 scenario table below that names R4.10, including ZERO for each out-of-scope scenario. Multi-block attacks can't be expressed as one exploit, so they have no test. | J | T |
-| R4.11 | A cheat claimed on testnet through the command-line tool (a deposit-then-withdraw by a fresh account) SHALL score zero and SHALL NOT move any funds, end to end. | T | T |
+| R4.11 | A cheat claimed on mainnet through the command-line tool (a deposit-then-withdraw by a fresh account) SHALL score zero and SHALL NOT move any funds, end to end. | T | T |
 | R4.12 | The README and the web app's posting flow SHALL state the coverage limit: only contracts that pay nothing to callers by design may be covered. | W | I |
 
 **R4.10 scenario table.** Each row is an exploit and the outcome it SHALL produce. Rows that name R4.10 are verified by R4.10; the others are verified by the requirement named. Rows 22–24 apply only to the Damn Vulnerable DeFi levels kept under the cut order (ADR-0011).
@@ -236,7 +237,7 @@ This document uses SHALL and SHALL NOT for every requirement. A SHOULD or MAY ca
 
 | ID | Low-level requirement | Seam | Method |
 |---|---|---|---|
-| R13.1 | The README SHALL show which promises rest on NEAR (the keyless contract holding money and pause rights, and Chain Signatures signing pauses for several chains) and SHALL back each with a transaction, as evidenced by R2.1, R7.1 and R14.2. | n/a | I |
+| R13.1 | The README SHALL show which promises rest on NEAR (the keyless contract holding money and pause rights, and Chain Signatures signing pauses for several chains) and SHALL back each with a mainnet transaction, as evidenced by R2.1, R7.1 and R14.2. | n/a | I |
 
 ## R14 · An AI agent can claim end to end, with authority limited to claiming
 
@@ -249,7 +250,7 @@ This document uses SHALL and SHALL NOT for every requirement. A SHOULD or MAY ca
 | R14.3 | The command-line tool SHALL create claim keys that can't transfer funds, withdraw the claim balance, add keys or call anything else. | T | T |
 | R14.4 | The command-line tool SHALL revoke a claim key so that it can no longer file claims. | T | T |
 | R14.5 | Every command of the command-line tool SHALL offer machine-readable output. | T | T |
-| R14.6 | An ordinary coding agent, given only the instructions file, SHALL find the demo bug and complete a claim with a claim key, with no human input during the run, as shown by a recorded run. | T | A |
+| R14.6 | An ordinary coding agent, given only the instructions file, SHALL find the demo bug and complete a claim with a claim key, with no human input during the run, as shown by a recorded mainnet run. | T | A |
 
 ## R15 · Everything claimed can be checked
 
@@ -272,7 +273,7 @@ This document uses SHALL and SHALL NOT for every requirement. A SHOULD or MAY ca
 | D1 | Each bounty SHALL name one proof chain. Every claim SHALL be judged against that chain's state at the claim's block, and a winning exploit SHALL pause every covered contract on every covered chain. | ADR-0009, ADR-0014 | C | T |
 | D2 | The command-line tool's `test` SHALL give the Whitehat, before any fee is spent, the same verdict the enclave then gives for the same claim. | Spec | T | T |
 | D3 | The command-line tool SHALL turn an exploit written as a Foundry script into a claim. | Spec | T | T |
-| D4 | The web app's landing page SHALL be the finished demo bounty, told as a story in the order things happen (posted → sealed → checked → pauses signed → paid → pause landed per chain → pause verified per chain → published), with each step linking its real transaction, and SHALL NOT require a wallet. | Spec | W | T |
+| D4 | The web app's landing page SHALL be the finished mainnet demo bounty, told as a story in the order things happen (posted → sealed → checked → pauses signed → paid → pause landed per chain → pause verified per chain → published), with each step linking its real mainnet transaction, and SHALL NOT require a wallet. | Spec, ADR-0017 | W | T |
 | D5 | The web app's posting flow SHALL show each pause-role grant and pause-gas top-up per chain and tick each off as it lands, and SHALL show the rules back in plain English. Its pause-gas step SHALL explain that the pause is a real transaction on that chain, paid by the pause-role address, so it needs a few cents of that chain's token in advance; that BounTEE's funds on NEAR can't pay gas there; that only the BounTEE contract can sign for that address, so nobody, the Protocol included, can take that gas back; and that nobody presses the pause button, because a proven exploit triggers it. | Spec, ADR-0015 | W | T |
 | D6 | The web app SHALL show, on every bounty, a Verify section with each check from R15.1 as passing, failing or not yet published. | Spec | W | T |
 | D7 | The bounty contract SHALL let anyone trigger a winning exploit's publication once its disclosure delay (1–90 days, fixed at posting) has passed, and SHALL refuse it before. | ADR-0008 | C | T |
