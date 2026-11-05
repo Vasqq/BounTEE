@@ -84,7 +84,7 @@ describe.runIf(RUN)("#21: a pause verified on NEAR by the MPC network", () => {
 
   test("R7.3, R7.10, R7.11: claim pays, broadcasts, waits for the safe head and has the pause verified; an early request is not", async () => {
     const id = { protocol: instance.protocol, name: instance.name };
-    const claiming = run(process.execPath, [entry, "claim", join(repo, "demo/script/Exploit.s.sol"), "--bounty", instance.bounty, "--contract", contract, "--as", whitehat, "--verify-wait", "3600", "--json"], { VAULT: instance.vault });
+    const claiming = run(process.execPath, [entry, "claim", join(repo, "demo/script/Exploit.s.sol"), "--bounty", instance.bounty, "--contract", contract, "--as", whitehat, "--verify-wait", "3600", "--timeout", "3600", "--json"], { VAULT: instance.vault });
 
     // R7.11: the bounty is paid while no chain's pause is verified, or even asked about.
     let bounty: any;
