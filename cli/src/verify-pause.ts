@@ -8,10 +8,14 @@
 // pause's receipt, refuses to ask about a reverted one, then waits until the chain's `safe` head
 // has passed the pauses' blocks (11-27 minutes on Base Sepolia), and only then calls
 // `verify_pause`. The contract takes the transaction hashes from the pauses it stored; the tool
-// never sends one. Once the prepaid attempts are used, it attaches the fee `fees()` names.
+// never sends one. The three prepaid attempts are only the winning Whitehat's and the posting
+// Protocol's (R7.10): signed by either, the tool attaches nothing while any is left; signed by
+// anyone else, or once they are used, it attaches `fees()`'s `verify_pause_fee_per_pause` for
+// each pause asked about (the contract refunds what it doesn't take).
 import { actions } from "near-api-js";
 import { defaultRpcs, waitForEvmReceipt } from "./chains.ts";
 import { Near, events, tgas } from "./near.ts";
+import type { ClaimView } from "./status.ts";
 import { rpc } from "./proofs.ts";
 
 export interface VerifyOptions {
@@ -26,6 +30,8 @@ export interface VerifyOptions {
   chains?: number[];
   /** How long to wait, per chain, for the pauses to land and reach the safe head. */
   waitSecs?: number;
+  /** Set by `verifyPauses` from the bounty: the signer is the winning Whitehat or the posting Protocol. */
+  mayUsePrepaid?: boolean;
 }
 
 export interface ChainVerification {
@@ -40,6 +46,8 @@ export interface ChainVerification {
   /** Whether this run asked the contract to verify (false if already verified, or not ready). */
   requested: boolean;
   near_tx?: string;
+  /** What the request attached, in yoctoNEAR: 0 on a prepaid attempt. */
+  deposit?: string;
   verified: boolean;
   attempts: number;
   error?: string;
@@ -118,7 +126,10 @@ async function verifyChain(o: VerifyOptions, chain: number, hashes: string[], ur
   if (v.verifying) return { ...out, error: "another verification is still under way" };
   const fees = await near.view(o.contract, "fees");
   const gas = BigInt(fees.min_verify_pause_gas_base) + BigInt(fees.min_verify_pause_gas_per_pause) * BigInt(pending.length) + tgas(20);
-  const deposit = v.prepaid_attempts_left > 0 ? 0n : BigInt(fees.verify_pause_fee_per_pause) * BigInt(pending.length);
+  // The prepaid attempts are only the winning Whitehat's and the posting Protocol's (R7.10);
+  // anyone else, and either of them once those are used, pays per pause.
+  const deposit = o.mayUsePrepaid && v.prepaid_attempts_left > 0 ? 0n : BigInt(fees.verify_pause_fee_per_pause) * BigInt(pending.length);
+  out.deposit = deposit.toString();
   const r = await near.account(o.signer).signAndSendTransaction({
     receiverId: o.contract,
     actions: [actions.functionCall("verify_pause", { id: o.bounty, chain_id: chain }, gas, deposit)],
@@ -141,9 +152,12 @@ async function verifyChain(o: VerifyOptions, chain: number, hashes: string[], ur
 }
 
 export async function verifyPauses(o: VerifyOptions): Promise<VerifyResult> {
-  const bounty = await o.near.view<{ signed_pauses: { chain_id: number; tx_hash: string }[]; state: string } | null>(o.contract, "bounty", { id: o.bounty });
+  const bounty = await o.near.view<{ signed_pauses: { chain_id: number; tx_hash: string }[]; state: string; winning_claim: number | null } | null>(o.contract, "bounty", { id: o.bounty });
   if (!bounty) throw new Error(`no bounty ${o.bounty.protocol}/${o.bounty.name} on ${o.contract}`);
   if (bounty.signed_pauses.length === 0) throw new Error(`bounty ${o.bounty.protocol}/${o.bounty.name} has no signed pauses (state: ${bounty.state})`);
+  // Whether the signer may use the prepaid attempts: the winning Whitehat or the posting Protocol.
+  const winner = bounty.winning_claim === null ? null : await o.near.view<ClaimView | null>(o.contract, "claim", { claim_id: bounty.winning_claim });
+  o = { ...o, mayUsePrepaid: o.signer === o.bounty.protocol || (winner !== null && o.signer === winner.whitehat) };
   const rpcs = { ...defaultRpcs(), ...o.rpcs };
   const chains = [...new Set(bounty.signed_pauses.map((p) => p.chain_id))].filter((c) => !o.chains || o.chains.includes(c));
   const results = await Promise.all(

@@ -52,8 +52,8 @@ const USAGES: Record<string, string> = {
   broadcast: "bountee broadcast <protocol>/<name> [--contract <account>] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]",
   key: "bountee key add --contract <account> --as <account> [--allowance <NEAR>] [--out-dir <dir>] [--network testnet|mainnet] [--near-rpc <url>] [--json]  |  bountee key revoke [<public key>] --as <account> [--out-dir <dir>] [--network testnet|mainnet] [--near-rpc <url>] [--json]",
   "verify-pause": `bountee verify-pause <protocol>/<name> --as <account> ${NEAR_FLAGS} [--chain <chain id>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]`,
-  publish: `bountee publish <protocol>/<name> --as <account> --proofs <saved job.json | proofs.json> ${NEAR_FLAGS} [--json]`,
-  rerun: `bountee rerun <protocol>/<name> [--judge <wasm>] [--out <job.json>] ${NEAR_FLAGS} [--json]`,
+  publish: `bountee publish <protocol>/<name> --as <account> [--proofs <saved job.json | proofs.json>] ${NEAR_FLAGS} [--json]`,
+  rerun: `bountee rerun <protocol>/<name> [--judge <wasm>] [--out <job.json>] [--proofs <saved job.json | proofs.json>] ${NEAR_FLAGS} [--json]`,
   "sign-pauses": `bountee sign-pauses <protocol>/<name> --as <account> ${NEAR_FLAGS} [--json]`,
   "retry-payout": `bountee retry-payout <protocol>/<name> --as <account> ${NEAR_FLAGS} [--json]`,
   balance: `bountee balance [top-up <NEAR> | withdraw [<NEAR>]] --as <account> ${NEAR_FLAGS} [--json]`,
@@ -234,7 +234,7 @@ try {
     } else fail(`key takes add or revoke\n${usage(command)}`, 2);
   } else if (command === "publish") {
     const { positional, flags } = parse(rest.slice(1));
-    if (!positional[0] || !flags.as || !flags.proofs) fail(`publish needs a bounty id, --as and --proofs\n${usage(command)}`, 2);
+    if (!positional[0] || !flags.as) fail(`publish needs a bounty id and --as\n${usage(command)}`, 2);
     const { near, contract } = nearFor(command, flags);
     const r = await publishExploit({ near, contract, bounty: parseBountyId(positional[0]), as: flags.as, proofs: flags.proofs });
     print(r, formatPublishResult(r));
@@ -242,7 +242,7 @@ try {
     const { positional, flags } = parse(rest.slice(1));
     if (!positional[0]) fail(`rerun needs a bounty id\n${usage(command)}`, 2);
     const { near, contract } = nearFor(command, flags);
-    const r = await rerunPublished({ near, contract, bounty: parseBountyId(positional[0]), judge: flags.judge, out: flags.out });
+    const r = await rerunPublished({ near, contract, bounty: parseBountyId(positional[0]), judge: flags.judge, out: flags.out, proofs: flags.proofs });
     print(r, formatRerunResult(r));
     if (!r.same_verdict) process.exit(1);
   } else if (command === "sign-pauses" || command === "retry-payout") {

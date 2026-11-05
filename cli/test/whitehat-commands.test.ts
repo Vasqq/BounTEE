@@ -38,6 +38,7 @@ const PAYS = { outcome: "PAYS", reason: "minimum_theft_reached" };
 const ZERO = { outcome: "ZERO", reason: "below_minimum_theft" };
 const YOCTO = 10n ** 24n;
 const MIN_RETRY_PAYOUT_GAS = 45_000_000_000_000n;
+const VERIFY_FEE = YOCTO / 20n;
 
 /** R14.1, spelled out: the bounty contract's claim actions, and nothing else. */
 const CLAIM_ACTIONS = ["submit_claim", "retry_claim"];
@@ -70,6 +71,8 @@ let world: {
   added: Record<string, unknown>;
   balance: bigint;
   verified: boolean;
+  /** The prepaid verification attempts left on the chain (of three). */
+  prepaidLeft: number;
   /** What `retry_claim` leaves behind: the claim's verdict and the bounty. */
   afterRetry: { verdict: unknown; bounty?: Record<string, unknown> };
   /** What `sign_pauses` leaves the bounty as. */
@@ -106,6 +109,7 @@ function reset() {
     added: {},
     balance: 3n * YOCTO,
     verified: false,
+    prepaidLeft: 3,
     afterRetry: { verdict: ZERO },
     afterSign: { state: "paid" },
   };
@@ -182,10 +186,10 @@ const VIEWS: Record<string, (args: any) => unknown> = {
     min_retry_payout_gas: MIN_RETRY_PAYOUT_GAS.toString(),
     min_verify_pause_gas_base: "50000000000000",
     min_verify_pause_gas_per_pause: "10000000000000",
-    verify_pause_fee_per_pause: "0",
+    verify_pause_fee_per_pause: VERIFY_FEE.toString(),
   }),
   pause_verifications: () => [
-    { chain_id: PAUSE.chain_id, verified: world.verified, verified_pauses: world.verified ? [PAUSE.tx_hash] : [], attempts: world.verified ? 1 : 0, prepaid_attempts_left: world.verified ? 2 : 3, verifying: false },
+    { chain_id: PAUSE.chain_id, verified: world.verified, verified_pauses: world.verified ? [PAUSE.tx_hash] : [], attempts: world.verified ? 1 : 0, prepaid_attempts_left: world.prepaidLeft, verifying: false },
   ],
 };
 
@@ -338,6 +342,29 @@ test("R14.1 R14.3 R7.3: claim signed with a claim key broadcasts the pause but n
   expect(full.code, full.stderr).toBe(0);
   expect(methods()).toStrictEqual(["retry_claim", "verify_pause"]);
   expect(full.out.verification.chains[0]).toMatchObject({ chain_id: PAUSE.chain_id, verified: true });
+}, 60_000);
+
+// ---- verify-pause: who uses the prepaid attempts (R7.10) -------------------------------------
+
+test("R7.10: verify-pause attaches nothing for the winning Whitehat or the posting Protocol while prepaid attempts are left, and the fee per pause for anyone else or once they are used", async () => {
+  Object.assign(world.claim, { state: "judged", verdict: PAYS });
+  Object.assign(world.bounty, { state: "paid", winning_claim: 3, signed_pauses: [PAUSE] });
+  const verifyAs = async (account: string) => {
+    // Every account signs with the one stand-in key; only who it is matters here.
+    writeFileSync(join(dir, `${account}.json`), JSON.stringify({ account_id: account, public_key: signerKey.getPublicKey().toString(), private_key: signerKey.toString() }));
+    world.verified = false;
+    const r = await bountee(["verify-pause", BOUNTY_TEXT, "--as", account, "--rpc", `84532=${base}/evm`, "--wait", "5", ...NEAR()]);
+    expect(r.code, r.stderr).toBe(0);
+    const s = sent.at(-1)!;
+    expect(s).toMatchObject({ signer: account, method: "verify_pause", args: { id: BOUNTY, chain_id: PAUSE.chain_id } });
+    expect(r.out.chains[0].deposit).toBe(s.deposit!.toString());
+    return s.deposit;
+  };
+  expect(await verifyAs(WHITEHAT)).toBe(0n); // the winner
+  expect(await verifyAs(BOUNTY.protocol)).toBe(0n); // the Protocol
+  expect(await verifyAs("carol.testnet")).toBe(VERIFY_FEE); // anyone else: one pause's fee
+  world.prepaidLeft = 0;
+  expect(await verifyAs(WHITEHAT)).toBe(VERIFY_FEE); // the winner, once the prepaid attempts are used
 }, 60_000);
 
 // ---- claim --retry (R2.6) ------------------------------------------------------------------
