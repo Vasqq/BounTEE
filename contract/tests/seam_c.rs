@@ -3287,6 +3287,13 @@ async fn r5_6_a_failed_exploit_is_never_released() -> anyhow::Result<()> {
     assert!(s.release_requests().await?.is_empty());
     assert_eq!(s.released("vault").await?, Value::Null);
 
+    // The no-verdict loser would hold a later winner's payout for its place hold (R3.6, #18):
+    // let it lapse first, so the winner is paid at once.
+    let no_verdict = s.claim(2).await?;
+    assert_eq!(no_verdict["state"], "no_verdict");
+    let submitted: u64 = no_verdict["submitted_at_ns"].as_str().unwrap().parse()?;
+    s.pass_time_to(submitted + PLACE_HOLD_NS).await?;
+
     let winner = s.pay_claim("vault").await?;
     s.script(json!({ "output": RELEASED })).await?;
     s.release(&s.protocol, "vault")
