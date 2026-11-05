@@ -1,0 +1,35 @@
+Damn Vulnerable DeFi v4 levels in BounTEE
+
+This directory uses three levels of Damn Vulnerable DeFi v4 (https://damnvulnerabledefi.xyz,
+https://github.com/theredguild/damn-vulnerable-defi, tag v4.1.0, commit 64fddf9), by The Red
+Guild and tinchoabbate, under the MIT licence. The licence's text is in LICENSE, beside this
+file: "Copyright (c) 2021 Damn Vulnerable DeFi".
+
+Copied unmodified from Damn Vulnerable DeFi v4.1.0:
+  src/v4/DamnValuableToken.sol                       from src/DamnValuableToken.sol
+  src/v4/truster/TrusterLenderPool.sol               from src/truster/
+  src/v4/side-entrance/SideEntranceLenderPool.sol    from src/side-entrance/
+  src/v4/puppet/PuppetPool.sol, IUniswapV1Exchange.sol, IUniswapV1Factory.sol
+                                                     from src/puppet/
+
+Modified by BounTEE (each file's header says how):
+  src/adapted/PausableTrusterLenderPool.sol          from src/truster/TrusterLenderPool.sol
+  src/adapted/PausableSideEntranceLenderPool.sol     from src/side-entrance/SideEntranceLenderPool.sol
+  src/adapted/PausablePuppetPool.sol                 from src/puppet/PuppetPool.sol
+The modification is the same in each: BounTEE's standard pause (src/adapted/PauseRole.sol,
+OpenZeppelin Pausable with a pause-only role and no unpause) is added, and every function on
+the level's exploit path refuses to run while paused. Each level's bug is kept unchanged.
+
+BounTEE's own files here (MIT): src/adapted/PauseRole.sol, script/, test/, make-fixtures.ts.
+The exploits in script/ are BounTEE's solutions to the three levels. Puppet's Uniswap pool
+starts with 0.1 ETH and 0.1 DVT instead of DVD's 10 and 10 (see script/World.sol).
+
+builds/uniswap/UniswapV1Exchange.json and UniswapV1Factory.json are the compiled Uniswap V1
+contracts as Damn Vulnerable DeFi v4.1.0 ships them (builds/uniswap/), unmodified. Uniswap V1 is
+licensed under the GNU General Public License v3.0; its source is at
+https://github.com/Uniswap/v1-contracts. They are deployed only on local test chains, as
+Puppet's price source.
+
+Libraries (fetched by soldeer, not committed): OpenZeppelin Contracts 5.2.0 (MIT), Solady
+0.0.221 (MIT), Solmate (its ERC20.sol is
+AGPL-3.0-only; used only because Damn Vulnerable DeFi's DamnValuableToken inherits it), forge-std 1.9.7 (MIT or Apache-2.0).
