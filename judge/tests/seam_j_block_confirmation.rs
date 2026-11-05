@@ -49,12 +49,33 @@ fn sealed(job: &Value, exploit: &Value) -> String {
 /// Run `wasm` on `job` with the test stand-ins' addresses in `BOUNTEE_TEST_RPCS` and, when
 /// given, `exploit` sealed as the job's secret, in a job the bounty contract requested.
 fn run(wasm: &PathBuf, job: &Value, rpcs: &[&TestRpc], exploit: Option<&Value>) -> Output {
-    let urls: Vec<&str> = rpcs.iter().map(|r| r.url.as_str()).collect();
+    run_per_chain(wasm, job, rpcs, &[], exploit)
+}
+
+fn urls(rpcs: &[&TestRpc]) -> String {
+    rpcs.iter().map(|r| r.url.as_str()).collect::<Vec<_>>().join(",")
+}
+
+/// [`run`], with the chains named in `per_chain` given their own stand-ins
+/// (`BOUNTEE_TEST_RPCS_<chain id>`) instead of `rpcs`.
+fn run_per_chain(
+    wasm: &PathBuf,
+    job: &Value,
+    rpcs: &[&TestRpc],
+    per_chain: &[(u64, &[&TestRpc])],
+    exploit: Option<&Value>,
+) -> Output {
     let mut command = Command::new("wasmtime");
     command
         .args(["run", "-S", "http"])
         .arg("--env")
-        .arg(format!("BOUNTEE_TEST_RPCS={}", urls.join(",")))
+        .arg(format!("BOUNTEE_TEST_RPCS={}", urls(rpcs)));
+    for (chain, rpcs) in per_chain {
+        command
+            .arg("--env")
+            .arg(format!("BOUNTEE_TEST_RPCS_{chain}={}", urls(rpcs)));
+    }
+    command
         .arg("--env")
         .arg(format!("NEAR_PREDECESSOR_ID={BOUNTY_CONTRACT}"));
     if let Some(exploit) = exploit {
@@ -322,6 +343,36 @@ fn r2_8_block_at_the_submission_time_is_accepted() {
 fn r2_8_block_after_the_submission_time_is_invalid() {
     let out = run_with(&claim_job(-1), [ours(), ours(), ours()]);
     assert_verdict(&out, Reason::StaleBlock);
+}
+
+// ---- D1: one proof chain ------------------------------------------------------------------
+
+/// D1: a bounty covering its vaults on the proof chain and on Arbitrum Sepolia is judged
+/// against the proof chain's state only: the judge confirms the block through the proof
+/// chain's RPCs and asks Arbitrum's nothing (here they would contradict the claim), and the
+/// replay PAYS on the proof chain's vaults alone.
+#[test]
+fn d1_a_claim_covering_two_chains_is_judged_on_its_proof_chain_only() {
+    const ARBITRUM: u64 = 421614;
+    let mut job = recent_claim();
+    let rules = &mut job["judge_claim"]["rules"];
+    let mut covered = rules["covered_contracts"].as_array().unwrap().clone();
+    for c in covered.clone() {
+        covered.push(json!({ "chain_id": ARBITRUM, "address": c["address"] }));
+    }
+    rules["covered_contracts"] = json!(covered);
+    let proof_chain = rpcs([ours(), ours(), ours()]);
+    let arbitrum = rpcs([other(), other(), other()]);
+    let out = run_per_chain(
+        test_build(),
+        &job,
+        &proof_chain.iter().collect::<Vec<_>>(),
+        &[(ARBITRUM, &arbitrum.iter().collect::<Vec<_>>())],
+        Some(&drain()),
+    );
+    assert_verdict(&out, Reason::MinimumTheftReached);
+    assert_eq!(proof_chain.iter().map(TestRpc::requests).sum::<usize>(), 3);
+    assert_eq!(arbitrum.iter().map(TestRpc::requests).sum::<usize>(), 0);
 }
 
 // ---- R2.8: RPC addresses come only from the build ---------------------------------------

@@ -26,17 +26,27 @@ use serde_json::json;
 
 use crate::rpc;
 
-/// The three independent RPCs pinned for each proof chain, by chain ID (spec, judge
-/// RPCs; each answered from inside an OutLayer job, Nov 4). Arbitrum Sepolia's and the
-/// mainnet chains' join here, picked the same way.
-pub const PINNED: &[(u64, [&str; 3])] = &[(
-    84532, // Base Sepolia
-    [
-        "https://sepolia.base.org",
-        "https://base-sepolia-rpc.publicnode.com",
-        "https://base-sepolia.gateway.tenderly.co",
-    ],
-)];
+/// The three independent RPCs pinned for each covered or proof chain, by chain ID (spec,
+/// judge RPCs; each answered from inside an OutLayer job: Base Sepolia's on Nov 4,
+/// Arbitrum Sepolia's on Nov 5). The mainnet chains' join here, picked the same way.
+pub const PINNED: &[(u64, [&str; 3])] = &[
+    (
+        84532, // Base Sepolia
+        [
+            "https://sepolia.base.org",
+            "https://base-sepolia-rpc.publicnode.com",
+            "https://base-sepolia.gateway.tenderly.co",
+        ],
+    ),
+    (
+        421614, // Arbitrum Sepolia
+        [
+            "https://sepolia-rollup.arbitrum.io/rpc",
+            "https://arbitrum-sepolia-rpc.publicnode.com",
+            "https://arbitrum-sepolia.gateway.tenderly.co",
+        ],
+    ),
+];
 
 /// Why a block can't be confirmed either way: the job fails with no verdict (R2.6).
 #[derive(Debug)]
@@ -105,12 +115,15 @@ pub fn rpcs_for(chain_id: u64) -> Option<Vec<String>> {
         .map(|(_, urls)| urls.iter().map(|u| (*u).to_owned()).collect())
 }
 
-/// TEST BUILD ONLY (seam J): the test stand-ins' addresses from `BOUNTEE_TEST_RPCS`, for
-/// any chain. Never compiled into the build OutLayer runs.
+/// TEST BUILD ONLY (seam J): the test stand-ins' addresses for `chain_id` from
+/// `BOUNTEE_TEST_RPCS_<chain id>`, else from `BOUNTEE_TEST_RPCS` for any chain. Never
+/// compiled into the build OutLayer runs.
 #[cfg(feature = "test-stand-in-rpcs")]
-pub fn rpcs_for(_chain_id: u64) -> Option<Vec<String>> {
+pub fn rpcs_for(chain_id: u64) -> Option<Vec<String>> {
     let _ = PINNED;
-    let urls = std::env::var("BOUNTEE_TEST_RPCS").ok()?;
+    let urls = std::env::var(format!("BOUNTEE_TEST_RPCS_{chain_id}"))
+        .or_else(|_| std::env::var("BOUNTEE_TEST_RPCS"))
+        .ok()?;
     Some(
         urls.split(',')
             .filter(|u| !u.is_empty())
