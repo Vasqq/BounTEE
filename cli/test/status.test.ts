@@ -12,7 +12,7 @@
 // `bounty_paid` event, the attestation filed under the claim's transaction, every pause's
 // transaction); R14.5 (each stage a JSON line, the result JSON). It misses the real
 // services' answers: `status-testnet.test.ts` reads a real paid claim. The verified-pause
-// record is assumed to be the bounty view's `verified_pauses` (ticket #21 builds it).
+// record is the contract's `pause_verifications` view (ticket #21), played here per chain.
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -40,6 +40,8 @@ const PAYS = { outcome: "PAYS", reason: "minimum_theft_reached" };
 let world: {
   claim: any;
   bounty: any;
+  /** The hashes the contract records as verified, by chain ID. */
+  verified: Record<number, string[]>;
   receipts: Record<string, { status: string; blockNumber: string }>;
   /** `claim` showed "sealed" before it filed: the claim, once filed, goes straight to judging. */
   sealedBeforeFiling?: boolean;
@@ -56,8 +58,8 @@ function reset() {
       signed_pauses: [],
       signing_pauses: false,
       paying_out: false,
-      verified_pauses: [],
     },
+    verified: {},
     receipts: {},
   };
 }
@@ -94,8 +96,8 @@ const STEPS: { shows: string; then: () => void }[] = [
   { shows: "pauses_signed", then: () => Object.assign(world.bounty, { state: "paid", paying_out: false }) },
   { shows: "paid", then: () => (world.receipts[PAUSES[0]!.tx_hash] = { status: "0x1", blockNumber: "0x10" }) },
   { shows: `landed ${PAUSES[0]!.tx_hash}`, then: () => (world.receipts[PAUSES[1]!.tx_hash] = { status: "0x1", blockNumber: "0x20" }) },
-  { shows: `landed ${PAUSES[1]!.tx_hash}`, then: () => world.bounty.verified_pauses.push({ chain_id: 84532, tx_hash: PAUSES[0]!.tx_hash }) },
-  { shows: `verified ${PAUSES[0]!.tx_hash}`, then: () => world.bounty.verified_pauses.push({ chain_id: 421614, tx_hash: PAUSES[1]!.tx_hash }) },
+  { shows: `landed ${PAUSES[1]!.tx_hash}`, then: () => (world.verified[84532] = [PAUSES[0]!.tx_hash]) },
+  { shows: `verified ${PAUSES[0]!.tx_hash}`, then: () => (world.verified[421614] = [PAUSES[1]!.tx_hash]) },
 ];
 const LAST = `verified ${PAUSES[1]!.tx_hash}`;
 
@@ -128,6 +130,13 @@ function claimTxStatus() {
 const VIEWS: Record<string, (args: any) => unknown> = {
   claim: ({ claim_id }) => (claim_id === 0 ? world.claim : null),
   bounty: () => world.bounty,
+  // The contract's view: every chain with a signed pause, and the hashes verified on it.
+  pause_verifications: () =>
+    [...new Set<number>(world.bounty.signed_pauses.map((p: any) => p.chain_id))].map((chain_id) => {
+      const verified_pauses = world.verified[chain_id] ?? [];
+      const all = world.bounty.signed_pauses.filter((p: any) => p.chain_id === chain_id);
+      return { chain_id, verified: all.every((p: any) => verified_pauses.includes(p.tx_hash)), verified_pauses, attempts: verified_pauses.length ? 1 : 0, prepaid_attempts_left: verified_pauses.length ? 2 : 3, verifying: false };
+    }),
   config: () => ({ outlayer: "outlayer.testnet", usdc: "usdc.testnet", judge_build_hash: `0x${JUDGE_HASH}` }),
   fees: () => ({ job_deposit: "0", storage_price_per_byte: "0", job_input_free_bytes: 0, secret_row_overhead_bytes: 0 }),
   claim_balance: () => "10000000000000000000000000",
