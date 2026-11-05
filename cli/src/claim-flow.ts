@@ -7,9 +7,11 @@
 // - after: wait for the enclave's verdict, and on PAYS make sure the pauses are signed (asking
 //   `sign_pauses` if the verdict's callback ran out of gas for them), the bounty is paid,
 //   and every signed pause is broadcast, then each chain's pause verified on NEAR once the
-//   chain reports it safe (R7.3).
+//   chain reports it safe (R7.3). A claim key may call only the claim actions (R14.1), so
+//   signed with one, the steps needing `sign_pauses` or `verify_pause` are skipped and named,
+//   as is a payout left waiting (`retry_payout`) or a claim with no verdict (`retry_claim`):
+//   each as the command the Whitehat runs.
 import { readFileSync } from "node:fs";
-import { actions } from "near-api-js";
 import { parseReplay, RECENCY_LIMIT_SECS, type Replay, type Verdict } from "@bountee/formats";
 import { broadcastCommand, type BroadcastResult } from "./broadcast.ts";
 import { rpc } from "./proofs.ts";
@@ -17,6 +19,7 @@ import { proofRpcs } from "./chains.ts";
 import { testCommand, type TestOptions, type TestResult } from "./test.ts";
 import { verifyPauses, type VerifyResult } from "./verify-pause.ts";
 import { Near, events, formatNear, milliNear, tgas } from "./near.ts";
+import { signPauses } from "./payout.ts";
 
 /** Time a claim needs from here to `submit_claim` recording its submission time. */
 export const SUBMIT_MARGIN_SECS = 60;
@@ -103,6 +106,8 @@ export interface Settlement {
   /** Each chain's pause verification on NEAR, after the broadcast. */
   verification?: VerifyResult;
   events: string[];
+  /** What is left that this run didn't do, each with the command that does it. */
+  next_steps: string[];
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -129,27 +134,31 @@ export async function settle(
     submitted_at_ns: claim?.submitted_at_ns,
     bounty_state: "",
     events: seen,
+    next_steps: [],
   };
+  if (out.state === "no_verdict") {
+    out.next_steps.push(`the job ended with no verdict and the claim keeps its place (R2.6): retry it with \`bountee claim --retry ${o.claimId} --bounty ${o.bounty.protocol}/${o.bounty.name} --contract ${o.contract} --as ${o.whitehat}\``);
+  }
   let bounty = await near.view(o.contract, "bounty", { id: o.bounty });
   out.bounty_state = bounty?.state;
   if (out.verdict?.outcome !== "PAYS" || bounty?.winning_claim !== o.claimId) return out;
 
   // The verdict's callback signs the pauses when it has the gas; otherwise it leaves the
   // bounty `signing`, waiting for `sign_pauses` (anyone may call it).
+  // A claim key can call only the claim actions (R14.1): every later step that needs another
+  // method is left to the Whitehat's own key, and named.
+  const id = `${o.bounty.protocol}/${o.bounty.name}`;
+  const flags = `--contract ${o.contract} --as ${o.whitehat}`;
   for (let tries = 0; bounty.state === "signing" && Date.now() < deadline; ) {
     if (!bounty.signing_pauses && tries < 3) {
+      if (!(await near.canCall(o.whitehat, o.contract, "sign_pauses"))) {
+        out.next_steps.push(`the pauses wait to be signed, and a claim key can't ask: run \`bountee sign-pauses ${id} ${flags}\` with your own key`);
+        break;
+      }
       tries++;
-      const fees = await near.view(o.contract, "fees");
-      const gas = BigInt(fees.min_sign_pauses_gas_base) + BigInt(fees.min_sign_pauses_gas_per_contract) * BigInt(bounty.rules.covered_contracts.length) + tgas(40);
-      const r = await near.account(o.whitehat).signAndSendTransaction({
-        receiverId: o.contract,
-        actions: [actions.functionCall("sign_pauses", { id: o.bounty }, gas, 0n)],
-        waitUntil: "FINAL",
-        throwOnFailure: false,
-      });
-      out.sign_pauses_tx = r.transaction.hash;
-      const s = await near.txStatus(r.transaction.hash, o.whitehat);
-      out.events.push(...events(s).map((e) => e.event));
+      const r = await signPauses({ near, contract: o.contract, bounty: o.bounty, signer: o.whitehat });
+      out.sign_pauses_tx = r.tx_hash;
+      out.events.push(...r.events);
     } else if (!bounty.signing_pauses) {
       break; // three retries failed: the claim stays pending, unpaid (R2.5)
     } else {
@@ -160,6 +169,11 @@ export async function settle(
   for (; bounty.state === "paying" && Date.now() < deadline; bounty = await near.view(o.contract, "bounty", { id: o.bounty })) await sleep(3000);
   out.bounty_state = bounty.state;
   out.paid = bounty.state === "paid";
+  if (bounty.state === "paying" && !bounty.paying_out) {
+    // Waiting for earlier claims (R3.6), or the transfer failed (R2.4): anyone may retry it.
+    const until = bounty.payout_waits_until_ns ? ` after ${new Date(Number(BigInt(bounty.payout_waits_until_ns) / 1_000_000n)).toISOString()}` : "";
+    out.next_steps.push(`the payout waits: run \`bountee retry-payout ${id} ${flags}\`${until}${(await near.canCall(o.whitehat, o.contract, "retry_payout")) ? "" : " with your own key"}`);
+  }
   if (o.broadcast && bounty.signed_pauses?.length) {
     out.broadcast = await broadcastCommand({
       bounty: `${o.bounty.protocol}/${o.bounty.name}`,
@@ -169,7 +183,9 @@ export async function settle(
       waitSecs: 120,
     });
     // Off the money path (R7.11): the claim is paid whatever this finds.
-    if (o.verify) {
+    if (o.verify && !(await near.canCall(o.whitehat, o.contract, "verify_pause"))) {
+      out.next_steps.push(`each pause is verified on NEAR once its chain reports it safe, and a claim key can't ask: run \`bountee verify-pause ${id} ${flags}\` with your own key`);
+    } else if (o.verify) {
       out.verification = await verifyPauses({
         near,
         contract: o.contract,
@@ -188,6 +204,7 @@ export function formatSettlement(s: Settlement): string {
   if (s.sign_pauses_tx) lines.push(`pauses signed by retry: ${s.sign_pauses_tx}`);
   for (const p of s.broadcast?.pauses ?? []) lines.push(`pause on ${p.chain_id} ${p.contract}: ${p.sent} ${p.tx_hash}${p.receipt ? ` (${p.receipt.status})` : ""}`);
   for (const c of s.verification?.chains ?? []) lines.push(`pause on ${c.chain_id}: ${c.verified ? "verified on NEAR" : `not verified (${c.error ?? "unknown"})`}`);
+  for (const step of s.next_steps) lines.push(`next: ${step}`);
   return lines.join("\n");
 }
 

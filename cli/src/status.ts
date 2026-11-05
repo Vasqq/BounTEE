@@ -13,11 +13,28 @@
 // the tool knows: the one `claim` sent and saved, or `--tx`.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { BountyId, Verdict } from "@bountee/formats";
-import { defaultRpc, explorerTx } from "./chains.ts";
+import type { BlockRef, BountyId, Verdict } from "@bountee/formats";
+import { defaultRpc, evmReceipt, explorerTx } from "./chains.ts";
 import { events, Near, NEAR_EXPLORER_TX, type Network } from "./near.ts";
-import { rpc } from "./proofs.ts";
 import { KEYSTORE_API } from "./seal.ts";
+
+/**
+ * The bounty contract's `claim` view (its `ClaimRecord`, contract/src/lib.rs), typed from the
+ * shared formats' parts.
+ */
+export interface ClaimView {
+  bounty: BountyId;
+  whitehat: string;
+  block: BlockRef;
+  header: string;
+  /** sha256 of the proofs exactly as submitted (`0x…`). */
+  proofs_sha256: string;
+  /** NEAR nanoseconds, decimal. */
+  submitted_at_ns: string;
+  secret_profile: string;
+  state: "storing" | "store_failed" | "judging" | "no_verdict" | "judged";
+  verdict: Verdict | null;
+}
 
 export type Stage =
   /** `claim` shows it as soon as the exploit is sealed locally, before filing: no claim id yet. */
@@ -118,15 +135,11 @@ const once = <T>(cache: Cache, key: string, f: () => Promise<T>): Promise<T> => 
   return cache.get(key) as Promise<T>;
 };
 
-async function pauseReceipt(url: string | undefined, hash: string) {
-  if (!url) return null;
-  try {
-    const r = await rpc<{ status: string; blockNumber: string } | null>(url, "eth_getTransactionReceipt", [hash]);
-    return r ? { block: Number(r.blockNumber), status: r.status === "0x1" ? ("success" as const) : ("reverted" as const) } : null;
-  } catch {
-    return null; // not landed yet, or the RPC didn't answer: either way not shown as landed
-  }
-}
+/** Not landed yet, or the RPC didn't answer: either way not shown as landed. */
+const pauseReceipt = async (url: string | undefined, hash: string) => {
+  const r = url ? await evmReceipt(url, hash) : null;
+  return r ? { block: r.block, status: r.status } : null;
+};
 
 /**
  * Whether the contract records a verified pause for this transaction (R7.10): its
@@ -136,7 +149,7 @@ function isVerified(verifications: { verified_pauses?: string[] }[], hash: strin
   return verifications.some((c) => (c.verified_pauses ?? []).some((h) => h.toLowerCase() === hash.toLowerCase()));
 }
 
-async function findPayout(o: StatusOptions, cache: Cache, claim: any) {
+async function findPayout(o: StatusOptions, cache: Cache, claim: ClaimView) {
   for (const hash of o.txs ?? []) {
     const status = await once(cache, `tx:${hash}`, () => o.near.txStatus(hash, claim.whitehat, 30)).catch(() => null);
     if (!status) continue;
@@ -189,7 +202,7 @@ async function attestation(o: StatusOptions, cache: Cache, whitehat: string): Pr
 
 /** The claim as it stands now. */
 export async function claimStatus(o: StatusOptions, cache: Cache = new Map()): Promise<ClaimStatus> {
-  const claim = await o.near.view<any>(o.contract, "claim", { claim_id: o.claimId });
+  const claim = await o.near.view<ClaimView | null>(o.contract, "claim", { claim_id: o.claimId });
   if (!claim) throw new Error(`no claim ${o.claimId} on ${o.contract}`);
   const bounty = await o.near.view<any>(o.contract, "bounty", { id: claim.bounty });
   const id = o.claimId;
@@ -216,10 +229,11 @@ export async function claimStatus(o: StatusOptions, cache: Cache = new Map()): P
     stages.push({ stage: "no_verdict", claim_id: id });
     return { ...out, done: true };
   }
-  if (claim.state !== "judged") return out;
-  stages.push({ stage: "verdict", claim_id: id, verdict: claim.verdict });
+  if (claim.state !== "judged" || !claim.verdict) return out;
+  const verdict = claim.verdict;
+  stages.push({ stage: "verdict", claim_id: id, verdict });
   // Only the winning PAYS claim goes on: a ZERO, an INVALID, or a PAYS an earlier claim beat.
-  if (claim.verdict?.outcome !== "PAYS" || bounty?.winning_claim !== id) return { ...out, done: true };
+  if (verdict.outcome !== "PAYS" || bounty?.winning_claim !== id) return { ...out, done: true };
 
   const signed: any[] = bounty.signed_pauses ?? [];
   if (signed.length === 0) return out;
@@ -259,7 +273,7 @@ export async function claimStatus(o: StatusOptions, cache: Cache = new Map()): P
     whitehat: claim.whitehat,
     amount: bounty.rules.bounty_amount,
     usdc: config.usdc,
-    verdict: claim.verdict,
+    verdict,
     payout: await findPayout(o, cache, claim),
     attestation: await attestation(o, cache, claim.whitehat),
     pauses,

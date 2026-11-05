@@ -11,6 +11,15 @@
 //                 [--timeout <secs>] [--interval <secs>]
 //                 [--no-wait] [--no-broadcast] [--no-verify] [--verify-wait <secs>]
 //                 [--dry-run] [--json]
+//   bountee claim --retry <claim id> --contract <bounty contract> --as <account>
+//                 [--bounty <protocol>/<name>] [--tx <hash>[,...] | --job <job.json> | --evidence <evidence.json>]
+//                 [the same network, wait and follow flags]
+//
+// `--retry` retries a claim whose enclave job ended with no verdict (R2.6): `retry_claim` with
+// the proofs it was filed with (read back from its saved `submit_claim` transaction, or from
+// `--tx`, `--job` or `--evidence`, and checked against the sha256 the contract kept), then sees
+// it through as below. It keeps its place and its original submission time; the new job is
+// drawn from the claim balance. A claim key may retry (R14.1).
 //
 // With a Foundry script (or `--job`, a job `bountee test` saved), claim runs `test`'s
 // collection and submits exactly the inputs it judged, re-running it if the saved block is
@@ -29,15 +38,31 @@
 // verified), until nothing more will happen or `--timeout` (default 30 min: a pause is
 // verified only once its chain's safe head passes it). A paid claim ends with its receipt
 // (D24). The transactions sent are saved under `.bountee/claims/`, so `bountee status` can
-// build the receipt again later.
+// build the receipt again later. Signed with a claim key, which may call only `submit_claim`
+// and `retry_claim` (R14.1), the steps that need another method (`sign_pauses`,
+// `verify_pause`, `retry_payout`) are skipped, and `next_steps` names the command the
+// Whitehat runs with their own key for each.
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { actions } from "near-api-js";
-import { parseBlockRef, parseExploit, parseAccountProof, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
+import { parseBlockRef, parseExploit, parseAccountProof, parseReplay, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
+import { parseBountyId } from "./bounties.ts";
 import { parseRpcFlags } from "./broadcast.ts";
 import { claimCost, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
-import { formatNear, Near, NEAR_RPC, parseNetwork } from "./near.ts";
+import { formatNear, Near, NEAR_RPC, parseNetwork, type Network } from "./near.ts";
 import { KEYSTORE_API, seal } from "./seal.ts";
-import { claimStatus, formatReceipt, saveClaimTxs, watchClaim, type ClaimStatus, type Receipt, type Stage, type StatusOptions } from "./status.ts";
+import {
+  claimStatus,
+  formatReceipt,
+  loadClaimTxs,
+  saveClaimTxs,
+  watchClaim,
+  type ClaimStatus,
+  type ClaimView,
+  type Receipt,
+  type Stage,
+  type StatusOptions,
+} from "./status.ts";
 
 /** `submit_claim` needs at least 200 Tgas; the rest goes to storing the secret, the job and, on PAYS, signing the pauses. */
 const CLAIM_GAS = 300_000_000_000_000n;
@@ -64,16 +89,38 @@ function positional(args: string[]): string | undefined {
   return undefined;
 }
 
-function parseBounty(text: string): BountyId {
-  const slash = text.lastIndexOf("/");
-  if (slash < 1) throw new Error("--bounty is <protocol account>/<bounty name>");
-  return { protocol: text.slice(0, slash), name: text.slice(slash + 1) };
+const sameId = (a: BountyId, b: BountyId) => a.protocol === b.protocol && a.name === b.name;
+
+/**
+ * The proofs a claim was filed with, as the exact text `submit_claim` carried: from `--job` or
+ * `--evidence` if given, else read back from the claim's own transaction on NEAR (saved by
+ * `claim` under `.bountee/claims/`, or `--tx`). The contract keeps only their sha256.
+ */
+async function filedProofs(args: string[], near: Near, contract: string, claimId: number, whitehat: string): Promise<string> {
+  if (flag(args, "job")) return JSON.stringify(parseReplay(JSON.parse(readFileSync(flag(args, "job")!, "utf8")).replay).proofs);
+  if (flag(args, "evidence")) {
+    const evidence = JSON.parse(readFileSync(flag(args, "evidence")!, "utf8"));
+    return JSON.stringify((evidence.proofs as unknown[]).map(parseAccountProof));
+  }
+  const txs = flag(args, "tx")?.split(",") ?? loadClaimTxs(contract, claimId);
+  for (const hash of txs) {
+    const tx = await near.txStatus(hash, whitehat, 30).catch(() => null);
+    for (const a of tx?.transaction?.actions ?? []) {
+      const call = a.FunctionCall;
+      if (call?.method_name !== "submit_claim") continue;
+      return String(JSON.parse(Buffer.from(call.args, "base64").toString("utf8")).proofs);
+    }
+  }
+  throw new Error(`no saved transaction filed claim ${claimId}: pass --tx <its submit_claim transaction>, or --job / --evidence with the proofs it was filed with`);
 }
 
 export interface ClaimResult {
   bounty_contract: string;
-  judge_build_hash: string;
-  sealed_exploit: string;
+  /** The judge build sealed to, and the sealed text; absent on a retry, which seals nothing. */
+  judge_build_hash?: string;
+  sealed_exploit?: string;
+  /** This run retried a claim left with no verdict (`--retry`, R2.6) rather than filing one. */
+  retried?: boolean;
   /** The verdict `bountee test` gave these exact inputs (D2); null when claiming from --exploit/--evidence or an unre-run --job. */
   local_verdict?: Verdict | null;
   saved?: string;
@@ -95,15 +142,19 @@ export interface ClaimResult {
   stages?: Stage[];
   /** On a paid claim: the payout, attestation and each pause's transaction (D24). */
   receipt?: Receipt;
+  /** What is left that this run didn't do, each with the command that does it. */
+  next_steps?: string[];
 }
 
 export async function claim(args: string[], onStage: (s: Stage) => void = () => {}): Promise<ClaimResult> {
   const network = parseNetwork(flag(args, "network"));
   const contract = required(args, "contract");
-  const bountyText = required(args, "bounty");
-  const bounty = parseBounty(bountyText);
+  const bountyText = flag(args, "retry") === undefined ? required(args, "bounty") : flag(args, "bounty");
+  const given = bountyText === undefined ? undefined : parseBountyId(bountyText);
   const whitehat = required(args, "as");
   const near = new Near(network, flag(args, "rpc") ?? NEAR_RPC[network]);
+  if (flag(args, "retry") !== undefined) return retryClaim(args, { near, network, contract, whitehat, given }, onStage);
+  const bounty = given!;
 
   const live = args.includes("--dry-run") ? { state: "live" } : await near.view<{ state: string } | null>(contract, "bounty", { id: bounty });
   if (!live) throw new Error(`no bounty ${bountyText} on ${contract}`);
@@ -118,7 +169,7 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
       job: flag(args, "job"),
       rpc: flag(args, "proof-rpc"),
       test: script
-        ? { script, bounty: bountyText, sig: flag(args, "sig"), rpc: flag(args, "proof-rpc"), contract, nearRpc: near.url }
+        ? { script, bounty: bountyText!, sig: flag(args, "sig"), rpc: flag(args, "proof-rpc"), contract, nearRpc: near.url }
         : undefined,
     });
     ({ exploit, block, header, proofs } = prepared.replay);
@@ -165,26 +216,86 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
   out.tx_hash = outcome.transaction.hash;
   saveClaimTxs(contract, out.claim_id, [out.tx_hash]);
   if (args.includes("--no-wait")) return out;
+  return seeThrough(args, { near, network, contract, whitehat, bounty }, out, [out.tx_hash], new Set(["sealed"]), onStage);
+}
 
-  // See the claim through (settle) while following it (watchClaim), side by side.
+interface Context {
+  near: Near;
+  network: Network;
+  contract: string;
+  whitehat: string;
+}
+
+/**
+ * Retry a claim whose job ended with no verdict (R2.6): `retry_claim` with the proofs it was
+ * filed with, drawing the new job's deposit from the claim balance, then see it through as a
+ * new claim is. The claim keeps its place and its original submission time.
+ */
+async function retryClaim(args: string[], c: Context & { given?: BountyId }, onStage: (s: Stage) => void): Promise<ClaimResult> {
+  const claimId = Number(flag(args, "retry"));
+  if (!Number.isSafeInteger(claimId) || claimId < 0) throw new Error(`--retry takes a claim id: got ${flag(args, "retry")}`);
+  const filed = await c.near.view<ClaimView | null>(c.contract, "claim", { claim_id: claimId });
+  if (!filed) throw new Error(`no claim ${claimId} on ${c.contract}`);
+  if (filed.whitehat !== c.whitehat) throw new Error(`claim ${claimId} was filed by ${filed.whitehat}: only its Whitehat may retry it`);
+  if (c.given && !sameId(c.given, filed.bounty)) throw new Error(`claim ${claimId} is on ${filed.bounty.protocol}/${filed.bounty.name}, not ${c.given.protocol}/${c.given.name}`);
+  if (filed.state !== "no_verdict") throw new Error(`claim ${claimId} is ${filed.state}: only a claim left with no verdict can be retried`);
+
+  const proofs = await filedProofs(args, c.near, c.contract, claimId, c.whitehat);
+  const digest = `0x${createHash("sha256").update(proofs).digest("hex")}`;
+  if (digest !== filed.proofs_sha256.toLowerCase()) {
+    throw new Error(`these proofs hash to ${digest}, but claim ${claimId} was filed with ${filed.proofs_sha256}: give the proofs it was filed with`);
+  }
+  const out: ClaimResult = { bounty_contract: c.contract, retried: true, claim_id: claimId, block: filed.block };
+  const fees = await c.near.view(c.contract, "fees");
+  // The new job's input is the claim's own; no secret is stored again.
+  const cost = claimCost(fees, proofs.length + filed.header.length + JSON.stringify(filed.block).length + 4096, 0);
+  const added = await ensureClaimBalance(c.near, c.contract, c.whitehat, cost);
+  if (added > 0n) out.topped_up_near = formatNear(added);
+
+  const outcome = await c.near.account(c.whitehat).signAndSendTransaction({
+    receiverId: c.contract,
+    actions: [actions.functionCall("retry_claim", { claim_id: claimId, proofs }, CLAIM_GAS, 0n)],
+    waitUntil: "EXECUTED_OPTIMISTIC",
+    throwOnFailure: false,
+  });
+  const status = outcome.status as { SuccessValue?: string; Failure?: unknown };
+  if (status.SuccessValue === undefined) throw new Error(`the retry was refused: ${JSON.stringify(status.Failure ?? status)}`);
+  out.tx_hash = outcome.transaction.hash;
+  const txs = [...new Set([...loadClaimTxs(c.contract, claimId), out.tx_hash])];
+  saveClaimTxs(c.contract, claimId, txs);
+  if (args.includes("--no-wait")) return out;
+  return seeThrough(args, { ...c, bounty: filed.bounty }, out, txs, new Set(["sealed", "checking"]), onStage);
+}
+
+/** See the claim through (settle) while following it (watchClaim), side by side. */
+async function seeThrough(
+  args: string[],
+  c: Context & { bounty: BountyId },
+  out: ClaimResult,
+  txs: string[],
+  seen: Set<string>,
+  onStage: (s: Stage) => void,
+): Promise<ClaimResult> {
+  const claimId = out.claim_id!;
+  const txHash = out.tx_hash!;
   const chainRpc = flag(args, "chain-rpc");
   const chainRpcs = chainRpc === undefined ? undefined : parseRpcFlags(chainRpc.split(","));
   const statusOptions: StatusOptions = {
-    contract,
-    claimId: out.claim_id,
-    network,
-    near,
+    contract: c.contract,
+    claimId,
+    network: c.network,
+    near: c.near,
     rpcs: chainRpcs,
     outlayerApi: flag(args, "outlayer-api"),
-    txs: [out.tx_hash],
+    txs,
   };
   let failed = false;
-  const settling = settle(near, {
-    contract,
-    bounty,
-    claimId: out.claim_id,
-    txHash: out.tx_hash,
-    whitehat,
+  const settling = settle(c.near, {
+    contract: c.contract,
+    bounty: c.bounty,
+    claimId,
+    txHash,
+    whitehat: c.whitehat,
     broadcast: !args.includes("--no-broadcast"),
     verify: !args.includes("--no-broadcast") && !args.includes("--no-verify"),
     verifyWaitSecs: flag(args, "verify-wait") === undefined ? undefined : Number(flag(args, "verify-wait")),
@@ -197,14 +308,14 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
     timeoutSecs: flag(args, "timeout") === undefined ? 1800 : Number(flag(args, "timeout")),
     intervalSecs: flag(args, "interval") === undefined ? undefined : Number(flag(args, "interval")),
     stop: () => failed,
-    seen: new Set(["sealed"]), // shown above, before filing
+    seen, // the stages shown before filing
   });
   const [s, followed] = await Promise.all([settling, following]);
   let last: ClaimStatus = followed;
   if (s.sign_pauses_tx) {
     // The payout may sit in the `sign_pauses` retry's transaction rather than the claim's.
-    statusOptions.txs = [out.tx_hash, s.sign_pauses_tx];
-    saveClaimTxs(contract, out.claim_id, statusOptions.txs);
+    statusOptions.txs = [...txs, s.sign_pauses_tx];
+    saveClaimTxs(c.contract, claimId, statusOptions.txs);
     if (last.receipt && !last.receipt.payout) last = await claimStatus(statusOptions);
   }
   return {
@@ -217,14 +328,16 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
     ...(s.sign_pauses_tx ? { sign_pauses_tx: s.sign_pauses_tx } : {}),
     ...(s.broadcast ? { broadcast: s.broadcast } : {}),
     ...(s.verification ? { verification: s.verification } : {}),
+    next_steps: s.next_steps,
     stages: last.stages,
     ...(last.receipt ? { receipt: last.receipt } : {}),
   };
 }
 
+
 export function formatClaimResult(r: ClaimResult): string {
   if (r.claim_id === undefined) return `sealed for ${r.bounty_contract} (judge ${r.judge_build_hash}); not filed (--dry-run)`;
-  const lines = [`claim ${r.claim_id} filed: ${r.tx_hash}`];
+  const lines = [`claim ${r.claim_id} ${r.retried ? "retried" : "filed"}: ${r.tx_hash}`];
   if (r.local_verdict) lines.push(`bountee test said: ${r.local_verdict.outcome} (${r.local_verdict.reason})`);
   if (r.topped_up_near) lines.push(`claim balance topped up by ${r.topped_up_near} NEAR`);
   if (r.state) lines.push(`enclave: ${r.state}${r.verdict ? ` ${r.verdict.outcome} (${r.verdict.reason})` : " (no verdict)"}`);
@@ -233,5 +346,6 @@ export function formatClaimResult(r: ClaimResult): string {
   for (const p of r.broadcast?.pauses ?? []) lines.push(`pause on ${p.chain_id} ${p.contract}: ${p.sent} ${p.tx_hash}${p.receipt ? ` (${p.receipt.status})` : ""}`);
   for (const c of r.verification?.chains ?? []) lines.push(`pause on ${c.chain_id}: ${c.verified ? "verified on NEAR" : `not verified (${c.error ?? "unknown"})`}`);
   if (r.receipt) lines.push(formatReceipt(r.receipt));
+  for (const step of r.next_steps ?? []) lines.push(`next: ${step}`);
   return lines.join("\n");
 }

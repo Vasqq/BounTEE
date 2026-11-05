@@ -24,7 +24,9 @@ When you need a command's exact flags, `bountee help --json` lists every command
 
 ## The claim key
 
-The claim key is a NEAR function-call key on the Whitehat's account. It can call only the bounty contract's claim methods (`submit_claim`, `retry_claim`, `sign_pauses`, `retry_payout`, `verify_pause`), and only with nothing attached. NEAR refuses anything else signed with it: transfers, top-ups, withdrawals, adding or deleting keys, and calls to other contracts or methods. Payouts go to the Whitehat's account, never to the key.
+The claim key is a NEAR function-call key on the Whitehat's account. It can call only the bounty contract's claim actions (`submit_claim`, `retry_claim`), and only with nothing attached. NEAR refuses anything else signed with it: transfers, top-ups, withdrawals, adding or deleting keys, and calls to other contracts or methods. Payouts go to the Whitehat's account, never to the key.
+
+After a PAYS, a few steps anyone may take need other methods: asking again for the pauses' signatures, verifying a pause on NEAR, and retrying a payout that waited. `bountee claim` run with the claim key skips them and lists each in `next_steps`, as the command your Whitehat runs with their own key. Report those commands; don't try them yourself.
 
 **The key does spend the claim balance.** Every claim it files draws its fee and storage deposit from the Whitehat's **claim balance**, whatever its verdict. Junk claims burn that balance. So file a claim only after `bountee test` gives PAYS on the same script.
 
@@ -61,7 +63,8 @@ The key can't top up the claim balance. If it is short, `bountee claim` stops be
 
 - **`claim` stops because the claim balance is short:** report the amount it names and stop.
 - **`claim` says the bounty isn't live:** someone else's claim won it first, or it ended. Check with `bountee show`. Don't file again.
-- **`claim` ends in `no_verdict`:** the enclave job failed and the claim keeps its place. `bountee status <claim id> --json` shows it. Report it rather than filing a second claim.
+- **`claim` ends in `no_verdict`:** the enclave job failed and the claim keeps its place. Retry that same claim, once, with the claim key's folder: `bountee claim --retry <claim id> --contract <bounty contract> --as <Whitehat account> --no-verify --timeout 540 --json`, run from the same directory as the first `claim` (it reads the proofs back from the claim's saved transaction). If it ends in `no_verdict` again, report it rather than filing a second claim.
+- **`claim` lists `next_steps`:** report them to your Whitehat as they are; they need the Whitehat's own key.
 - **Locally `PAYS`, then `ZERO` on chain:** state moved between your test and the claim. Run `bountee test` again before filing anything else.
 
 ## For the Whitehat: before you hand over
@@ -69,14 +72,12 @@ The key can't top up the claim balance. If it is short, `bountee claim` stops be
 Do these once, with your own full-access key, before your agent starts:
 
 1. **An account.** On testnet, `bountee init --json` creates a faucet-funded account and saves its key in `~/.near-credentials/testnet/`.
-2. **The claim balance.** Top it up for every claim you are willing to pay for. Each claim draws about 1 NEAR, whatever the verdict. The claim key can't top up, so you do, with NEAR CLI:
+2. **The claim balance.** Top it up for every claim you are willing to pay for. Each claim draws about 1 NEAR, whatever the verdict. The claim key can't top up, so you do:
 
    ```
-   near contract call-function as-transaction <bounty contract> top_up_claim_balance json-args '{}' \
-     prepaid-gas '30 Tgas' attached-deposit '1.2 NEAR' \
-     sign-as <your account> network-config testnet sign-with-legacy-keychain send
+   bountee balance top-up 1.2 --contract <bounty contract> --as <your account> --json
    ```
 
-   This balance is what a claim key can spend, junk claims included, so keep only what you are willing to lose.
+   This balance is what a claim key can spend, junk claims included, so keep only what you are willing to lose. `bountee balance --contract <bounty contract> --as <your account> --json` shows what is left, and `bountee balance withdraw [<NEAR>] ...` takes it back (all of it if you name no amount); a claim key can do neither.
 3. **The claim key.** `bountee key add --contract <bounty contract> --as <your account> --out-dir <folder> --json` adds the key and writes it to `<folder>/<your account>.json`. It prints what the key can and can't do. Give your agent that folder, never `~/.near-credentials`.
-4. **Afterwards.** `bountee key revoke --as <your account> --out-dir <folder> --json` deletes the key from your account.
+4. **Afterwards.** `bountee key revoke --as <your account> --out-dir <folder> --json` deletes the key from your account. Run any `next_steps` your agent reports with your own key: `bountee sign-pauses`, `bountee verify-pause` or `bountee retry-payout`, each with the bounty id, `--contract` and `--as <your account>`.

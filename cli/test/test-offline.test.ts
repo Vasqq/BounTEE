@@ -7,33 +7,21 @@
 // (claim 5, enclave verdict ZERO). Each holds the block header and proofs at its fixed block;
 // the contract's `claim` view for both shows the same block, header and proofs_sha256.
 //
-// The tool runs inside an OS sandbox that denies all networking (macOS `sandbox-exec`, Linux
-// `unshare -n`), so a test passes only if the verdict needs no RPC, keys or funds.
+// The tool runs inside an OS sandbox that denies all networking (offline.ts), so a test passes
+// only if the verdict needs no RPC, keys or funds.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
+import { bounteeOffline, offline } from "./offline.ts";
 
-const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
 const localJudge = `${repo}target/${target}/release/bountee-judge.wasm`;
 const EXPLOIT = `${repo}demo/fixtures/exploit.json`;
 const CHEAT = `${repo}demo/fixtures/cheat.json`;
 
-/** The command run with networking denied to it and every process it starts. */
-function offline(cmd: string, args: string[]) {
-  const wrapped =
-    process.platform === "darwin"
-      ? ["sandbox-exec", ["-p", "(version 1)(allow default)(deny network*)", cmd, ...args]]
-      : ["unshare", ["--user", "--map-root-user", "--net", cmd, ...args]];
-  const res = spawnSync(wrapped[0] as string, wrapped[1] as string[], { encoding: "utf8", timeout: 300_000 });
-  if (res.error) throw new Error(`can't deny networking here: ${res.error.message}`);
-  return { code: res.status, stdout: res.stdout, stderr: res.stderr };
-}
-
-const bounteeOffline = (args: string[]) => offline(process.execPath, [entry, ...args]);
 const sha256 = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
 
 beforeAll(() => {
@@ -78,10 +66,10 @@ test("D19 R4.2: bountee test on the demo cheat (deposit then withdraw by a fresh
   expect(out.transactions).toBe(4); // mint, approve, deposit, withdraw
 });
 
-// Ticket criterion 3: the verdict comes from the compiled judge the enclave runs. By default
+// D2 (ticket #9 criterion 3): the verdict comes from the compiled judge the enclave runs. By default
 // that is the wasm32-wasip2 release build `cli/test/testnet/deploy.ts` uploads to OutLayer,
 // named by its sha256, and the tool says whether it is the bounty's pinned build.
-test("criterion 3: test names the compiled judge it ran, and whether it is the bounty's pinned build", () => {
+test("D2: test names the compiled judge it ran by its sha256, and whether it is the bounty's pinned build", () => {
   const out = JSON.parse(bounteeOffline(["test", "--job", EXPLOIT, "--json"]).stdout);
   expect(out.judge.wasm).toBe(localJudge);
   expect(out.judge.sha256).toBe(sha256(localJudge));
@@ -91,9 +79,9 @@ test("criterion 3: test names the compiled judge it ran, and whether it is the b
   expect(out.judge.same_as_bounty).toBe(false);
 });
 
-// Ticket criterion 3: the enclave's build (pinned to the demo bounty's contract, built the
+// D2, R3.9 (ticket #9 criterion 3): the enclave's build (pinned to the demo bounty's contract, built the
 // way deploy.ts builds it) passed with --judge gives the same verdicts as the local build.
-test("criterion 3 R3.9: the enclave-pinned judge build, passed with --judge, gives the same verdicts offline", () => {
+test("D2 R3.9: the enclave-pinned judge build, passed with --judge, gives the same verdicts offline", () => {
   const dir = `${repo}target/enclave-pinned`;
   const build = spawnSync("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], {
     cwd: repo,

@@ -15,6 +15,10 @@
 // 4. Posts the bounty with `bountee post` (#17), covering every chain's vault, the first
 //    chain as its proof chain (D1); it goes live once the enclave's posting check passes.
 //
+// The deployer's key never goes on forge's or cast's command line (where a failed command's
+// error would print it): they read it from a throwaway encrypted keystore (evm-key.ts), and
+// everything this script prints on failure is redacted.
+//
 // Writes the instance to $BOUNTEE_INSTANCE (default ~/.bountee-testnet/day3-instance.json)
 // and prints it as one JSON line. Exit status 3 = a balance is short (nothing was spent).
 //
@@ -36,6 +40,7 @@ import { base58 } from "@scure/base";
 import { PAUSE_GAS_PER_PAUSE, pauseRole } from "@bountee/formats";
 import { defaultRpc } from "../../src/chains.ts";
 import { Near, formatNear, milliNear } from "../../src/near.ts";
+import { keystoreEnv, redact } from "./evm-key.ts";
 
 const home = homedir();
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -63,7 +68,32 @@ const DEPLOYER = deployerEnv.DEPLOYER_ADDRESS ?? "";
 const DEPLOYER_KEY = deployerEnv.DEPLOYER_PRIVATE_KEY ?? "";
 if (!DEPLOYER || !DEPLOYER_KEY) throw new Error("the deployer env file needs DEPLOYER_ADDRESS and DEPLOYER_PRIVATE_KEY");
 const near = new Near("testnet");
-const cast = (...args: string[]) => execFileSync("cast", args, { encoding: "utf8" }).trim();
+// The deployer key reaches forge and cast as an encrypted keystore named in the environment,
+// never on a command line, and any error this script prints is redacted (evm-key.ts).
+const deployerKeystore = keystoreEnv(DEPLOYER_KEY);
+process.on("exit", deployerKeystore.cleanup);
+const redactErrors = (e: unknown) => {
+  const err = e as Error & { stdout?: unknown; stderr?: unknown };
+  console.error(redact(`${err?.stack ?? err}\n${err?.stdout ?? ""}\n${err?.stderr ?? ""}`));
+  process.exit(1);
+};
+process.on("uncaughtException", redactErrors);
+process.on("unhandledRejection", redactErrors);
+/** forge or cast; with `signs`, signing as the deployer through its keystore. */
+function foundry(tool: "forge" | "cast", args: string[], o: { signs?: boolean; cwd?: string; env?: Record<string, string> } = {}): string {
+  try {
+    return execFileSync(tool, args, {
+      cwd: o.cwd,
+      encoding: "utf8",
+      env: { ...process.env, ...(o.signs ? deployerKeystore.env : {}), ...o.env },
+      maxBuffer: 64 << 20,
+    }).trim();
+  } catch (e) {
+    const err = e as Error & { stderr?: string };
+    throw new Error(redact(`${tool} ${args[0]} failed: ${err.message}\n${err.stderr ?? ""}`));
+  }
+}
+const cast = (...args: string[]) => foundry("cast", args);
 const eth = (wei: bigint) => `${(Number(wei) / 1e18).toFixed(6)} ETH`;
 
 // ---- 0. Preflight --------------------------------------------------------------------------------
@@ -138,11 +168,11 @@ const save = (extra: Record<string, unknown>) => {
 
 for (const chain of CHAIN_IDS) {
   const rpc = rpcOf(chain);
-  const forge = execFileSync(
-    "forge",
-    ["script", "script/Deploy.s.sol", "--rpc-url", rpc, "--broadcast", "--private-key", DEPLOYER_KEY, "--slow"],
-    { cwd: join(root, "demo"), encoding: "utf8", env: { ...process.env, PAUSE_ROLE: role.address }, maxBuffer: 64 << 20 },
-  );
+  const forge = foundry("forge", ["script", "script/Deploy.s.sol", "--rpc-url", rpc, "--broadcast", "--sender", DEPLOYER, "--slow"], {
+    signs: true,
+    cwd: join(root, "demo"),
+    env: { PAUSE_ROLE: role.address },
+  });
   const deployed = JSON.parse(forge.slice(forge.indexOf("DEMO_DEPLOY_JSON:") + "DEMO_DEPLOY_JSON:".length).trim().split("\n")[0]!);
   const vault = String(deployed.vault).toLowerCase();
   const evmUsdc = String(deployed.usdc).toLowerCase();
@@ -155,7 +185,7 @@ for (const chain of CHAIN_IDS) {
   // ---- 3. Pause gas --------------------------------------------------------------------------------
 
   const fund = JSON.parse(
-    cast("send", role.address, "--value", pauseGasWei.toString(), "--private-key", DEPLOYER_KEY, "--rpc-url", rpc, "--json"),
+    foundry("cast", ["send", role.address, "--value", pauseGasWei.toString(), "--rpc-url", rpc, "--json"], { signs: true }),
   );
   chains.push({
     chain_id: chain,

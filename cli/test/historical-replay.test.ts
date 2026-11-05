@@ -31,23 +31,12 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
+import { bounteeOffline } from "./offline.ts";
 
-const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
 const JOB = fileURLToPath(new URL("./fixtures/historical/depusdt-levusdc.json", import.meta.url));
 
-/** Run a command with networking denied to it and every process it spawns (#9's harness). */
-function offline(cmd: string, args: string[]) {
-  const wrapped =
-    process.platform === "darwin"
-      ? ["sandbox-exec", ["-p", "(version 1)(allow default)(deny network*)", cmd, ...args]]
-      : ["unshare", ["--user", "--map-root-user", "--net", cmd, ...args]];
-  const res = spawnSync(wrapped[0] as string, wrapped[1] as string[], { encoding: "utf8", timeout: 300_000 });
-  if (res.error) throw new Error(`can't deny networking here: ${res.error.message}`);
-  return { code: res.status, stdout: res.stdout, stderr: res.stderr };
-}
-const bounteeOffline = (args: string[]) => offline(process.execPath, [entry, ...args]);
 
 beforeAll(() => {
   // Build the judge before networking is cut, as a Verifier's checkout would have it.

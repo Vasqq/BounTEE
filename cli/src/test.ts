@@ -20,6 +20,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { parseReplay, parseRules, toJson, type Exploit, type Rules, type Verdict } from "@bountee/formats";
+import { parseBountyId } from "./bounties.ts";
 import { proofRpcs } from "./chains.ts";
 import { NEAR_RPC } from "./near.ts";
 import { collectReplay, exploitFromBroadcast, rpc, runJudge } from "./proofs.ts";
@@ -56,11 +57,11 @@ export interface TestResult {
 
 async function loadRules(o: TestOptions): Promise<Rules> {
   if (existsSync(o.bounty)) return parseRules(JSON.parse(readFileSync(o.bounty, "utf8")));
-  const m = /^([a-z0-9._-]+)\/([a-z0-9-]+)$/.exec(o.bounty);
-  if (!m) throw new Error(`--bounty: ${o.bounty} is neither a rules file nor a bounty id <protocol>/<name>`);
+  // Not a rules file: a bounty id, refused as every command refuses a bad one.
+  const id = parseBountyId(o.bounty);
   const contract = o.contract ?? process.env.BOUNTEE_CONTRACT;
   if (!contract) throw new Error("--bounty <id> needs the bounty contract's account: pass --contract or set BOUNTEE_CONTRACT");
-  const args = Buffer.from(JSON.stringify({ id: { protocol: m[1], name: m[2] } })).toString("base64");
+  const args = Buffer.from(JSON.stringify({ id })).toString("base64");
   const res = await rpc<{ result: number[] }>(o.nearRpc ?? NEAR_RPC.testnet, "query", {
     request_type: "call_function",
     finality: "final",

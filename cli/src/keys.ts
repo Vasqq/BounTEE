@@ -23,12 +23,12 @@ import { actions, KeyPair, PublicKey } from "near-api-js";
 import { formatNear, loadKey, Near, saveKey } from "./near.ts";
 
 /**
- * The claim actions: `submit_claim`, `retry_claim` (a claim with no verdict), and the steps
- * `bountee claim` takes after a PAYS that anyone may take (`sign_pauses`, `retry_payout`,
- * `verify_pause` on its prepaid attempts). None moves the Whitehat's money anywhere but to
- * the Whitehat.
+ * The bounty contract's claim actions, and only those (R14.1): filing a claim, and retrying
+ * one left with no verdict. The steps after a PAYS that anyone may take (`sign_pauses`,
+ * `retry_payout`, `verify_pause`) are not claim actions: `bountee claim` signed with a claim
+ * key skips them and names the command for the Whitehat's own key.
  */
-export const CLAIM_KEY_METHODS = ["submit_claim", "retry_claim", "sign_pauses", "retry_payout", "verify_pause"];
+export const CLAIM_KEY_METHODS = ["submit_claim", "retry_claim"];
 /** The gas a new claim key may spend, by default: about 30 claims' worth at 300 Tgas each. */
 export const DEFAULT_ALLOWANCE_NEAR = "1";
 

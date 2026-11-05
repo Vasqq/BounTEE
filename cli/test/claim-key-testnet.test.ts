@@ -20,11 +20,13 @@ import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import { actions, baseDecode, createTransaction, KeyPair, KeyPairSigner, type KeyPairString } from "near-api-js";
 import { defaultRpc } from "../src/chains.ts";
-import { CLAIM_KEY_METHODS } from "../src/keys.ts";
 import { Near, loadKey, milliNear, tgas } from "../src/near.ts";
+
+/** R14.1, spelled out here rather than imported: the bounty contract's claim actions, and nothing else. */
+const CLAIM_ACTIONS = ["submit_claim", "retry_claim"];
 
 const RUN = process.env.BOUNTEE_T25_RUN === "1";
 const BASE = 84532;
@@ -97,7 +99,8 @@ describe.runIf(RUN)("#25: a claim key files claims and does nothing else", () =>
   let instance: any;
   let added: any;
 
-  test("a fresh demo instance is posted and live", async () => {
+  // Setup, not a requirement: a fresh demo instance, posted and live (D21).
+  beforeAll(async () => {
     expect(whitehat, "set WHITEHAT").not.toBe("");
     if (process.env.INSTANCE) {
       instance = JSON.parse(readFileSync(process.env.INSTANCE, "utf8"));
@@ -128,7 +131,7 @@ describe.runIf(RUN)("#25: a claim key files claims and does nothing else", () =>
     // What the tool shows...
     expect(added.account).toBe(whitehat);
     expect(added.permission.receiver_id).toBe(contract);
-    expect(added.permission.method_names).toStrictEqual(CLAIM_KEY_METHODS);
+    expect(added.permission.method_names).toStrictEqual(CLAIM_ACTIONS);
     expect(added.can.length).toBeGreaterThan(0);
     for (const word of [/transfer/i, /withdraw/i, /keys?/i, /other contract/i]) {
       expect(added.cannot.some((c: string) => word.test(c)), `cannot mentions ${word}`).toBe(true);
@@ -137,7 +140,7 @@ describe.runIf(RUN)("#25: a claim key files claims and does nothing else", () =>
     const onChain = await near.rpc<any>("query", { request_type: "view_access_key", finality: "final", account_id: whitehat, public_key: added.public_key });
     record("R14.1 view_access_key", onChain.permission);
     expect(onChain.permission).toStrictEqual({
-      FunctionCall: { receiver_id: contract, method_names: CLAIM_KEY_METHODS, allowance: added.permission.allowance },
+      FunctionCall: { receiver_id: contract, method_names: CLAIM_ACTIONS, allowance: added.permission.allowance },
     });
     expect((await keys(whitehat)).length).toBe(before.length + 1);
     // The agent's folder holds the key, for this account, readable only by its owner.
@@ -165,6 +168,10 @@ describe.runIf(RUN)("#25: a claim key files claims and does nothing else", () =>
       ["delete the Whitehat's full-access key", whitehat, [actions.deleteKey(KeyPair.fromString(loadKey("testnet", whitehat)).getPublicKey())]],
       ["call another contract (sUSDC ft_transfer)", usdc, [actions.functionCall("ft_transfer", { receiver_id: contract, amount: "1" }, tgas(30), 0n)]],
       ["call another method (prepay_posting_fee)", contract, [actions.functionCall("prepay_posting_fee", {}, tgas(30), 0n)]],
+      // Anyone's steps after a PAYS are not claim actions either.
+      ["call sign_pauses", contract, [actions.functionCall("sign_pauses", { id: { protocol: instance.protocol, name: instance.name } }, tgas(30), 0n)]],
+      ["call retry_payout", contract, [actions.functionCall("retry_payout", { id: { protocol: instance.protocol, name: instance.name } }, tgas(30), 0n)]],
+      ["call verify_pause", contract, [actions.functionCall("verify_pause", { id: { protocol: instance.protocol, name: instance.name }, chain_id: BASE }, tgas(30), 0n)]],
     ];
     const refused: Record<string, string> = {};
     for (const [what, receiver, acts] of attempts) {

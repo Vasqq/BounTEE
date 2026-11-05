@@ -25,12 +25,11 @@ import { createHash } from "node:crypto";
 import type { BountyId, Verdict } from "@bountee/formats";
 import { checkQuote, OUTLAYER_REGISTER, type AttestationRecord } from "./attestation.ts";
 import { codeHash, reproducibleBuild, resolveRev, revFromSourceMetadata, sha256File } from "./build.ts";
-import { defaultRpc, explorerTx } from "./chains.ts";
+import { defaultRpc, evmReceipt, explorerTx } from "./chains.ts";
 import { type Near, type Network } from "./near.ts";
-import { rpc } from "./proofs.ts";
 import { rerunPublished } from "./publish.ts";
 import { KEYSTORE_API } from "./seal.ts";
-import { loadClaimTxs } from "./status.ts";
+import { loadClaimTxs, type ClaimView } from "./status.ts";
 
 export type CheckStatus = "pass" | "fail" | "not_yet" | "not_yet_published";
 
@@ -169,7 +168,7 @@ async function findTxs(o: VerifyOptions, claimId: number, wantPayout: boolean): 
   return { judged, paid };
 }
 
-async function attestationCheck(o: VerifyOptions, bounty: any, claim: any, tx: Tx | null): Promise<Check> {
+async function attestationCheck(o: VerifyOptions, bounty: any, claim: ClaimView & { id: number }, tx: Tx | null): Promise<Check> {
   if (!tx) return { check: "attestation", status: "fail", detail: "no transaction holds the winning claim's verdict" };
   const url = `${o.outlayerApi ?? KEYSTORE_API[o.network]}/attestations/by-tx/${tx.hash}`;
   const res = await fetch(url, { headers: { "User-Agent": "bountee-cli" } }).catch(() => null);
@@ -209,7 +208,7 @@ async function attestationCheck(o: VerifyOptions, bounty: any, claim: any, tx: T
     : { check: "attestation", status: "fail", detail: problems.join("; "), ...evidence };
 }
 
-function payoutCheck(o: VerifyOptions, bounty: any, claim: any, usdc: string, tx: Tx | null, claimId: number): Check {
+function payoutCheck(o: VerifyOptions, bounty: any, claim: ClaimView, usdc: string, tx: Tx | null, claimId: number): Check {
   if (bounty.state !== "paid") return { check: "payout", status: "not_yet", detail: `the bounty is ${bounty.state}, not paid` };
   if (!tx) return { check: "payout", status: "fail", detail: `the bounty is paid, but no transaction shows claim ${claimId}'s payout` };
   const amount = String(bounty.rules.bounty_amount);
@@ -232,12 +231,12 @@ async function pauseChecks(o: VerifyOptions, bounty: any): Promise<Check[]> {
     let landed: Check;
     if (!url) landed = { check: "pause_landed", status: "fail", detail: `no RPC known for chain ${p.chain_id} (pass --rpc)`, ...where };
     else {
-      const r = await rpc<{ status: string; blockNumber: string; to: string | null } | null>(url, "eth_getTransactionReceipt", [p.tx_hash]).catch(() => null);
+      const r = await evmReceipt(url, p.tx_hash);
       if (!r) landed = { check: "pause_landed", status: "not_yet", detail: `the pause hasn't landed on chain ${p.chain_id}`, ...where };
-      else if (r.status !== "0x1") landed = { check: "pause_landed", status: "fail", detail: `the pause reverted on chain ${p.chain_id}`, ...where };
+      else if (r.status !== "success") landed = { check: "pause_landed", status: "fail", detail: `the pause reverted on chain ${p.chain_id}`, ...where };
       else if ((r.to ?? "").toLowerCase() !== String(p.contract).toLowerCase()) {
         landed = { check: "pause_landed", status: "fail", detail: `the transaction landed, but called ${r.to}, not ${p.contract}`, ...where };
-      } else landed = { check: "pause_landed", status: "pass", detail: `paused ${p.contract} on chain ${p.chain_id} in block ${Number(r.blockNumber)}`, block: Number(r.blockNumber), ...where };
+      } else landed = { check: "pause_landed", status: "pass", detail: `paused ${p.contract} on chain ${p.chain_id} in block ${r.block}`, block: r.block, ...where };
     }
     checks.push(landed);
     const verified = verifications.some((c) => (c.verified_pauses ?? []).some((h) => h.toLowerCase() === String(p.tx_hash).toLowerCase()));
@@ -320,7 +319,7 @@ export async function verify(o: VerifyOptions): Promise<VerifyResult> {
     checks.push({ check: "payout", status: "not_yet", detail: "no claim has won this bounty" });
     checks.push({ check: "rerun", status: "not_yet_published", detail: "the winning exploit is not yet published (no winner)" });
   } else {
-    const claim = await o.near.view<any>(o.contract, "claim", { claim_id: winner });
+    const claim = await o.near.view<ClaimView>(o.contract, "claim", { claim_id: winner });
     const txs = await findTxs(o, winner, bounty.state === "paid");
     checks.push(await attestationCheck(o, bounty, { ...claim, id: winner }, txs.judged));
     checks.push(payoutCheck(o, bounty, claim, config.usdc, txs.paid, winner));
