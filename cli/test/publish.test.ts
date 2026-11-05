@@ -73,9 +73,10 @@ function publish(name: string, claimId: number): string {
 // ---- A stand-in for NEAR's RPC: the bounty contract's views ------------------------------
 
 const views: Record<string, { bounty: unknown; published_exploit: unknown }> = {};
-/** The claims, by ID, and the transactions in each block's one chunk, by height. */
+/** The claims, by ID, and the transactions and receipts in each block's one chunk, by height. */
 const claims: Record<number, unknown> = {};
 const blocks: Record<number, unknown[]> = {};
+const receiptsAt: Record<number, unknown[]> = {};
 /** A `submit_claim` transaction to the contract carrying `proofs`, as a chunk lists it. */
 const submitClaimTx = (proofs: string, receiver = CONTRACT) => ({
   hash: `tx-${sha256(proofs).slice(2, 10)}`,
@@ -84,6 +85,23 @@ const submitClaimTx = (proofs: string, receiver = CONTRACT) => ({
   actions: [
     { FunctionCall: { method_name: "submit_claim", args: Buffer.from(JSON.stringify({ bounty: {}, proofs, sealed_exploit: "AA==" })).toString("base64"), gas: 300e12, deposit: "0" } },
   ],
+});
+/**
+ * A `submit_claim` receipt to the contract carrying `proofs`, as a chunk lists it: a claim
+ * filed through a cross-contract call, by `relay` for a transaction signed by the Whitehat.
+ */
+const submitClaimReceipt = (proofs: string, relay: string) => ({
+  predecessor_id: relay,
+  receiver_id: CONTRACT,
+  receipt_id: `receipt-${sha256(proofs).slice(2, 10)}`,
+  receipt: {
+    Action: {
+      signer_id: WHITEHAT,
+      actions: [
+        { FunctionCall: { method_name: "submit_claim", args: Buffer.from(JSON.stringify({ bounty: {}, proofs, sealed_exploit: "AA==" })).toString("base64"), gas: 250e12, deposit: "0" } },
+      ],
+    },
+  },
 });
 /** Claim `id`, filed with `proofs`, whose submission ran in block `at`. */
 const claimAt = (id: number, at: number, proofs: string) => {
@@ -124,7 +142,7 @@ const server = createServer((req, res) => {
     }
     if (method === "chunk") {
       const height = Number(String(params.chunk_id).slice("chunk-".length));
-      return reply({ result: { transactions: blocks[height] ?? [] } });
+      return reply({ result: { transactions: blocks[height] ?? [], receipts: receiptsAt[height] ?? [] } });
     }
     const args = JSON.parse(Buffer.from(params.args_base64, "base64").toString("utf8"));
     const view =
@@ -155,6 +173,15 @@ beforeAll(async () => {
   views["vault-zero"] = {
     bounty: bountyView("vault-zero", "paid"),
     published_exploit: publication({ state: "published", published: publish("vault-zero", 3), verdict: { outcome: "ZERO", reason: "below_minimum_theft" } }),
+  };
+  // Claim 5 was filed through a cross-contract call: no transaction calls the bounty
+  // contract; the relay's receipt to it, two blocks before the submission ran, does.
+  claimAt(5, 3000, proofsText);
+  blocks[2998] = [submitClaimTx(proofsText, "relay.testnet")];
+  receiptsAt[2999] = [submitClaimReceipt(otherProofs, "relay.testnet"), submitClaimReceipt(proofsText, "relay.testnet")];
+  views["vault-relayed"] = {
+    bounty: { ...bountyView("vault-relayed", "paid"), winning_claim: 5 },
+    published_exploit: publication({ state: "published", claim: 5, published: publish("vault-relayed", 5) }),
   };
   // Paid, but the disclosure delay hasn't passed.
   views["vault-delayed"] = {
@@ -198,6 +225,13 @@ test("D7.1, R14.5: a published exploit re-runs from its own header and its claim
   expect(job.replay.exploit).toEqual(readFixture("exploits/drain.json"));
   const again = await bountee(["test", "--job", out]);
   expect(JSON.parse(again.stdout).verdict).toEqual(PAYS);
+}, 300_000);
+
+test("D7.1: a claim filed through a cross-contract call re-runs too: its proofs are found in its receipt", async () => {
+  const r = await bountee(["rerun", `${PROTOCOL}/vault-relayed`]);
+  expect(r.stderr).toBe("");
+  expect(r.code).toBe(0);
+  expect(JSON.parse(r.stdout)).toMatchObject({ claim_id: 5, verdict: PAYS, enclave_verdict: PAYS, same_verdict: true });
 }, 300_000);
 
 test("D7.1: a verdict that differs from the enclave's, or a claim whose proofs can't be found, are named", async () => {

@@ -5,8 +5,9 @@
 // - Both need the winning claim's proofs, exactly as its `submit_claim` carried them: the
 //   contract keeps only their sha256 and the NEAR block the submission ran in. They are
 //   fetched from that call's arguments (claim-proofs.ts: the block and the few before it, each
-//   block's chunks, the call to the contract whose `proofs` hash to the claim's sha256, so no
-//   RPC can substitute others). An ordinary RPC keeps about five epochs of blocks; past that,
+//   block's chunks, their transactions and receipts, so a claim filed through a cross-contract
+//   call is found too; the call to the contract whose `proofs` hash to the claim's sha256, so
+//   no RPC can substitute others). An ordinary RPC keeps about five epochs of blocks; past that,
 //   the network's archival RPC is asked. `--proofs` (a saved job from `bountee test --out`,
 //   or the proofs array as a JSON file) overrides the fetch.
 // - `publish` asks the bounty contract to publish (anyone may, once the delay has passed),

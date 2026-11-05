@@ -27,7 +27,7 @@ export type ProofsSource =
   /** The chunks of the block the submission ran in and of the few before it. */
   | { chain: true };
 
-/** How many blocks before the submission's block its transaction may sit in. */
+/** How many blocks before the submission's block its transaction or receipt may be listed in. */
 const TX_BLOCKS_BEFORE = 10;
 
 const sha256 = (text: string) => `0x${createHash("sha256").update(text).digest("hex")}`;
@@ -61,8 +61,25 @@ function proofsArgs(receiver: string, actions: Action[], contract: string): stri
   });
 }
 
+/** A transaction or an action receipt, as NEAR RPC shows it. */
+interface Tx {
+  receiver_id: string;
+  actions: Action[];
+}
+interface Receipt {
+  receiver_id: string;
+  receipt: { Action?: { actions: Action[] } };
+}
+
 /** The proofs passed by `submit_claim` or `retry_claim` calls in a transaction. */
-const txCandidates = (tx: { receiver_id: string; actions: Action[] }, contract: string) => proofsArgs(tx.receiver_id, tx.actions, contract);
+const txCandidates = (tx: Tx, contract: string) => proofsArgs(tx.receiver_id, tx.actions, contract);
+
+/**
+ * The proofs passed by `submit_claim` or `retry_claim` calls in a receipt: a claim filed
+ * through a cross-contract call (or a meta transaction) reaches the contract as a receipt
+ * that no transaction's own actions show.
+ */
+const receiptCandidates = (r: Receipt, contract: string) => proofsArgs(r.receiver_id, r.receipt.Action?.actions ?? [], contract);
 
 /** Candidates from the claim's transactions, as NEAR RPC has them. */
 async function fromTxs(near: Near, contract: string, hashes: string[], signer: string): Promise<string[]> {
@@ -70,17 +87,22 @@ async function fromTxs(near: Near, contract: string, hashes: string[], signer: s
   for (const hash of hashes) {
     for (const rpc of near.withArchive()) {
       const status = await rpc
-        .rpc<{ transaction: { receiver_id: string; actions: Action[] } }>("EXPERIMENTAL_tx_status", { tx_hash: hash, sender_account_id: signer, wait_until: "FINAL" })
+        .rpc<{ transaction: Tx; receipts?: Receipt[] }>("EXPERIMENTAL_tx_status", { tx_hash: hash, sender_account_id: signer, wait_until: "FINAL" })
         .catch(() => null);
       if (!status) continue;
       out.push(...txCandidates(status.transaction, contract));
+      for (const receipt of status.receipts ?? []) out.push(...receiptCandidates(receipt, contract));
       break;
     }
   }
   return out;
 }
 
-/** Candidates from the chunks of NEAR blocks `from`..`to`, newest first. */
+/**
+ * Candidates from the chunks of NEAR blocks `from`..`to`, newest first: each chunk's
+ * transactions, and its receipts (those the shard's previous chunk sent, so a cross-contract
+ * call that ran at the submission's block is listed by a chunk at or just before it).
+ */
 async function* fromChain(near: Near, contract: string, from: number, to: number): AsyncGenerator<string> {
   const rpcs = near.withArchive();
   for (let height = to; height >= from; height--) {
@@ -93,8 +115,9 @@ async function* fromChain(near: Near, contract: string, from: number, to: number
         continue; // not kept by this RPC, or no block at this height
       }
       for (const chunk of chunks) {
-        const { transactions } = await rpc.rpc<{ transactions: { receiver_id: string; actions: Action[] }[] }>("chunk", { chunk_id: chunk });
+        const { transactions, receipts } = await rpc.rpc<{ transactions: Tx[]; receipts?: Receipt[] }>("chunk", { chunk_id: chunk });
         for (const tx of transactions) yield* txCandidates(tx, contract);
+        for (const receipt of receipts ?? []) yield* receiptCandidates(receipt, contract);
       }
       break;
     }
@@ -120,7 +143,7 @@ export async function proofsMatchingClaim(near: Near, contract: string, claim: C
   if ("txs" in source) {
     for (const proofs of await fromTxs(near, contract, source.txs, source.signer)) if (sha256(proofs) === want) return proofs;
     throw notFound(
-      source.txs.length > 0 ? `in a submit_claim call in transaction ${source.txs.join(", ")}` : "in a saved transaction",
+      source.txs.length > 0 ? `in a submit_claim call in transaction ${source.txs.join(", ")} or its receipts` : "in a saved transaction",
       "pass --tx <its submit_claim transaction>, or --job / --evidence with the proofs it was filed with",
     );
   }
@@ -128,7 +151,7 @@ export async function proofsMatchingClaim(near: Near, contract: string, claim: C
   const at = Number(claim.submitted_at_block);
   for await (const proofs of fromChain(near, contract, at - TX_BLOCKS_BEFORE, at)) if (sha256(proofs) === want) return proofs;
   throw notFound(
-    `in a submit_claim call at NEAR blocks ${at - TX_BLOCKS_BEFORE}-${at}`,
+    `in a submit_claim call at NEAR blocks ${at - TX_BLOCKS_BEFORE}-${at}, its transactions' or its receipts'`,
     "pass --proofs, or a --near-rpc that keeps those blocks (an archival RPC)",
   );
 }
