@@ -20,15 +20,13 @@
 mod common;
 
 use std::io::Write;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
 
 use base64::Engine;
 use bountee_formats::{from_json, Exploit, ReleaseOutput, ReleasedExploit};
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
-use common::{repo_root, wasm_target};
+use common::{attested_build, repo_root};
 use serde_json::{json, Value};
 
 /// The bounty contract a default build of the judge is pinned to (`judge/src/sealed.rs`).
@@ -38,30 +36,6 @@ const SEALED_FOR: &str = "alice.testnet";
 /// The posting Protocol's exploit key (its X25519 secret), and another key.
 const PROTOCOL_SECRET: [u8; 32] = [0x42; 32];
 const OTHER_SECRET: [u8; 32] = [0x17; 32];
-
-/// The attested build: no features.
-fn judge_wasm() -> &'static PathBuf {
-    static WASM: OnceLock<PathBuf> = OnceLock::new();
-    WASM.get_or_init(|| {
-        let target = wasm_target();
-        let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-        let status = Command::new(cargo)
-            .current_dir(repo_root())
-            .env_remove("BOUNTEE_BOUNTY_CONTRACT")
-            .args([
-                "build",
-                "--release",
-                "-p",
-                "bountee-judge",
-                "--target",
-                &target,
-            ])
-            .status()
-            .expect("cargo runs");
-        assert!(status.success(), "the judge builds for {target}");
-        repo_root().join(format!("target/{target}/release/bountee-judge.wasm"))
-    })
-}
 
 struct Run {
     success: bool,
@@ -77,7 +51,7 @@ fn run_job(job: &Value, env: &[(&str, &str)]) -> Run {
     }
     let mut child = cmd
         .arg("--")
-        .arg(judge_wasm())
+        .arg(attested_build())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
