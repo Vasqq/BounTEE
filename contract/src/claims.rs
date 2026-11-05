@@ -295,7 +295,17 @@ impl Contract {
             submitted,
         );
         let job_deposit = job_deposit(&input);
-        self.draw_claim_balance(&claim.whitehat, job_deposit);
+        // A claim whose place lapsed was dropped from the open claims; while its new job
+        // runs it is open again, so the bounty can't be withdrawn beside it (R10.2). Its
+        // lapsed place still holds no payout (R3.6). The Whitehat pays for the entry.
+        let storage_before = env::storage_usage();
+        let record = self.bounties.get_mut(&claim.bounty).expect("read above");
+        if !record.open_claims.iter().any(|(id, _)| *id == claim_id) {
+            record.open_claims.push((claim_id, submitted));
+        }
+        self.bounties.flush();
+        let entry_cost = storage_cost(env::storage_usage().saturating_sub(storage_before));
+        self.draw_claim_balance(&claim.whitehat, job_deposit.saturating_add(entry_cost));
         self.claims.get_mut(&claim_id).expect("read above").state = ClaimState::Judging;
         emit(
             "claim_retried",
