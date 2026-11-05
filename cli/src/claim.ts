@@ -158,7 +158,7 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
       job: flag(args, "job"),
       rpc: flag(args, "proof-rpc"),
       test: script
-        ? { script, bounty: bountyText!, sig: flag(args, "sig"), rpc: flag(args, "proof-rpc"), contract, nearRpc: near.url }
+        ? { script, bounty: bountyText!, sig: flag(args, "sig"), rpc: flag(args, "proof-rpc"), contract, near }
         : undefined,
     });
     ({ exploit, block, header, proofs } = prepared.replay);

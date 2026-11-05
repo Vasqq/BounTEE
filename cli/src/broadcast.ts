@@ -6,13 +6,14 @@
 // twice is harmless. Verification on NEAR (R7.3's second half) is `verify-pause.ts`.
 import { parseBountyId } from "./bounties.ts";
 import { defaultRpcs, waitForEvmReceipt, type EvmReceipt } from "./chains.ts";
-import { NEAR_RPC } from "./endpoints.ts";
+import type { Near } from "./near.ts";
 import { rpc } from "./proofs.ts";
 
 export interface BroadcastOptions {
   bounty: string;
   contract?: string;
-  nearRpc?: string;
+  /** The NEAR network the bounty contract is on. */
+  near: Near;
   /** Chain ID → RPC URL, over the defaults. */
   rpcs?: Record<number, string>;
   /** Wait for each pause's receipt, up to this many seconds. */
@@ -55,9 +56,9 @@ export function parseRpcFlags(values: string[]): Record<number, string> {
   return out;
 }
 
-async function viewBounty(nearRpc: string, contract: string, protocol: string, name: string) {
+async function viewBounty(near: Near, contract: string, protocol: string, name: string) {
   const args = Buffer.from(JSON.stringify({ id: { protocol, name } })).toString("base64");
-  const res = await rpc<{ result: number[] }>(nearRpc, "query", {
+  const res = await near.rpc<{ result: number[] }>("query", {
     request_type: "call_function",
     finality: "final",
     account_id: contract,
@@ -89,8 +90,7 @@ export async function broadcastCommand(o: BroadcastOptions): Promise<BroadcastRe
   const { protocol, name } = parseBountyId(o.bounty);
   const contract = o.contract ?? process.env.BOUNTEE_CONTRACT;
   if (!contract) throw new Error("broadcast needs the bounty contract's account: pass --contract or set BOUNTEE_CONTRACT");
-  const nearRpc = o.nearRpc ?? NEAR_RPC.testnet;
-  const bounty = await viewBounty(nearRpc, contract, protocol, name);
+  const bounty = await viewBounty(o.near, contract, protocol, name);
   if (!bounty) throw new Error(`no bounty ${o.bounty} on ${contract}`);
   if (bounty.signed_pauses.length === 0) throw new Error(`bounty ${o.bounty} has no signed pauses (state: ${bounty.state})`);
 

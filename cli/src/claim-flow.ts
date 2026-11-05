@@ -178,7 +178,7 @@ export async function settle(
     out.broadcast = await broadcastCommand({
       bounty: `${o.bounty.protocol}/${o.bounty.name}`,
       contract: o.contract,
-      nearRpc: near.url,
+      near,
       rpcs: o.rpcs,
       waitSecs: 120,
     });

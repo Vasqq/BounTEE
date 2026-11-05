@@ -22,7 +22,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { parseReplay, parseRules, toJson, type Exploit, type Rules, type Verdict } from "@bountee/formats";
 import { parseBountyId } from "./bounties.ts";
 import { proofRpcs } from "./chains.ts";
-import { NEAR_RPC } from "./endpoints.ts";
+import type { Near } from "./near.ts";
 import { collectReplay, exploitFromBroadcast, rpc, runJudge } from "./proofs.ts";
 
 /** How far behind the head the claim's block is: a few seconds, since a public RPC can fail on the very latest. */
@@ -39,7 +39,8 @@ export interface TestOptions {
   block?: number;
   judge?: string;
   contract?: string;
-  nearRpc?: string;
+  /** The NEAR network a bounty id is read from. */
+  near: Near;
 }
 
 export interface TestResult {
@@ -62,7 +63,7 @@ async function loadRules(o: TestOptions): Promise<Rules> {
   const contract = o.contract ?? process.env.BOUNTEE_CONTRACT;
   if (!contract) throw new Error("--bounty <id> needs the bounty contract's account: pass --contract or set BOUNTEE_CONTRACT");
   const args = Buffer.from(JSON.stringify({ id })).toString("base64");
-  const res = await rpc<{ result: number[] }>(o.nearRpc ?? NEAR_RPC.testnet, "query", {
+  const res = await o.near.rpc<{ result: number[] }>("query", {
     request_type: "call_function",
     finality: "final",
     account_id: contract,

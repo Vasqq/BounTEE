@@ -44,13 +44,13 @@ const USAGES: Record<string, string> = {
   init: "bountee init [--network testnet|mainnet] [--account <name>.testnet] [--json]",
   list: `bountee list ${NEAR_FLAGS} [--json]`,
   show: `bountee show <protocol>/<name> ${NEAR_FLAGS} [--json]`,
-  test: "bountee test <foundry-script>[:<contract>] --bounty <rules.json | protocol/name> [--sig <fn>] [--out <job.json>] [--rpc <url>] [--block <n>] [--judge <wasm>] [--contract <account>] [--json]  |  bountee test --job <saved job.json> [--judge <wasm>] [--json]",
+  test: "bountee test <foundry-script>[:<contract>] --bounty <rules.json | protocol/name> [--sig <fn>] [--out <job.json>] [--rpc <url>] [--block <n>] [--judge <wasm>] [--contract <account>] [--network testnet|mainnet] [--near-rpc <url>] [--json]  |  bountee test --job <saved job.json> [--judge <wasm>] [--json]",
   claim:
-    "bountee claim [<foundry-script>[:<contract>]] --contract <account> --bounty <protocol>/<name> --as <account> [--sig <fn>] [--job <job.json>] [--exploit <exploit.json> --evidence <evidence.json>] [--network testnet|mainnet] [--rpc <NEAR rpc>] [--proof-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--outlayer-api <url>] [--timeout <secs>] [--interval <secs>] [--no-wait] [--no-broadcast] [--no-verify] [--verify-wait <secs>] [--dry-run] [--json]  |  bountee claim --retry <claim id> --contract <account> --as <account> [--bounty <protocol>/<name>] [--tx <hash>[,...] | --job <job.json> | --evidence <evidence.json>] [--rpc <NEAR rpc>] [--timeout <secs>] [--no-wait] [--no-broadcast] [--no-verify] [--json]",
+    "bountee claim [<foundry-script>[:<contract>]] --contract <account> --bounty <protocol>/<name> --as <account> [--sig <fn>] [--job <job.json>] [--exploit <exploit.json> --evidence <evidence.json>] [--network testnet|mainnet] [--rpc <NEAR rpc>] [--proof-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--outlayer-api <url>] [--timeout <secs>] [--interval <secs>] [--no-wait] [--no-broadcast] [--no-verify] [--verify-wait <secs>] [--dry-run] [--json]  |  bountee claim --retry <claim id> --contract <account> --as <account> [--bounty <protocol>/<name>] [--tx <hash>[,...] | --job <job.json> | --evidence <evidence.json>] [--network testnet|mainnet] [--rpc <NEAR rpc>] [--timeout <secs>] [--no-wait] [--no-broadcast] [--no-verify] [--json]",
   status: `bountee status <claim id> ${NEAR_FLAGS} [--rpc <chain id>=<url>[,...]] [--tx <hash>[,...]] [--outlayer-api <url>] [--watch [--timeout <secs>] [--interval <secs>]] [--json]`,
   post: "bountee post <protocol>/<name> --rules <rules.json> --contract <account> [--network testnet|mainnet] [--near-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--no-preflight] [--json]",
   "open-exploit": `bountee open-exploit <protocol>/<name> (--wallet <Ethereum key file> | --key-file <saved exploit key>) [--public-key] [--as <account>] [--out <file>] ${NEAR_FLAGS} [--json]`,
-  broadcast: "bountee broadcast <protocol>/<name> [--contract <account>] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]",
+  broadcast: "bountee broadcast <protocol>/<name> [--contract <account>] [--network testnet|mainnet] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]",
   key: "bountee key add --contract <account> --as <account> [--allowance <NEAR>] [--out-dir <dir>] [--network testnet|mainnet] [--near-rpc <url>] [--json]  |  bountee key revoke [<public key>] --as <account> [--out-dir <dir>] [--network testnet|mainnet] [--near-rpc <url>] [--json]",
   "verify-pause": `bountee verify-pause <protocol>/<name> --as <account> ${NEAR_FLAGS} [--chain <chain id>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]`,
   publish: `bountee publish <protocol>/<name> --as <account> [--proofs <saved job.json | proofs.json>] ${NEAR_FLAGS} [--json]`,
@@ -84,12 +84,18 @@ function fail(message: string, code = 1): never {
   process.exit(code);
 }
 
+/** The NEAR connection `--network` and `--near-rpc` name: every command's one way to NEAR. */
+function nearConnection(flags: Record<string, string>): Near {
+  const network = parseNetwork(flags.network);
+  return new Near(network, flags["near-rpc"] ?? NEAR_RPC[network]);
+}
+
 /** The bounty contract and NEAR connection the read commands share. */
 function nearFor(command: string, flags: Record<string, string>) {
   const contract = flags.contract ?? process.env.BOUNTEE_CONTRACT;
   if (!contract) fail(`${command} needs the bounty contract's account: pass --contract or set BOUNTEE_CONTRACT\n${usage(command)}`, 2);
-  const network = parseNetwork(flags.network);
-  return { contract, network, near: new Near(network, flags["near-rpc"] ?? NEAR_RPC[network]) };
+  const near = nearConnection(flags);
+  return { contract, network: near.network, near };
 }
 
 const print = (result: unknown, text: string) => console.log(json ? JSON.stringify(result) : text);
@@ -137,7 +143,7 @@ try {
       block: flags.block === undefined ? undefined : Number(flags.block),
       judge: flags.judge,
       contract: flags.contract,
-      nearRpc: flags["near-rpc"],
+      near: nearConnection(flags),
     });
     print(result, formatTestResult(result));
   } else if (command === "broadcast") {
@@ -147,7 +153,7 @@ try {
     const result = await broadcastCommand({
       bounty,
       contract: flags.contract,
-      nearRpc: flags["near-rpc"],
+      near: nearConnection(flags),
       rpcs: flags.rpc === undefined ? undefined : parseRpcFlags(flags.rpc.split(",")),
       waitSecs: flags.wait === undefined ? undefined : Number(flags.wait),
     });
@@ -221,8 +227,7 @@ try {
     }
   } else if (command === "key") {
     const { positional, flags } = parse(rest.slice(1));
-    const network = parseNetwork(flags.network);
-    const near = new Near(network, flags["near-rpc"] ?? NEAR_RPC[network]);
+    const near = nearConnection(flags);
     if (positional[0] === "add") {
       const contract = flags.contract ?? process.env.BOUNTEE_CONTRACT;
       if (!contract || !flags.as) fail(`key add needs --contract and --as\n${usage(command)}`, 2);

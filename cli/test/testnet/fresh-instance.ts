@@ -1,13 +1,16 @@
-// A fresh demo instance on Base Sepolia (and, with CHAINS, on more chains), and its bounty
-// posted on NEAR testnet (D21): every winning run closes its bounty and pauses its vault,
-// so each run uses a new one.
+// A fresh demo instance and its bounty posted (D21): every winning run closes its bounty and
+// pauses its vault, so each run uses a new one. NETWORK picks the network (#43): testnet (the
+// default) deploys on Base Sepolia (and, with CHAINS, more chains) with a mock USDC and
+// posts on NEAR testnet; mainnet deploys on Base and Arbitrum One with Circle's USDC (2 into
+// the proof chain's vault, 1 into each other, ADR-0018) and posts on NEAR mainnet.
 //
 // 0. Reports every balance the run needs, and stops before spending anything, naming what
 //    to top up, if any would run dry (spec, Testing Decisions).
 // 1. Reads the new bounty's pause-role address from the bounty contract (`pause_role`), and
 //    checks it against the formats' own derivation (D25). One address serves every chain.
-// 2. On each chain, deploys a new MockUSDC + DemoVault (demo/script/Deploy.s.sol,
-//    --broadcast), granting the pause role to that address.
+// 2. On each chain, deploys a new DemoVault (demo/script/Deploy.s.sol, --broadcast), with a
+//    new MockUSDC minted into it on testnet or real USDC sent from the deployer on mainnet,
+//    granting the pause role to that address.
 // 3. On each chain, funds the pause-role address with the pause gas the posting check asks
 //    for (R7.6): the gas its signed pause may burn at its fee limit (200,000 gas at 1 gwei =
 //    0.0002 ETH), plus Base's L1 data fee allowance (0.00001 ETH); the formats'
@@ -19,17 +22,20 @@
 // error would print it): they read it from a throwaway encrypted keystore (evm-key.ts), and
 // everything this script prints on failure is redacted.
 //
-// Writes the instance to $BOUNTEE_INSTANCE (default ~/.bountee-testnet/day3-instance.json)
+// Writes the instance to $BOUNTEE_INSTANCE (default ~/.bountee-<network>/day3-instance.json)
 // and prints it as one JSON line. Exit status 3 = a balance is short (nothing was spent).
 //
-// Env: BOUNTEE_DAY3 (deploy-system.ts's file), PROTOCOL (holds the test USDC; default
-// bountee-spike4.testnet), BOUNTY_NAME (default demo-<UTC yyyymmddhhmm>), BOUNTY_AMOUNT (test
-// USDC smallest unit, default 100e6), MINIMUM_THEFT (default 1000e6), WHITEHAT and
-// CLAIMS (the Whitehat and how many claims the run files, for the preflight), DEPLOYER_ENV
-// (default ~/.bountee-testnet/base-sepolia-deployer.env; the same key deploys on every chain),
-// CHAINS (comma-separated chain IDs, the proof chain first; default 84532), RPC (the proof
-// chain's RPC; every chain's default is in cli/src/chains.ts), PREFLIGHT_ONLY=1 to stop after
-// step 0.
+// Env: NETWORK (testnet or mainnet), BOUNTEE_DAY3 (deploy-system.ts's file, default
+// ~/.bountee-<network>/day3-deployment.json), PROTOCOL (holds the USDC; default
+// bountee-spike4.testnet, required on mainnet), BOUNTY_NAME (default demo-<UTC yyyymmddhhmm>),
+// BOUNTY_AMOUNT (USDC smallest unit; default 100e6 on testnet, 10e6 on mainnet),
+// MINIMUM_THEFT (default 1000e6 on testnet, 1e6 on mainnet), WHITEHAT and CLAIMS (the
+// Whitehat and how many claims the run files, for the preflight), DEPLOYER_ENV (default
+// ~/.bountee-testnet/base-sepolia-deployer.env, ~/.bountee-mainnet/deployer.env; the same key
+// deploys on every chain), CHAINS (comma-separated chain IDs, the proof chain first; default
+// 84532 on testnet, 8453,42161 on mainnet), RPC (the proof chain's RPC), CHAIN_RPCS
+// (<chain id>=<url>,... for any chain; every chain's default is in cli/src/chains.ts),
+// NEAR_RPC, PREFLIGHT_ONLY=1 to stop after step 0.
 import { execFileSync, spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -38,28 +44,42 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { base58 } from "@scure/base";
 import { PAUSE_GAS_PER_PAUSE, pauseRole } from "@bountee/formats";
-import { defaultRpc } from "../../src/chains.ts";
-import { Near, formatNear, milliNear } from "../../src/near.ts";
+import { parseRpcFlags } from "../../src/broadcast.ts";
+import { CHAINS, defaultRpc } from "../../src/chains.ts";
+import { Near, formatNear, milliNear, parseNetwork } from "../../src/near.ts";
+import { MPC_ROOT, need, stopIfShort, type Need } from "./deploy.ts";
 import { keystoreEnv, redact } from "./evm-key.ts";
 
 const home = homedir();
 const root = fileURLToPath(new URL("../../../", import.meta.url));
-const deployment = JSON.parse(readFileSync(process.env.BOUNTEE_DAY3 ?? join(home, ".bountee-testnet", "day3-deployment.json"), "utf8"));
+const NETWORK = parseNetwork(process.env.NETWORK);
+const MAINNET = NETWORK === "mainnet";
+const dir = join(home, `.bountee-${NETWORK}`);
+const deployment = JSON.parse(readFileSync(process.env.BOUNTEE_DAY3 ?? join(dir, "day3-deployment.json"), "utf8"));
+if ((deployment.network ?? "testnet") !== NETWORK) throw new Error(`the deployment is on ${deployment.network}, not ${NETWORK}`);
 const CONTRACT: string = deployment.contract;
 const USDC: string = deployment.usdc;
-const PROTOCOL = process.env.PROTOCOL ?? "bountee-spike4.testnet";
+const PROTOCOL = process.env.PROTOCOL ?? (MAINNET ? undefined : "bountee-spike4.testnet");
+if (!PROTOCOL) throw new Error("set PROTOCOL: the NEAR account that posts the bounty");
 const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 12);
 const NAME = process.env.BOUNTY_NAME ?? `demo-${stamp}`;
-const BOUNTY_AMOUNT = process.env.BOUNTY_AMOUNT ?? "100000000";
-const MINIMUM_THEFT = process.env.MINIMUM_THEFT ?? "1000000000";
-const CHAIN_IDS = (process.env.CHAINS ?? "84532").split(",").map(Number);
+// ADR-0018: on mainnet a 10 USDC bounty and a 1 USDC minimum theft.
+const BOUNTY_AMOUNT = process.env.BOUNTY_AMOUNT ?? (MAINNET ? "10000000" : "100000000");
+const MINIMUM_THEFT = process.env.MINIMUM_THEFT ?? (MAINNET ? "1000000" : "1000000000");
+const CHAIN_IDS = (process.env.CHAINS ?? (MAINNET ? "8453,42161" : "84532")).split(",").map(Number);
 const CHAIN = CHAIN_IDS[0]!;
-const RPC = process.env.RPC ?? defaultRpc(CHAIN)!;
-const rpcOf = (chain: number) => (chain === CHAIN ? RPC : defaultRpc(chain)!);
-const chainName: Record<number, string> = { 84532: "base-sepolia", 421614: "arbitrum-sepolia" };
-const OUT = process.env.BOUNTEE_INSTANCE ?? join(home, ".bountee-testnet", "day3-instance.json");
+const chainRpcs = { ...parseRpcFlags(process.env.CHAIN_RPCS ? process.env.CHAIN_RPCS.split(",") : []), ...(process.env.RPC ? { [CHAIN]: process.env.RPC } : {}) };
+const rpcOf = (chain: number) => chainRpcs[chain] ?? defaultRpc(chain) ?? (() => { throw new Error(`no RPC for chain ${chain}: set CHAIN_RPCS`); })();
+const chainName = (chain: number) => CHAINS[chain]?.name ?? `chain ${chain}`;
+// How much of Circle's USDC each mainnet vault starts with (ADR-0018: 2 on the proof chain,
+// 1 on each other; the replay measures it). Testnet mints a mock.
+const circleUsdc = (chain: number) => CHAINS[chain]?.usdc ?? (() => { throw new Error(`no USDC known on chain ${chain}`); })();
+const vaultSeed = (chain: number) => (chain === CHAIN ? 2_000_000n : 1_000_000n);
+if (MAINNET) CHAIN_IDS.forEach(circleUsdc);
+const nearChain = `near-${NETWORK}`;
+const OUT = process.env.BOUNTEE_INSTANCE ?? join(dir, "day3-instance.json");
 const deployerEnv: Record<string, string> = Object.fromEntries(
-  readFileSync(process.env.DEPLOYER_ENV ?? join(home, ".bountee-testnet", "base-sepolia-deployer.env"), "utf8")
+  readFileSync(process.env.DEPLOYER_ENV ?? join(dir, MAINNET ? "deployer.env" : "base-sepolia-deployer.env"), "utf8")
     .split("\n")
     .filter((l) => l.includes("="))
     .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim()]),
@@ -67,7 +87,7 @@ const deployerEnv: Record<string, string> = Object.fromEntries(
 const DEPLOYER = deployerEnv.DEPLOYER_ADDRESS ?? "";
 const DEPLOYER_KEY = deployerEnv.DEPLOYER_PRIVATE_KEY ?? "";
 if (!DEPLOYER || !DEPLOYER_KEY) throw new Error("the deployer env file needs DEPLOYER_ADDRESS and DEPLOYER_PRIVATE_KEY");
-const near = new Near("testnet");
+const near = new Near(NETWORK, process.env.NEAR_RPC);
 // The deployer key reaches forge and cast as an encrypted keystore named in the environment,
 // never on a command line, and any error this script prints is redacted (evm-key.ts).
 const deployerKeystore = keystoreEnv(DEPLOYER_KEY);
@@ -114,38 +134,31 @@ const claims = Number(process.env.CLAIMS ?? 3);
 const WHITEHAT = process.env.WHITEHAT;
 const ftBalance = async (who: string) => BigInt(await near.view<string>(USDC, "ft_balance_of", { account_id: who }));
 
-interface Need { who: string; chain: string; asset: string; have: string; need: string; ok: boolean; top_up?: string }
 const needs: Need[] = [];
-const need = (who: string, chain: string, asset: string, have: bigint, want: bigint, show: (x: bigint) => string) =>
-  needs.push({ who, chain, asset, have: show(have), need: show(want), ok: have >= want, ...(have < want ? { top_up: show(want - have) } : {}) });
-
+const showUsdc = (x: bigint) => `${Number(x) / 1e6} USDC`;
+const showNear = (y: bigint) => `${formatNear(y)} NEAR`;
 for (const chain of CHAIN_IDS) {
   const rpc = rpcOf(chain);
-  need(DEPLOYER, chainName[chain] ?? `chain ${chain}`, "ETH", BigInt(cast("balance", DEPLOYER, "--rpc-url", rpc)), deployWei(rpc) + pauseGasWei, eth);
+  needs.push(need(DEPLOYER, chainName(chain), "ETH", BigInt(cast("balance", DEPLOYER, "--rpc-url", rpc)), deployWei(rpc) + pauseGasWei, eth));
+  if (MAINNET) {
+    const have = BigInt(cast("call", circleUsdc(chain), "balanceOf(address)(uint256)", DEPLOYER, "--rpc-url", rpc).split(" ")[0]!);
+    needs.push(need(DEPLOYER, chainName(chain), `USDC (${circleUsdc(chain)})`, have, vaultSeed(chain), showUsdc));
+  }
 }
-need(PROTOCOL, "near-testnet", "NEAR", (await near.balance(PROTOCOL)) ?? 0n, BigInt(fees.posting_fee) + milliNear(100), (y) => `${formatNear(y)} NEAR`);
-need(PROTOCOL, "near-testnet", `test USDC (${USDC})`, await ftBalance(PROTOCOL), BigInt(BOUNTY_AMOUNT), (x) => `${Number(x) / 1e6} USDC`);
+needs.push(need(PROTOCOL, nearChain, "NEAR", (await near.balance(PROTOCOL)) ?? 0n, BigInt(fees.posting_fee) + milliNear(100), showNear));
+needs.push(need(PROTOCOL, nearChain, `${MAINNET ? "" : "test "}USDC (${USDC})`, await ftBalance(PROTOCOL), BigInt(BOUNTY_AMOUNT), showUsdc));
 if (WHITEHAT) {
   // Each live claim draws ~0.9 NEAR (its ~120 KB input is held while the job runs) plus gas.
-  need(WHITEHAT, "near-testnet", "NEAR", (await near.balance(WHITEHAT)) ?? 0n, milliNear(1100 * claims), (y) => `${formatNear(y)} NEAR`);
+  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.balance(WHITEHAT)) ?? 0n, milliNear(1100 * claims), showNear));
 }
-const short = needs.filter((n) => !n.ok);
-console.error(needs.map((n) => `${n.ok ? "ok   " : "SHORT"} ${n.who} (${n.chain}) ${n.asset}: has ${n.have}, needs ${n.need}`).join("\n"));
-if (short.length > 0) {
-  console.log(JSON.stringify({ ok: false, balances: needs, top_up: short.map((n) => `${n.top_up} to ${n.who} on ${n.chain}`) }));
-  process.exit(3);
-}
-if (process.env.PREFLIGHT_ONLY === "1") {
-  console.log(JSON.stringify({ ok: true, balances: needs }));
-  process.exit(0);
-}
+stopIfShort(needs);
 
 // ---- 1. Pause-role address -------------------------------------------------------------------------
 
 const id = { protocol: PROTOCOL, name: NAME };
 if (await near.view(CONTRACT, "bounty", { id })) throw new Error(`${PROTOCOL}/${NAME} exists already: names are never reused (D25)`);
 const role = await near.view<{ path: string; address: string }>(CONTRACT, "pause_role", { id });
-const derived = pauseRole.address(pauseRole.TESTNET_ROOT_PUBLIC_KEY, CONTRACT, id);
+const derived = pauseRole.address(MPC_ROOT[NETWORK], CONTRACT, id);
 if (role.address !== derived) throw new Error(`pause_role says ${role.address}, the formats derive ${derived}`);
 
 // ---- 2. Demo vault ---------------------------------------------------------------------------------
@@ -171,7 +184,7 @@ for (const chain of CHAIN_IDS) {
   const forge = foundry("forge", ["script", "script/Deploy.s.sol", "--rpc-url", rpc, "--broadcast", "--sender", DEPLOYER, "--slow"], {
     signs: true,
     cwd: join(root, "demo"),
-    env: { PAUSE_ROLE: role.address },
+    env: { PAUSE_ROLE: role.address, ...(MAINNET ? { USDC: circleUsdc(chain), SEED_USDC: vaultSeed(chain).toString() } : {}) },
   });
   const deployed = JSON.parse(forge.slice(forge.indexOf("DEMO_DEPLOY_JSON:") + "DEMO_DEPLOY_JSON:".length).trim().split("\n")[0]!);
   const vault = String(deployed.vault).toLowerCase();
@@ -205,7 +218,7 @@ const proof = chains[0]!;
 const config = await near.view(CONTRACT, "config");
 const x25519 = generateKeyPairSync("x25519");
 const pub = Buffer.from(x25519.publicKey.export({ format: "jwk" }).x!, "base64url");
-const exploitKeyFile = join(home, ".bountee-testnet", `${NAME}-exploit-key.pem`);
+const exploitKeyFile = join(dir, `${NAME}-exploit-key.pem`);
 writeFileSync(exploitKeyFile, x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
 const rules = {
   covered_contracts: chains.map((c) => ({ chain_id: c.chain_id, address: c.vault })),
@@ -223,11 +236,16 @@ const rules = {
   exploit_public_key: `x25519:${base58.encode(pub)}`,
   judge_build_hash: config.judge_build_hash,
 };
-const rulesFile = join(home, ".bountee-testnet", `${NAME}-rules.json`);
+const rulesFile = join(dir, `${NAME}-rules.json`);
 writeFileSync(rulesFile, `${JSON.stringify(rules, null, 2)}\n`, { mode: 0o600 });
 const posted = spawnSync(
   process.execPath,
-  [join(root, "cli/src/main.ts"), "post", `${PROTOCOL}/${NAME}`, "--rules", rulesFile, "--contract", CONTRACT, "--json"],
+  [
+    join(root, "cli/src/main.ts"), "post", `${PROTOCOL}/${NAME}`, "--rules", rulesFile, "--contract", CONTRACT, "--network", NETWORK,
+    ...(process.env.NEAR_RPC ? ["--near-rpc", process.env.NEAR_RPC] : []),
+    "--chain-rpc", CHAIN_IDS.map((c) => `${c}=${rpcOf(c)}`).join(","),
+    "--json",
+  ],
   { encoding: "utf8" },
 );
 const postResult = JSON.parse(posted.stdout.trim().split("\n").pop() || posted.stderr.trim().split("\n").pop() || "{}");
