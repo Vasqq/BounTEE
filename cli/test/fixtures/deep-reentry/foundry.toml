@@ -1,0 +1,12 @@
+# A deep-reentrancy exploit on a local anvil chain (ticket #9, from #10's finding): forge's
+# gas estimate for it is too low, so the exploit only pays if `bountee test` doesn't take
+# its gas from that estimate.
+[profile.default]
+src = "src"
+script = "script"
+out = "out"
+cache_path = "cache"
+broadcast = "broadcast"
+libs = []
+solc_version = "0.8.28"
+evm_version = "cancun"
