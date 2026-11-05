@@ -31,6 +31,25 @@ pub const BOUNTY_CONTRACT: &str = match option_env!("BOUNTEE_BOUNTY_CONTRACT") {
     None => "bounty.bountee.testnet",
 };
 
+/// Whether this build answers to a mainnet bounty contract (`.near`); otherwise testnet.
+/// Chooses the build's pinned RPCs (`confirm.rs`) and MPC root key (`posting.rs`).
+pub const ON_MAINNET: bool = ends_with(BOUNTY_CONTRACT.as_bytes(), b".near");
+
+const fn ends_with(s: &[u8], suffix: &[u8]) -> bool {
+    if s.len() < suffix.len() {
+        return false;
+    }
+    let start = s.len() - suffix.len();
+    let mut i = 0;
+    while i < suffix.len() {
+        if s[start + i] != suffix[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 /// The OutLayer secret holding the sealed exploit.
 pub const SECRET_NAME: &str = "BOUNTEE_SEALED_EXPLOIT";
 

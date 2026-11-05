@@ -18,8 +18,13 @@
 //!   testnet, recorded in the spec), the attested build's own confirmation path (the test
 //!   build differs from it only in where the RPC list comes from), and the sealed
 //!   exploit and account binding (#15, `seam_j_sealing.rs`).
+//!   Ticket #43 adds a test build pinned to the mainnet bounty contract (`.near`): it
+//!   catches that each build confirms only its own network's chains (Base and Arbitrum One
+//!   on mainnet, the Sepolias on testnet) and refuses the other network's with no verdict,
+//!   asking no RPC. It misses the mainnet RPCs themselves, which a testnet OutLayer job
+//!   checks (recorded in the ticket's work).
 //! - Inspection (R2.8, recorded in the judge's `confirm.rs`): no RPC address is read from
-//!   the job input, a claim or a Protocol.
+//!   the job input, a claim or a Protocol; the attested build's table is its network's.
 
 mod common;
 #[path = "stand-ins/test_rpc.rs"]
@@ -30,7 +35,10 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
 use bountee_formats::{from_json, Reason, Verdict};
-use common::{attested_build, repo_root, test_build};
+use common::{
+    attested_build, mainnet_test_build, repo_root, test_build, ARBITRUM_ONE, BASE,
+    MAINNET_BOUNTY_CONTRACT,
+};
 use serde_json::{json, Value};
 use test_rpc::{Answer, TestRpc};
 
@@ -65,6 +73,18 @@ fn run_per_chain(
     per_chain: &[(u64, &[&TestRpc])],
     exploit: Option<&Value>,
 ) -> Output {
+    run_full(BOUNTY_CONTRACT, wasm, job, rpcs, per_chain, exploit)
+}
+
+/// [`run_per_chain`] for a build pinned to `contract`, in a job that contract requested.
+fn run_full(
+    contract: &str,
+    wasm: &PathBuf,
+    job: &Value,
+    rpcs: &[&TestRpc],
+    per_chain: &[(u64, &[&TestRpc])],
+    exploit: Option<&Value>,
+) -> Output {
     let mut command = Command::new("wasmtime");
     command
         .args(["run", "-S", "http"])
@@ -77,7 +97,7 @@ fn run_per_chain(
     }
     command
         .arg("--env")
-        .arg(format!("NEAR_PREDECESSOR_ID={BOUNTY_CONTRACT}"));
+        .arg(format!("NEAR_PREDECESSOR_ID={contract}"));
     if let Some(exploit) = exploit {
         command
             .arg("--env")
@@ -435,4 +455,86 @@ fn r2_8_unparseable_proofs_are_unproven() {
     job["judge_claim"]["proofs_json"] = json!("not proofs");
     let out = run_with(&job, [ours(), ours(), ours()]);
     assert_verdict(&out, Reason::UnprovenState);
+}
+
+// ---- R2.8: each build confirms only its own network's chains (#43) ----------------------
+
+const BASE_SEPOLIA: u64 = 84532;
+const ARBITRUM_SEPOLIA: u64 = 421614;
+
+/// The fixture claim with its proof chain, and every covered contract, on `chain`.
+fn claim_on(chain: u64) -> Value {
+    let mut job = recent_claim();
+    let rules = &mut job["judge_claim"]["rules"];
+    rules["proof_chain"] = json!(chain);
+    for c in rules["covered_contracts"].as_array_mut().unwrap() {
+        c["chain_id"] = json!(chain);
+    }
+    job
+}
+
+/// Run `claim_on(chain)` on `wasm`, pinned to `contract`, with three matching stand-ins
+/// for `chain` and three for every other chain; the verdict and how many requests reached
+/// each set.
+fn judge_on(contract: &str, wasm: &PathBuf, chain: u64) -> (Output, usize, usize) {
+    let own = rpcs([ours(), ours(), ours()]);
+    let any = rpcs([ours(), ours(), ours()]);
+    let out = run_full(
+        contract,
+        wasm,
+        &claim_on(chain),
+        &any.iter().collect::<Vec<_>>(),
+        &[(chain, &own.iter().collect::<Vec<_>>())],
+        Some(&drain()),
+    );
+    let asked = |set: &[TestRpc; 3]| set.iter().map(TestRpc::requests).sum::<usize>();
+    (out, asked(&own), asked(&any))
+}
+
+/// R2.8: a build for the mainnet bounty contract confirms a Base block through Base's
+/// RPCs, and the replay runs: the fixture `drain` PAYS.
+#[test]
+fn r2_8_mainnet_build_confirms_a_base_block() {
+    let (out, own, _) = judge_on(MAINNET_BOUNTY_CONTRACT, mainnet_test_build(), BASE);
+    assert_verdict(&out, Reason::MinimumTheftReached);
+    assert_eq!(own, 3);
+}
+
+/// R2.8: a build for the mainnet bounty contract confirms an Arbitrum One block.
+#[test]
+fn r2_8_mainnet_build_confirms_an_arbitrum_one_block() {
+    let (out, own, _) = judge_on(MAINNET_BOUNTY_CONTRACT, mainnet_test_build(), ARBITRUM_ONE);
+    assert_verdict(&out, Reason::MinimumTheftReached);
+    assert_eq!(own, 3);
+}
+
+/// R2.8, R2.6: a mainnet build refuses a Sepolia proof chain: no verdict, and no RPC is
+/// asked, even though every stand-in would confirm the block.
+#[test]
+fn r2_8_mainnet_build_refuses_a_sepolia_chain_with_no_verdict() {
+    for chain in [BASE_SEPOLIA, ARBITRUM_SEPOLIA] {
+        let (out, own, any) = judge_on(MAINNET_BOUNTY_CONTRACT, mainnet_test_build(), chain);
+        assert_no_verdict(&out);
+        assert_eq!((own, any), (0, 0), "chain {chain}");
+    }
+}
+
+/// R2.8, R2.6: the reverse: a testnet build refuses a mainnet proof chain with no verdict.
+#[test]
+fn r2_8_testnet_build_refuses_a_mainnet_chain_with_no_verdict() {
+    for chain in [BASE, ARBITRUM_ONE] {
+        let (out, own, any) = judge_on(BOUNTY_CONTRACT, test_build(), chain);
+        assert_no_verdict(&out);
+        assert_eq!((own, any), (0, 0), "chain {chain}");
+    }
+}
+
+/// R2.8: the testnet build still confirms its own network's chains.
+#[test]
+fn r2_8_testnet_build_confirms_a_sepolia_block() {
+    for chain in [BASE_SEPOLIA, ARBITRUM_SEPOLIA] {
+        let (out, own, _) = judge_on(BOUNTY_CONTRACT, test_build(), chain);
+        assert_verdict(&out, Reason::MinimumTheftReached);
+        assert_eq!(own, 3, "chain {chain}");
+    }
 }
