@@ -2,7 +2,7 @@
 // BounTEE's command-line tool. Commands so far: `--version`, `help`, `init` (#16), `test`
 // (ticket #11), `broadcast` (ticket #13), `claim` (sealing and filing, #15; script path,
 // verdict, payout and pauses, #16; live progress and receipt, #26), `list`, `show` and
-// `status` (#26). The rest (verify, balance, key, open-exploit, withdraw, post) land in the
+// `status` (#26), `open-exploit` (#22). The rest (verify, balance, key, withdraw, post) land in the
 // CLI tickets. Every command takes `--json` for machine-readable output (R14.5): the result
 // as one JSON document on stdout, an error as `{"error": …}` on stderr, and a claim's live
 // stages as one JSON line each on stderr.
@@ -12,6 +12,7 @@ import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadc
 import { claim, formatClaimResult } from "./claim.ts";
 import { initCommand } from "./init.ts";
 import { Near, NEAR_RPC, parseNetwork } from "./near.ts";
+import { exploitPublicKey, formatOpenExploit, openExploit } from "./open-exploit.ts";
 import { claimStatus, formatStage, formatStatus, loadClaimTxs, watchClaim } from "./status.ts";
 import { formatTestResult, testCommand } from "./test.ts";
 
@@ -19,7 +20,8 @@ const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url),
 const args = process.argv.slice(2);
 const json = args.includes("--json");
 const watch = args.includes("--watch");
-const rest = args.filter((a) => a !== "--json" && a !== "--watch");
+const publicKey = args.includes("--public-key");
+const rest = args.filter((a) => a !== "--json" && a !== "--watch" && a !== "--public-key");
 
 const NEAR_FLAGS = "[--contract <account>] [--network testnet|mainnet] [--near-rpc <url>]";
 /** Every command and its usage; `bountee help` prints them. */
@@ -33,6 +35,7 @@ const USAGES: Record<string, string> = {
   claim:
     "bountee claim [<foundry-script>[:<contract>]] --contract <account> --bounty <protocol>/<name> --as <account> [--sig <fn>] [--job <job.json>] [--exploit <exploit.json> --evidence <evidence.json>] [--network testnet|mainnet] [--rpc <NEAR rpc>] [--proof-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--outlayer-api <url>] [--timeout <secs>] [--interval <secs>] [--no-wait] [--no-broadcast] [--dry-run] [--json]",
   status: `bountee status <claim id> ${NEAR_FLAGS} [--rpc <chain id>=<url>[,...]] [--tx <hash>[,...]] [--outlayer-api <url>] [--watch [--timeout <secs>] [--interval <secs>]] [--json]`,
+  "open-exploit": `bountee open-exploit <protocol>/<name> (--wallet <Ethereum key file> | --key-file <saved exploit key>) [--public-key] [--as <account>] [--out <file>] ${NEAR_FLAGS} [--json]`,
   broadcast: "bountee broadcast <protocol>/<name> [--contract <account>] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]",
 };
 const usage = (command: string) => `usage: ${USAGES[command]}`;
@@ -143,6 +146,18 @@ try {
         })
       : await claimStatus(o);
     print(status, formatStatus(status));
+  } else if (command === "open-exploit") {
+    const { positional, flags } = parse(rest.slice(1));
+    if (!positional[0]) fail(`open-exploit needs a bounty id\n${usage(command)}`, 2);
+    const { near, contract } = nearFor(command, flags);
+    const o = { near, contract, bounty: parseBountyId(positional[0]), wallet: flags.wallet, keyFile: flags["key-file"], as: flags.as, out: flags.out };
+    if (publicKey) {
+      const r = exploitPublicKey(o);
+      print(r, r.exploit_public_key);
+    } else {
+      const r = await openExploit(o);
+      print(r, formatOpenExploit(r));
+    }
   } else if (command === "claim") {
     const r = await claim(rest.slice(1), showStage);
     print(r, formatClaimResult(r));
