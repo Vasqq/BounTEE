@@ -16,6 +16,16 @@
 //!   Answering `{"stand_in_defer": true}` keeps the request pending under a fresh yield, so
 //!   a test can hold a request open past the bounty contract's stale-signing limit.
 //! - `fail_next_sign()` makes the next `sign` call itself fail.
+//!
+//! Foreign-chain transaction verification (`crates/contract/src/api/foreign_chain/requests.rs`,
+//! 3.18.0, spike #3): `verify_foreign_transaction({request: {request: {Base|Arbitrum: {tx_id,
+//! extractors, finality}}, domain_id, payload_version, expected_payload_hash}})` needs at least
+//! 1 yoctoNEAR and 15 Tgas, and yields; the network's answer, `{"payload_hash":<hex>,
+//! "signature":{…}}`, reaches the caller as the yield callback's return value; a transaction
+//! that reverted, is unknown or isn't yet at the requested finality gets no answer, so the
+//! request times out and the caller's promise fails.
+//! - `verify_requests()` reads back every verification request with its caller and deposit.
+//! - `respond_verify(index, response)` answers one with any JSON; unanswered, it times out.
 
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, Value};
@@ -40,6 +50,8 @@ pub struct TestMpc {
     sign_requests: Vector<SignRequest>,
     yields: LookupMap<u32, YieldId>,
     fail_next: bool,
+    verify_requests: Vector<SignRequest>,
+    verify_yields: LookupMap<u32, YieldId>,
 }
 
 impl Default for TestMpc {
@@ -48,6 +60,8 @@ impl Default for TestMpc {
             sign_requests: Vector::new(b"s"),
             yields: LookupMap::new(b"y"),
             fail_next: false,
+            verify_requests: Vector::new(b"v"),
+            verify_yields: LookupMap::new(b"w"),
         }
     }
 }
@@ -149,5 +163,57 @@ impl TestMpc {
     /// Every `sign` request received.
     pub fn sign_requests(&self) -> Vec<SignRequest> {
         self.sign_requests.iter().cloned().collect()
+    }
+
+    #[payable]
+    pub fn verify_foreign_transaction(&mut self, request: Value) {
+        if env::attached_deposit().as_yoctonear() < 1 {
+            env::panic_str("attach at least 1 yoctoNEAR");
+        }
+        if env::prepaid_gas() < MIN_SIGN_GAS {
+            env::panic_str("attach at least 15 Tgas");
+        }
+        let index = self.verify_requests.len();
+        self.verify_requests.push(SignRequest {
+            predecessor: env::predecessor_account_id(),
+            request: serde_json::to_string(&request).unwrap(),
+            deposit: U128(env::attached_deposit().as_yoctonear()),
+            answered: false,
+        });
+        let args = serde_json::json!({ "index": index }).to_string();
+        let (promise, yield_id) =
+            Promise::new_yield("on_verify_response", args, Gas::from_tgas(7), GasWeight(1));
+        self.verify_yields.insert(index, yield_id);
+        let _ = promise.as_return();
+    }
+
+    /// Answer a pending verification request with `response`.
+    pub fn respond_verify(&mut self, index: u32, response: Value) {
+        let yield_id = self.verify_yields.remove(&index).expect("no pending request");
+        yield_id
+            .resume(serde_json::to_vec(&response).unwrap())
+            .expect("yield already resumed or timed out");
+        if let Some(r) = self.verify_requests.get_mut(index) {
+            r.answered = true;
+        }
+    }
+
+    /// The verification yield callback: hands the answer back; a timeout fails the caller's
+    /// promise with the real contract's message.
+    #[private]
+    pub fn on_verify_response(&mut self, index: u32) {
+        #[allow(deprecated)]
+        match env::promise_result(0) {
+            PromiseResult::Successful(bytes) => env::value_return(&bytes),
+            PromiseResult::Failed => {
+                self.verify_yields.remove(&index);
+                env::panic_str("Request has timed out.")
+            }
+        }
+    }
+
+    /// Every `verify_foreign_transaction` request received.
+    pub fn verify_requests(&self) -> Vec<SignRequest> {
+        self.verify_requests.iter().cloned().collect()
     }
 }

@@ -1611,6 +1611,401 @@ async fn a_failed_payout_transfer_is_retried_to_the_same_winner_exactly_once() -
     Ok(())
 }
 
+// ---- pause verification (ticket #21) ----
+//
+// Seam C with the MPC stand-in's `verify_foreign_transaction`. The expected payload hash is
+// computed here from the spec's byte layout ("Verify a pause"), not by the contract's code.
+
+/// sha256(00 | chain byte | tx_id | 00000000 | 01 (Safe) | 00000000), as the spec lays it out.
+fn expected_payload_hash(chain_byte: u8, tx_hash: &str) -> String {
+    use sha2::Digest;
+    let mut bytes = vec![0u8, chain_byte];
+    bytes.extend(hex::decode(tx_hash.trim_start_matches("0x")).unwrap());
+    bytes.extend([0, 0, 0, 0, 1, 0, 0, 0, 0]);
+    hex::encode(sha2::Sha256::digest(&bytes))
+}
+
+/// The MPC network's answer to a verification request, in its own JSON.
+fn verified_answer(payload_hash: &str) -> Value {
+    json!({
+        "payload_hash": payload_hash,
+        "signature": {
+            "scheme": "Secp256k1",
+            "big_r": { "affine_point": format!("03{}", "ca".repeat(32)) },
+            "s": { "scalar": "03".repeat(32) },
+            "recovery_id": 0,
+        },
+    })
+}
+
+impl Sandbox {
+    async fn verify_requests(&self) -> anyhow::Result<Vec<Value>> {
+        Ok(self.test_mpc.view("verify_requests").await?.json()?)
+    }
+
+    async fn wait_for_verify_requests(&self, n: usize) -> anyhow::Result<Vec<Value>> {
+        for _ in 0..150 {
+            let r = self.verify_requests().await?;
+            if r.len() >= n {
+                return Ok(r);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        anyhow::bail!(
+            "only {} verification requests arrived",
+            self.verify_requests().await?.len()
+        )
+    }
+
+    async fn respond_verify(&self, index: usize, response: Value) -> anyhow::Result<()> {
+        self.test_mpc
+            .call("respond_verify")
+            .args_json(json!({ "index": index, "response": response }))
+            .transact()
+            .await?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// `by` asks for `chain`'s pause of `name` to be verified, with `extra` arguments merged
+    /// in, attaching `deposit`; without waiting for its receipts.
+    async fn verify_pause(
+        &self,
+        by: &Account,
+        name: &str,
+        chain: u64,
+        extra: Value,
+        deposit: NearToken,
+    ) -> anyhow::Result<Pending> {
+        let mut args = json!({
+            "id": { "protocol": self.protocol.id(), "name": name },
+            "chain_id": chain,
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            args[k] = v.clone();
+        }
+        Ok(by
+            .call(self.contract.id(), "verify_pause")
+            .args_json(args)
+            .deposit(deposit)
+            .gas(tgas(100))
+            .transact_async()
+            .await?)
+    }
+
+    /// The bounty's pause verifications, by chain ID.
+    async fn verifications(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<std::collections::BTreeMap<u64, Value>> {
+        let v = self
+            .view(
+                "pause_verifications",
+                json!({ "id": { "protocol": self.protocol.id(), "name": name } }),
+            )
+            .await?;
+        Ok(v.as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["chain_id"].as_u64().unwrap(), c.clone()))
+            .collect())
+    }
+
+    /// Wait until `chain`'s verification of `name` is no longer under way, and return it.
+    async fn wait_until_not_verifying(&self, name: &str, chain: u64) -> anyhow::Result<Value> {
+        for _ in 0..300 {
+            let v = self.verifications(name).await?[&chain].clone();
+            if v["verifying"] == false {
+                return Ok(v);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        anyhow::bail!("verification of chain {chain} never finished")
+    }
+
+    /// The stored signed pauses' hashes on `chain`, without `0x`.
+    async fn pause_hashes(&self, name: &str, chain: u64) -> anyhow::Result<Vec<String>> {
+        let b = self.bounty(name).await?;
+        Ok(b["signed_pauses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["chain_id"] == chain)
+            .map(|p| p["tx_hash"].as_str().unwrap().trim_start_matches("0x").to_owned())
+            .collect())
+    }
+}
+
+/// A paid bounty covering two contracts on Base Sepolia and one on Arbitrum Sepolia.
+async fn paid_two_chain_bounty() -> anyhow::Result<Sandbox> {
+    let s = Sandbox::start().await?;
+    let mut rules = valid_rules(&s).await?;
+    rules["covered_contracts"] = json!([
+        { "chain_id": 84532, "address": "0x00000000000000000000000000000000000000aa" },
+        { "chain_id": 84532, "address": "0x00000000000000000000000000000000000000cc" },
+        { "chain_id": 421614, "address": "0x00000000000000000000000000000000000000aa" },
+    ]);
+    s.post("vault", &rules).await?.into_result()?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+    s.pay_claim("vault").await?;
+    Ok(s)
+}
+
+/// R7.10, R7.11: once a PAYS bounty is paid (with no verification at all), anyone can ask
+/// for a chain's pause to be verified. The contract asks the MPC network about the hash of
+/// each pause it stored for that chain, at `Safe` finality, never a hash the caller passes,
+/// and pins the answer to the expected payload hash. Only when every one comes back with
+/// that hash is the chain's pause recorded as verified; the payout is untouched by it.
+#[tokio::test]
+async fn a_landed_pause_is_verified_from_the_hash_of_the_stored_signed_pause() -> anyhow::Result<()>
+{
+    let s = paid_two_chain_bounty().await?;
+    // R7.11: paid before any verification was requested.
+    assert_eq!(s.bounty("vault").await?["state"], "paid");
+    let v = s.verifications("vault").await?;
+    assert_eq!(v.keys().copied().collect::<Vec<_>>(), vec![84532, 421614]);
+    assert!(v.values().all(|c| c["verified"] == false), "{v:?}");
+
+    // Anyone asks; a hash in the arguments is not the contract's to take.
+    let junk = "11".repeat(32);
+    let call = s
+        .verify_pause(
+            &s.other,
+            "vault",
+            84532,
+            json!({ "tx_hash": junk }),
+            NearToken::from_yoctonear(0),
+        )
+        .await?;
+    let requests = s.wait_for_verify_requests(2).await?;
+    let mut asked = Vec::new();
+    for (i, r) in requests.iter().enumerate() {
+        assert_eq!(r["predecessor"], s.contract.id().as_str());
+        assert_eq!(r["deposit"], "1");
+        let req: Value = serde_json::from_str(r["request"].as_str().unwrap())?;
+        let tx_id = req["request"]["Base"]["tx_id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            req,
+            json!({
+                "request": { "Base": { "tx_id": tx_id, "extractors": [], "finality": "Safe" } },
+                "domain_id": 3,
+                "payload_version": 1,
+                "expected_payload_hash": expected_payload_hash(6, &tx_id),
+            })
+        );
+        asked.push(tx_id.clone());
+        s.respond_verify(i, verified_answer(&expected_payload_hash(6, &tx_id)))
+            .await?;
+    }
+    let mut stored = s.pause_hashes("vault", 84532).await?;
+    stored.sort();
+    asked.sort();
+    assert_eq!(asked, stored, "the stored pauses' hashes, never the caller's");
+    call.await?.into_result()?;
+    let v = s.wait_until_not_verifying("vault", 84532).await?;
+    assert_eq!(v["verified"], true, "{v}");
+    assert_eq!(s.verifications("vault").await?[&421614]["verified"], false);
+
+    // Arbitrum's request names its own chain.
+    let call = s
+        .verify_pause(
+            &s.protocol,
+            "vault",
+            421614,
+            json!({}),
+            NearToken::from_yoctonear(0),
+        )
+        .await?;
+    let requests = s.wait_for_verify_requests(3).await?;
+    let req: Value = serde_json::from_str(requests[2]["request"].as_str().unwrap())?;
+    let tx_id = s.pause_hashes("vault", 421614).await?.remove(0);
+    assert_eq!(req["request"]["Arbitrum"]["tx_id"], tx_id);
+    assert_eq!(req["request"]["Arbitrum"]["finality"], "Safe");
+    assert_eq!(req["expected_payload_hash"], expected_payload_hash(7, &tx_id));
+    s.respond_verify(2, verified_answer(&expected_payload_hash(7, &tx_id)))
+        .await?;
+    call.await?.into_result()?;
+    assert_eq!(
+        s.wait_until_not_verifying("vault", 421614).await?["verified"],
+        true
+    );
+
+    // R7.11: the payout is exactly as it was.
+    assert_eq!(s.bounty("vault").await?["state"], "paid");
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    Ok(())
+}
+
+/// R7.10: a pause the MPC network doesn't vouch for is never recorded as verified: a request
+/// that times out (a reverted, unknown or not-yet-safe transaction), an answer about another
+/// payload, a garbled answer, and a chain where only one of its two pauses comes back. The
+/// next request asks only about the pauses not yet verified; one request at a time per chain;
+/// nothing can be verified before pauses are signed, nor on a chain the network can't check.
+#[tokio::test]
+async fn a_failed_or_missing_transaction_is_never_recorded_as_verified() -> anyhow::Result<()> {
+    let none = NearToken::from_yoctonear(0);
+    let s = live_bounty("vault").await?;
+    let r = s
+        .verify_pause(&s.other, "vault", 84532, json!({}), none)
+        .await?
+        .await?;
+    assert!(failure_text(&r).contains("no signed pause"), "{r:?}");
+    drop(s);
+
+    let s = paid_two_chain_bounty().await?;
+    let r = s
+        .verify_pause(&s.other, "vault", 1, json!({}), none)
+        .await?
+        .await?;
+    assert!(failure_text(&r).contains("can't verify this chain"), "{r:?}");
+    let hashes = s.pause_hashes("vault", 84532).await?;
+
+    // Nobody answers: both requests time out. A second request meanwhile is refused.
+    let call = s
+        .verify_pause(&s.other, "vault", 84532, json!({}), none)
+        .await?;
+    s.wait_for_verify_requests(2).await?;
+    let r = s
+        .verify_pause(&s.other, "vault", 84532, json!({}), none)
+        .await?
+        .await?;
+    assert!(failure_text(&r).contains("already under way"), "{r:?}");
+    s.worker.fast_forward(250).await?;
+    call.await?.into_result()?;
+    let v = s.wait_until_not_verifying("vault", 84532).await?;
+    assert_eq!(v["verified"], false, "{v}");
+    assert_eq!(v["verified_pauses"], json!([]));
+    assert_eq!(v["attempts"], 1);
+
+    // One answer is about another payload, the other is garbage.
+    let call = s
+        .verify_pause(&s.other, "vault", 84532, json!({}), none)
+        .await?;
+    s.wait_for_verify_requests(4).await?;
+    let other_tx = "22".repeat(32);
+    s.respond_verify(2, verified_answer(&expected_payload_hash(6, &other_tx)))
+        .await?;
+    s.respond_verify(3, json!({ "payload_hash": 7 })).await?;
+    call.await?.into_result()?;
+    let v = s.wait_until_not_verifying("vault", 84532).await?;
+    assert_eq!(v["verified"], false, "{v}");
+    assert_eq!(v["verified_pauses"], json!([]));
+
+    // One of the two is verified, the other times out: the chain is not verified.
+    let call = s
+        .verify_pause(&s.other, "vault", 84532, json!({}), none)
+        .await?;
+    let requests = s.wait_for_verify_requests(6).await?;
+    let req: Value = serde_json::from_str(requests[4]["request"].as_str().unwrap())?;
+    let first = req["request"]["Base"]["tx_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    s.respond_verify(4, verified_answer(&expected_payload_hash(6, &first)))
+        .await?;
+    s.worker.fast_forward(250).await?;
+    call.await?.into_result()?;
+    let v = s.wait_until_not_verifying("vault", 84532).await?;
+    assert_eq!(v["verified"], false, "{v}");
+    assert_eq!(v["verified_pauses"], json!([format!("0x{first}")]));
+
+    // The next request (the fourth, paid by its caller) asks only about the other pause.
+    let fee = s.fee("verify_pause_fee_per_pause").await?;
+    let call = s
+        .verify_pause(&s.other, "vault", 84532, json!({}), fee)
+        .await?;
+    let requests = s.wait_for_verify_requests(7).await?;
+    let req: Value = serde_json::from_str(requests[6]["request"].as_str().unwrap())?;
+    let second = req["request"]["Base"]["tx_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(first, second);
+    assert!(hashes.contains(&first) && hashes.contains(&second));
+    s.respond_verify(6, verified_answer(&expected_payload_hash(6, &second)))
+        .await?;
+    call.await?.into_result()?;
+    let v = s.wait_until_not_verifying("vault", 84532).await?;
+    assert_eq!(v["verified"], true, "{v}");
+    let r = s
+        .verify_pause(&s.other, "vault", 84532, json!({}), fee)
+        .await?
+        .await?;
+    assert!(failure_text(&r).contains("already verified"), "{r:?}");
+    Ok(())
+}
+
+/// R7.10, R11.4: the posting fee pays for three verification attempts per chain, each chain
+/// counted on its own; a fourth is refused unless its caller attaches its cost, and then
+/// the contract keeps that cost and refunds the rest of the deposit.
+#[tokio::test]
+async fn three_attempts_per_chain_are_prepaid_and_later_ones_pay_their_own_cost(
+) -> anyhow::Result<()> {
+    let none = NearToken::from_yoctonear(0);
+    let s = paid_two_chain_bounty().await?;
+    let fees = s.fees().await?;
+    assert_eq!(fees["prepaid_verify_attempts"], 3);
+    let fee = s.fee("verify_pause_fee_per_pause").await?;
+
+    // Three prepaid attempts on Arbitrum, all timing out.
+    for n in 1..=3u64 {
+        assert_eq!(
+            s.verifications("vault").await?[&421614]["prepaid_attempts_left"],
+            3 - n + 1
+        );
+        let call = s
+            .verify_pause(&s.other, "vault", 421614, json!({}), none)
+            .await?;
+        s.wait_for_verify_requests(n as usize).await?;
+        s.worker.fast_forward(250).await?;
+        call.await?.into_result()?;
+        s.wait_until_not_verifying("vault", 421614).await?;
+    }
+    let v = s.verifications("vault").await?;
+    assert_eq!(v[&421614]["attempts"], 3);
+    assert_eq!(v[&421614]["prepaid_attempts_left"], 0);
+    // Base's prepaid attempts are its own.
+    assert_eq!(v[&84532]["prepaid_attempts_left"], 3);
+
+    // A fourth with no deposit, or less than its cost, is refused.
+    let r = s
+        .verify_pause(&s.other, "vault", 421614, json!({}), none)
+        .await?
+        .await?;
+    assert!(failure_text(&r).contains("prepaid attempts are used"), "{r:?}");
+    let short = NearToken::from_yoctonear(fee.as_yoctonear() - 1);
+    let r = s
+        .verify_pause(&s.other, "vault", 421614, json!({}), short)
+        .await?
+        .await?;
+    assert!(failure_text(&r).contains("prepaid attempts are used"), "{r:?}");
+    assert_eq!(s.verify_requests().await?.len(), 3);
+
+    // With more than its cost attached, the contract keeps the cost and refunds the rest.
+    let before = s.free_balance().await?;
+    let extra = NearToken::from_near(1);
+    let call = s
+        .verify_pause(&s.other, "vault", 421614, json!({}), fee.saturating_add(extra))
+        .await?;
+    let requests = s.wait_for_verify_requests(4).await?;
+    let req: Value = serde_json::from_str(requests[3]["request"].as_str().unwrap())?;
+    let tx_id = req["request"]["Arbitrum"]["tx_id"].as_str().unwrap().to_owned();
+    s.respond_verify(3, verified_answer(&expected_payload_hash(7, &tx_id)))
+        .await?;
+    call.await?.into_result()?;
+    let v = s.wait_until_not_verifying("vault", 421614).await?;
+    assert_eq!(v["verified"], true, "{v}");
+    assert_eq!(v["attempts"], 4);
+    let after = s.free_balance().await?;
+    assert!(after >= before, "the caller paid this attempt, not the contract");
+    assert!(
+        after < before + extra.as_yoctonear() / 2,
+        "the excess went back to the caller"
+    );
+    Ok(())
+}
+
 // ---- posting check (#17) ----
 
 impl Sandbox {

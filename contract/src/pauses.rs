@@ -427,7 +427,7 @@ pub(crate) fn hex(b: &[u8]) -> String {
 }
 
 /// Hex digits (either case, optional `0x`) into exactly `N` bytes.
-fn hex_array<const N: usize>(s: &str) -> Option<[u8; N]> {
+pub(crate) fn hex_array<const N: usize>(s: &str) -> Option<[u8; N]> {
     let s = s.strip_prefix("0x").unwrap_or(s);
     if s.len() != 2 * N {
         return None;

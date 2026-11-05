@@ -9,7 +9,8 @@
 //                 [--network testnet|mainnet] [--rpc <NEAR rpc>] [--proof-rpc <chain rpc>]
 //                 [--outlayer-api <url>] [--chain-rpc <chain id>=<url>[,...]]
 //                 [--timeout <secs>] [--interval <secs>]
-//                 [--no-wait] [--no-broadcast] [--dry-run] [--json]
+//                 [--no-wait] [--no-broadcast] [--no-verify] [--verify-wait <secs>]
+//                 [--dry-run] [--json]
 //
 // With a Foundry script (or `--job`, a job `bountee test` saved), claim runs `test`'s
 // collection and submits exactly the inputs it judged, re-running it if the saved block is
@@ -18,7 +19,10 @@
 // `config`), with the contract as the secret's owner (R5.1, R5.3, R5.4). Only the sealed text
 // is sent. The claim balance is topped up with what the claim draws if it's short. Then it
 // waits for the verdict; on PAYS it sees the pauses signed and the bounty paid, and
-// broadcasts every signed pause (R7.3). `--dry-run` seals and prints without filing.
+// broadcasts every signed pause, then has each chain's pause verified on NEAR once that chain
+// reports it safe, which takes minutes (R7.3; `--no-verify` skips it, `bountee verify-pause`
+// does it later; `--verify-wait`, default 3600 s, bounds the wait for the safe head).
+// `--dry-run` seals and prints without filing.
 //
 // From filing on, each stage of the claim is shown the moment the chains show it (D23:
 // sealed, checking, the verdict, and on PAYS pauses signed, paid, then each pause landed and
@@ -51,7 +55,7 @@ function required(args: string[], name: string): string {
 
 /** The first argument that is neither a flag nor a flag's value. */
 function positional(args: string[]): string | undefined {
-  const bare = new Set(["--json", "--watch", "--dry-run", "--no-wait", "--no-broadcast"]);
+  const bare = new Set(["--json", "--watch", "--dry-run", "--no-wait", "--no-broadcast", "--no-verify"]);
   for (let i = 0; i < args.length; i++) {
     if (bare.has(args[i]!)) continue;
     if (args[i]!.startsWith("--")) { i++; continue; }
@@ -86,6 +90,7 @@ export interface ClaimResult {
   paid?: boolean;
   sign_pauses_tx?: string;
   broadcast?: Settlement["broadcast"];
+  verification?: Settlement["verification"];
   /** Every stage the claim reached, as shown live (D23). */
   stages?: Stage[];
   /** On a paid claim: the payout, attestation and each pause's transaction (D24). */
@@ -181,6 +186,8 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
     txHash: out.tx_hash,
     whitehat,
     broadcast: !args.includes("--no-broadcast"),
+    verify: !args.includes("--no-broadcast") && !args.includes("--no-verify"),
+    verifyWaitSecs: flag(args, "verify-wait") === undefined ? undefined : Number(flag(args, "verify-wait")),
     rpcs: chainRpcs,
   }).catch((e) => {
     failed = true;
@@ -209,6 +216,7 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
     ...(s.paid !== undefined ? { paid: s.paid } : {}),
     ...(s.sign_pauses_tx ? { sign_pauses_tx: s.sign_pauses_tx } : {}),
     ...(s.broadcast ? { broadcast: s.broadcast } : {}),
+    ...(s.verification ? { verification: s.verification } : {}),
     stages: last.stages,
     ...(last.receipt ? { receipt: last.receipt } : {}),
   };
@@ -223,6 +231,7 @@ export function formatClaimResult(r: ClaimResult): string {
   if (r.bounty_state) lines.push(`bounty: ${r.bounty_state}${r.paid ? " (paid to you)" : ""}`);
   if (r.sign_pauses_tx) lines.push(`pauses signed by retry: ${r.sign_pauses_tx}`);
   for (const p of r.broadcast?.pauses ?? []) lines.push(`pause on ${p.chain_id} ${p.contract}: ${p.sent} ${p.tx_hash}${p.receipt ? ` (${p.receipt.status})` : ""}`);
+  for (const c of r.verification?.chains ?? []) lines.push(`pause on ${c.chain_id}: ${c.verified ? "verified on NEAR" : `not verified (${c.error ?? "unknown"})`}`);
   if (r.receipt) lines.push(formatReceipt(r.receipt));
   return lines.join("\n");
 }
