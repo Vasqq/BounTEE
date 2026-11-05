@@ -49,9 +49,10 @@ jobs:
           rm cargo-near.tar.gz
           cargo near --version
 
-      # Seam T drives forge, anvil and cast as a Whitehat's machine does.
+      # Seam T drives forge, anvil and cast as a Whitehat's machine does; seam C checks the
+      # contract's pause transactions with cast, an EVM decoder independent of its own.
       - name: Foundry
-        if: contains(fromJSON('["e","t"]'), matrix.suite)
+        if: contains(fromJSON('["c","e","t"]'), matrix.suite)
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.0.0
