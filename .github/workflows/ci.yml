@@ -33,6 +33,22 @@ jobs:
         with:
           version: "v50.0.1"
 
+      # Seam C builds the contract with `cargo near` (near-workspaces' compile_project), at the
+      # version contract/rust-toolchain.toml pins. The release tarball is checked against a
+      # hash pinned here, not one fetched from the same release.
+      - name: cargo-near
+        if: matrix.suite == 'c'
+        env:
+          CARGO_NEAR_VERSION: "0.20.3"
+          CARGO_NEAR_SHA256: "1777e0595db7ed81c926cd68ce262580b65efa691195349424193cb350774dcb"
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSLo cargo-near.tar.gz \
+            "https://github.com/near/cargo-near/releases/download/cargo-near-v${CARGO_NEAR_VERSION}/cargo-near-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${CARGO_NEAR_SHA256}  cargo-near.tar.gz" | sha256sum -c -
+          tar xzf cargo-near.tar.gz --strip-components=1 -C "$HOME/.cargo/bin" cargo-near-x86_64-unknown-linux-gnu/cargo-near
+          rm cargo-near.tar.gz
+          cargo near --version
+
       # Seam T drives forge, anvil and cast as a Whitehat's machine does.
       - name: Foundry
         if: contains(fromJSON('["e","t"]'), matrix.suite)
