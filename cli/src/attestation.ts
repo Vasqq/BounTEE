@@ -5,7 +5,10 @@
 //
 // - the quote (TDX, version 4, ECDSA P-256) is signed by its attestation key; that key is
 //   bound into the Quoting Enclave's report, which the PCK certificate's key signs; the PCK
-//   certificate chains to Intel's SGX Root CA, pinned here by its SHA-256 fingerprint;
+//   certificate chains to Intel's SGX Root CA, pinned here by its SHA-256 fingerprint; that
+//   report is Intel's TDX Quoting Enclave's (MRSIGNER, ISVPRODID and attributes pinned from
+//   Intel's PCS);
+// - the TD isn't a debug TD (TD_ATTRIBUTES.DEBUG clear);
 // - the quote's report_data is SHA-256 of the task's fields in OutLayer's order
 //   (worker/src/tdx_attestation.rs: task_type, task_id LE, repo, commit, build_target,
 //   wasm_hash, input_hash, output_hash, block_height LE, caller, project_id, secrets_ref,
@@ -19,6 +22,20 @@ import { createHash, createPublicKey, verify, X509Certificate } from "node:crypt
 
 /** SHA-256 fingerprint of Intel's SGX Root CA certificate, the root of every PCK chain. */
 export const INTEL_SGX_ROOT_CA_SHA256 = "44:A0:19:6B:2B:99:F8:89:B8:E1:49:E9:5B:80:7A:35:0E:74:24:96:43:99:E8:85:A7:CB:B8:CC:FA:B6:74:D3";
+
+/**
+ * Intel's TDX Quoting Enclave, the only enclave whose report may vouch for a TDX quote's
+ * attestation key: its signer (MRSIGNER) and product ID (ISVPRODID), and the attributes it
+ * must have under Intel's mask (no debug enclave). From Intel's PCS, "TD_QE" identity:
+ * https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity (read Nov 5, 2026).
+ * The SGX QE has the same signer but product ID 1.
+ */
+export const INTEL_TDX_QE = {
+  mrsigner: "dc9e2a7c6f948f17474e34a7fc43ed030f7c1563f1babddf6340c82e0e54a8c5",
+  isvprodid: 2,
+  attributes: "11000000000000000000000000000000",
+  attributesMask: "fbffffffffffffff0000000000000000",
+} as const;
 
 /** OutLayer's register contract, which approves worker measurements. */
 export const OUTLAYER_REGISTER = { testnet: "worker.outlayer.testnet", mainnet: "worker.outlayer.near" } as const;
@@ -108,6 +125,9 @@ export function checkQuote(a: AttestationRecord): QuoteCheck {
   const body = q.subarray(HEADER, HEADER + BODY);
   const field = (offset: number) => body.subarray(offset, offset + 48).toString("hex");
   const measurements = { mrtd: field(136), rtmr0: field(328), rtmr1: field(376), rtmr2: field(424), rtmr3: field(472) };
+  // TD_ATTRIBUTES (TD report body, offset 120), bit 0: a debug TD's memory and state are open
+  // to the host, so nothing it reports can be trusted.
+  if ((body.readUInt8(120) & 1) !== 0) problems.push("the TD is in debug mode (TD_ATTRIBUTES.DEBUG is set)");
   try {
     const sigData = q.subarray(HEADER + BODY + 4, HEADER + BODY + 4 + q.readUInt32LE(HEADER + BODY));
     const signature = sigData.subarray(0, 64);
@@ -133,6 +153,16 @@ export function checkQuote(a: AttestationRecord): QuoteCheck {
     }
     if (!verify("sha256", qeReport, { key: pck.publicKey, dsaEncoding: "ieee-p1363" }, qeSignature)) {
       problems.push("the Quoting Enclave report isn't signed by the PCK certificate");
+    }
+    // The report is the TDX QE's (SGX report body: ATTRIBUTES at 48, MRSIGNER at 128,
+    // ISVPRODID at 256), not some other enclave on the platform.
+    const attributes = qeReport.subarray(48, 64);
+    const mask = Buffer.from(INTEL_TDX_QE.attributesMask, "hex");
+    const masked = Buffer.from(attributes.map((b, i) => b & mask[i]!));
+    const mrsigner = qeReport.subarray(128, 160).toString("hex");
+    const isvprodid = qeReport.readUInt16LE(256);
+    if (mrsigner !== INTEL_TDX_QE.mrsigner || isvprodid !== INTEL_TDX_QE.isvprodid || masked.toString("hex") !== INTEL_TDX_QE.attributes) {
+      problems.push(`the Quoting Enclave isn't Intel's TDX QE (MRSIGNER ${mrsigner}, ISVPRODID ${isvprodid}, attributes ${attributes.toString("hex")})`);
     }
     const bound = createHash("sha256").update(attestationKey).update(authData).digest();
     const qeData = qeReport.subarray(320, 384);

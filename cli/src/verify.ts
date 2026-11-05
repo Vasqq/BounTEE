@@ -255,6 +255,48 @@ async function findTxs(o: VerifyOptions, claim: ClaimView, claimId: number, want
   return { judged, paid };
 }
 
+/** A block's height, from NEAR RPC (the archival RPC once an ordinary one has dropped it), or null. */
+async function blockHeight(near: Near, hash: string): Promise<number | null> {
+  for (const rpc of near.withArchive()) {
+    const b = await rpc.rpc<{ header: { height: number } }>("block", { block_id: hash }).catch(() => null);
+    if (b) return b.header.height;
+  }
+  return null;
+}
+
+/**
+ * Whether OutLayer's `input_hash` is SHA-256 of the claim's job input, as the bounty contract
+ * builds it (contract/src/claims.rs `judge_input`) from the claim's record: the bounty's
+ * rules, the claim's bounty, Whitehat, block, header, proofs and submission time. The
+ * contract keeps only the proofs' sha256, so they are read from the request's own arguments
+ * on NEAR and checked against it.
+ */
+function inputProblems(a: AttestationRecord, request: Tx["receipts"][number], bounty: BountyView, claim: ClaimView & { id: number }): string[] {
+  let proofs: unknown;
+  try {
+    const call = request.calls.find((c) => c.method_name === "request_execution");
+    const args = JSON.parse(Buffer.from(call?.args ?? "", "base64").toString("utf8")) as { input_data: string };
+    proofs = (JSON.parse(args.input_data) as { judge_claim?: { proofs_json?: unknown } }).judge_claim?.proofs_json;
+  } catch {
+    proofs = undefined;
+  }
+  if (typeof proofs !== "string" || `0x${sha256(proofs)}` !== claim.proofs_sha256.toLowerCase()) {
+    return [`the job's input carries other proofs than claim ${claim.id}'s`];
+  }
+  const input = JSON.stringify({
+    judge_claim: {
+      rules: bounty.rules,
+      bounty: claim.bounty,
+      whitehat: claim.whitehat,
+      block: claim.block,
+      header: claim.header,
+      proofs_json: proofs,
+      submitted_at_ns: claim.submitted_at_ns,
+    },
+  });
+  return bare(a.input_hash) === sha256(input) ? [] : [`its input isn't claim ${claim.id}'s job input (sha256 ${sha256(input)})`];
+}
+
 async function attestationCheck(o: VerifyOptions, bounty: BountyView, config: ConfigView, claim: ClaimView & { id: number }, tx: Tx | null): Promise<Check> {
   if (!tx) return { check: "attestation", status: "fail", detail: "no transaction NEAR RPC knows holds the winning claim's verdict" };
   const url = `${o.outlayerApi ?? KEYSTORE_API[o.network]}/attestations/by-tx/${tx.hash}`;
@@ -297,6 +339,20 @@ async function attestationCheck(o: VerifyOptions, bounty: BountyView, config: Co
   else {
     const by = request.receipt.predecessor_id !== o.contract ? request.receipt.predecessor_id : request.data.predecessor_id;
     if (by !== o.contract) problems.push(`job ${a.request_id} was requested by ${by}, not the bounty contract`);
+    // OutLayer's worker names the block the request's event was logged in as the job's.
+    const height = await blockHeight(o.near, request.receipt.block_hash);
+    if (a.block_height !== height) {
+      problems.push(`it names NEAR block ${a.block_height}, but job ${a.request_id} was requested in block ${height ?? `${request.receipt.block_hash} (unknown to NEAR RPC)`}`);
+    }
+    problems.push(...inputProblems(a, request.receipt, bounty, claim));
+  }
+  // OutLayer names as the job's caller the transaction's signer (the request's `sender_id`),
+  // or for a meta transaction the account that made the request (worker/src/event_monitor.rs).
+  // It doesn't attest the request's predecessor: that the bounty contract asked for the job
+  // is the request receipt's predecessor on NEAR, above.
+  const caller = tx.delegated ? o.contract : tx.signer_id;
+  if (a.caller_account_id !== caller) {
+    problems.push(`it names caller ${a.caller_account_id}, not the ${tx.delegated ? "meta transaction's requester" : "transaction's signer"} ${caller}`);
   }
   const evidence = { url, task_id: a.task_id, request_id: a.request_id, transaction_hash: tx.hash, wasm_hash: a.wasm_hash, measurements: quote.measurements };
   return problems.length === 0

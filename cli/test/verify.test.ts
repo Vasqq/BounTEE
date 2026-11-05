@@ -381,3 +381,53 @@ test("R15.1: a lying explorer can't make the payout or the attestation pass: NEA
   expect(statuses(forged)).toMatchObject({ attestation: "fail", payout: "fail" });
   expect(sent).toEqual([]);
 }, 300_000);
+
+test("R15.1: the attestation's TD is not in debug mode, its QE is Intel's, and it names the claim's caller, block and input", async () => {
+  const bounty = `${DAY3_BOUNTY.protocol}/${DAY3_BOUNTY.name}`;
+  const hash = tx7.transaction.hash;
+  // Offsets in the quote: a 48-byte header, the 584-byte TD report, the signature data's
+  // length (4), then the signature (64), attestation key (64), certification header (6) and
+  // the Quoting Enclave's 384-byte SGX report.
+  const TD_ATTRIBUTES = 48 + 120;
+  const QE_REPORT = 48 + 584 + 4 + 128 + 6;
+  const tamperQuote = (change: (q: Buffer) => void) => (a: any) => {
+    const q = Buffer.from(a.tdx_quote, "base64");
+    change(q);
+    return { ...a, tdx_quote: q.toString("base64") };
+  };
+  const failsWith = async (why: RegExp) => {
+    const r = (await verify(bounty, DAY3)).result;
+    expect(check(r, "attestation").status).toBe("fail");
+    expect(check(r, "attestation").detail).toMatch(why);
+  };
+
+  // The real quote passes every one of these checks (the first test); each tampered one fails.
+  const quoteCases: [(a: any) => any, RegExp][] = [
+    [tamperQuote((q) => q.writeUInt8(q.readUInt8(TD_ATTRIBUTES) | 1, TD_ATTRIBUTES)), /debug mode/],
+    [tamperQuote((q) => q.writeUInt8(q.readUInt8(QE_REPORT + 128) ^ 0xff, QE_REPORT + 128)), /Quoting Enclave isn't Intel's TDX QE/],
+    [tamperQuote((q) => q.writeUInt16LE(1, QE_REPORT + 256)), /Quoting Enclave isn't Intel's TDX QE/],
+    [(a) => ({ ...a, caller_account_id: DAY3 }), /report_data differs.*caller day3b\.bountee-spike2\.testnet, not the transaction's signer bts1-white-1104\.testnet/],
+    [(a) => ({ ...a, block_height: a.block_height + 1 }), /report_data differs.*NEAR block 276289449, but job 9405 was requested in block 276289448/],
+    [(a) => ({ ...a, input_hash: "cd".repeat(32) }), /report_data differs.*input isn't claim 7's job input/],
+  ];
+  for (const [tamper, why] of quoteCases) {
+    attestations[hash] = tamper(attestation7);
+    await failsWith(why);
+  }
+  attestations[hash] = attestation7;
+
+  // An untampered attestation, but NEAR says the request ran in another block.
+  const [block] = Object.keys(rpc7.blocks);
+  blocks[block!] = { height: 276289000 };
+  await failsWith(/NEAR block 276289448, but job 9405 was requested in block 276289000/);
+  blocks[block!] = rpc7.blocks[block!];
+
+  // An untampered attestation, but the claim's recorded data isn't the job's input.
+  const claim = day3.claim;
+  day3.claim = { ...claim, submitted_at_ns: "1793850608584544985" };
+  await failsWith(/input isn't claim 7's job input/);
+  day3.claim = { ...claim, proofs_sha256: `0x${"ee".repeat(32)}` };
+  await failsWith(/the job's input carries other proofs than claim 7's/);
+  day3.claim = claim;
+  expect(sent).toEqual([]);
+}, 300_000);
