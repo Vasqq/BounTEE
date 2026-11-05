@@ -4,12 +4,15 @@
 //
 // Seams (written before the first test; also in the ticket's findings): T here drives the
 // tool against a local stand-in for NEAR's RPC that serves the bounty contract's `bounty`,
-// `claim` and `published_exploit` views. The publication it serves is the real judge's
+// `claim` and `published_exploit` views, and the blocks and chunks holding each claim's
+// `submit_claim` transaction (code review of #23: the contract keeps only the proofs'
+// sha256 and the claim's submission block). The publication it serves is the real judge's
 // output: the test runs the compiled judge's `publish` action under wasmtime, as OutLayer
 // runs it for the bounty contract, on a bundle the tool's own sealing code made, beside the
 // judge's committed fixture block, header and proofs. Catches D7.1 (a published exploit
-// re-runs, from its own header and proofs under the compiled judge, to the enclave's
-// verdict; one whose proofs aren't the claim's, or whose verdict differs, is named as such;
+// re-runs, from its own header and the proofs fetched from its claim's transaction under the
+// compiled judge, to the enclave's verdict; a transaction whose proofs aren't the claim's is
+// passed over, none found is named, and a verdict that differs is named as such;
 // before publication it is "not yet published"), D7 at the tool (`publish` is refused
 // before the delay, and with proofs other than the claim's, before any transaction), and
 // R14.5 (JSON). Misses: the real contract (seam C proves the gate and what is kept) and
@@ -70,44 +73,83 @@ function publish(name: string, claimId: number): string {
 // ---- A stand-in for NEAR's RPC: the bounty contract's views ------------------------------
 
 const views: Record<string, { bounty: unknown; published_exploit: unknown }> = {};
+/** The claims, by ID, and the transactions in each block's one chunk, by height. */
+const claims: Record<number, unknown> = {};
+const blocks: Record<number, unknown[]> = {};
+/** A `submit_claim` transaction to the contract carrying `proofs`, as a chunk lists it. */
+const submitClaimTx = (proofs: string, receiver = CONTRACT) => ({
+  hash: `tx-${sha256(proofs).slice(2, 10)}`,
+  signer_id: WHITEHAT,
+  receiver_id: receiver,
+  actions: [
+    { FunctionCall: { method_name: "submit_claim", args: Buffer.from(JSON.stringify({ bounty: {}, proofs, sealed_exploit: "AA==" })).toString("base64"), gas: 300e12, deposit: "0" } },
+  ],
+});
+/** Claim `id`, filed with `proofs`, whose submission ran in block `at`. */
+const claimAt = (id: number, at: number, proofs: string) => {
+  claims[id] = { whitehat: WHITEHAT, proofs_sha256: sha256(proofs), submitted_at_block: String(at), state: "judged" };
+};
 const bountyView = (name: string, s: string) => ({ id: { protocol: PROTOCOL, name }, rules, state: s, winning_claim: 3 });
 const now = BigInt(Date.now()) * 1_000_000n;
-const publication = (o: { state: string; from?: bigint; proofs?: string | null; published?: string | null; verdict?: unknown }) => ({
-  claim_id: 3,
-  state: o.state,
-  publishable_from_ns: String(o.from ?? now - DAY_NS),
-  block: state.block,
-  header: state.header,
-  proofs_sha256: sha256(proofsText),
-  proofs: o.proofs === undefined ? proofsText : o.proofs,
-  verdict: o.verdict ?? PAYS,
-  published: o.published ?? null,
-});
+const publication = (o: { state: string; claim?: number; from?: bigint; published?: string | null; verdict?: unknown }) => {
+  const claim = claims[o.claim ?? 3] as { proofs_sha256: string; submitted_at_block: string };
+  return {
+    claim_id: o.claim ?? 3,
+    state: o.state,
+    publishable_from_ns: String(o.from ?? now - DAY_NS),
+    block: state.block,
+    header: state.header,
+    proofs_sha256: claim.proofs_sha256,
+    submitted_at_block: claim.submitted_at_block,
+    verdict: o.verdict ?? PAYS,
+    published: o.published ?? null,
+  };
+};
 
 let rpc: string;
 const server = createServer((req, res) => {
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
-    const { id, params } = JSON.parse(body);
+    const { id, method, params } = JSON.parse(body);
+    const reply = (r: object) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ jsonrpc: "2.0", id, ...r }));
+    };
+    if (method === "block") {
+      const height = params.block_id as number;
+      // A height with no block, as NEAR answers a skipped one.
+      if (height === 999) return reply({ error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" } } });
+      return reply({ result: { header: { height }, chunks: [{ chunk_hash: `chunk-${height}`, height_included: height }] } });
+    }
+    if (method === "chunk") {
+      const height = Number(String(params.chunk_id).slice("chunk-".length));
+      return reply({ result: { transactions: blocks[height] ?? [] } });
+    }
     const args = JSON.parse(Buffer.from(params.args_base64, "base64").toString("utf8"));
-    const view = views[args.id.name]?.[params.method_name as "bounty" | "published_exploit"] ?? null;
-    const result = [...Buffer.from(JSON.stringify(view))];
-    res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ jsonrpc: "2.0", id, result: { result, logs: [] } }));
+    const view =
+      params.method_name === "claim" ? (claims[args.claim_id] ?? null) : (views[args.id.name]?.[params.method_name as "bounty" | "published_exploit"] ?? null);
+    reply({ result: { result: [...Buffer.from(JSON.stringify(view))], logs: [] } });
   });
 });
 
 beforeAll(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   rpc = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const otherProofs = JSON.stringify(state.proofs.slice(1));
+  // Claim 3 ran in block 1000; its transaction sits three blocks before it, behind a skipped
+  // height and a block holding a call with other proofs and one to another contract.
+  claimAt(3, 1000, proofsText);
+  blocks[998] = [submitClaimTx(otherProofs), submitClaimTx(proofsText, "other-contract.testnet")];
+  blocks[997] = [submitClaimTx(proofsText)];
   const published = publish("vault", 3);
   views.vault = { bounty: bountyView("vault", "paid"), published_exploit: publication({ state: "published", published }) };
-  // Published, but its proofs aren't the ones the claim was filed with.
-  const otherProofs = JSON.stringify(state.proofs.slice(1));
+  // Published, but no transaction near its claim's block carries the claim's proofs.
+  claimAt(4, 2000, proofsText);
+  blocks[1999] = [submitClaimTx(otherProofs)];
   views["vault-tampered"] = {
-    bounty: bountyView("vault-tampered", "paid"),
-    published_exploit: publication({ state: "published", published: publish("vault-tampered", 3), proofs: otherProofs }),
+    bounty: { ...bountyView("vault-tampered", "paid"), winning_claim: 4 },
+    published_exploit: publication({ state: "published", claim: 4, published: publish("vault-tampered", 4) }),
   };
   // Published, but the verdict on record isn't the one the exploit re-runs to.
   views["vault-zero"] = {
@@ -117,7 +159,7 @@ beforeAll(async () => {
   // Paid, but the disclosure delay hasn't passed.
   views["vault-delayed"] = {
     bounty: bountyView("vault-delayed", "paid"),
-    published_exploit: publication({ state: "delayed", from: now + DAY_NS, proofs: null }),
+    published_exploit: publication({ state: "delayed", from: now + DAY_NS }),
   };
   views["vault-live"] = { bounty: bountyView("vault-live", "live"), published_exploit: null };
 }, 600_000);
@@ -134,7 +176,7 @@ function bountee(args: string[]): Promise<{ code: number | null; stdout: string;
   });
 }
 
-test("D7.1, R14.5: a published exploit re-runs from its own header and proofs to the enclave's verdict", async () => {
+test("D7.1, R14.5: a published exploit re-runs from its own header and its claim's proofs to the enclave's verdict", async () => {
   const out = join(dir, "rerun-job.json");
   const r = await bountee(["rerun", `${PROTOCOL}/vault`, "--out", out]);
   expect(r.stderr).toBe("");
@@ -158,7 +200,7 @@ test("D7.1, R14.5: a published exploit re-runs from its own header and proofs to
   expect(JSON.parse(again.stdout).verdict).toEqual(PAYS);
 }, 300_000);
 
-test("D7.1: a verdict that differs from the enclave's, or proofs that aren't the claim's, are named", async () => {
+test("D7.1: a verdict that differs from the enclave's, or a claim whose proofs can't be found, are named", async () => {
   const zero = await bountee(["rerun", `${PROTOCOL}/vault-zero`]);
   expect(zero.code).toBe(1);
   expect(JSON.parse(zero.stdout)).toMatchObject({ verdict: PAYS, enclave_verdict: { outcome: "ZERO" }, same_verdict: false });
@@ -166,7 +208,7 @@ test("D7.1: a verdict that differs from the enclave's, or proofs that aren't the
   const tampered = await bountee(["rerun", `${PROTOCOL}/vault-tampered`]);
   expect(tampered.code).toBe(1);
   expect(tampered.stdout).toBe("");
-  expect(JSON.parse(tampered.stderr).error).toMatch(/proofs .*aren't the ones the claim was filed with/);
+  expect(JSON.parse(tampered.stderr).error).toMatch(/couldn't find claim 4's proofs in a submit_claim transaction at NEAR blocks 1990-2000/);
 }, 300_000);
 
 test("D7: before publication there is nothing to re-run, and publish is refused before the delay", async () => {
@@ -187,7 +229,7 @@ test("D7: before publication there is nothing to re-run, and publish is refused 
 }, 120_000);
 
 test("D7.1: publish takes only the proofs the winning claim was filed with, checked before any transaction", async () => {
-  views["vault-ready"] = { bounty: bountyView("vault-ready", "paid"), published_exploit: publication({ state: "publishable", proofs: null }) };
+  views["vault-ready"] = { bounty: bountyView("vault-ready", "paid"), published_exploit: publication({ state: "publishable" }) };
   const wrong = join(dir, "wrong-proofs.json");
   writeFileSync(wrong, JSON.stringify(state.proofs.slice(1)));
   const r = await bountee(["publish", `${PROTOCOL}/vault-ready`, "--as", "anyone.testnet", "--proofs", wrong]);

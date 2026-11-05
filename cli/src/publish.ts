@@ -2,15 +2,20 @@
 // exploit is published once its disclosure delay has passed since the payout, and anyone
 // re-runs it to the verdict the enclave gave, trusting nobody (D7, D7.1, ADR-0008).
 //
-// - `publish` asks the bounty contract to publish (anyone may, once the delay has passed).
-//   It passes the winning claim's proofs, exactly as its `submit_claim` carried them (the
-//   contract kept only their sha256): from a saved job (`bountee test --out`, or the
-//   claim's own job), or the proofs array as a JSON file. It checks the delay and the proofs
-//   against the contract's views before sending anything, and attaches the proofs' storage.
+// - Both need the winning claim's proofs, exactly as its `submit_claim` carried them: the
+//   contract keeps only their sha256 and the NEAR block the submission ran in. They are
+//   fetched from that transaction's arguments (the block and the few before it, each block's
+//   chunks, the transaction to the contract calling `submit_claim` whose `proofs` hash to the
+//   claim's sha256, so no RPC can substitute others). An ordinary RPC keeps about five epochs
+//   of blocks; past that, the network's archival RPC is asked. `--proofs` (a saved job from
+//   `bountee test --out`, or the proofs array as a JSON file) overrides the fetch.
+// - `publish` asks the bounty contract to publish (anyone may, once the delay has passed),
+//   passing those proofs. It checks the delay and the proofs against the contract's views
+//   before sending anything; the bounty's posting fee pays for the job (R11.4).
 // - `rerun` reads the publication (`published_exploit` view): the exploit the judge wrote in
-//   the clear, beside the claim's block, header and proofs. It checks the proofs are the ones
-//   the claim was filed with, replays the exploit under the compiled judge from that header
-//   and those proofs with no RPC (R2.9), and compares the verdict with the enclave's.
+//   the clear, beside the claim's block and header. It replays the exploit under the compiled
+//   judge from that header and the claim's proofs with no RPC (R2.9), and compares the
+//   verdict with the enclave's.
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
@@ -27,7 +32,7 @@ import {
   type Verdict,
 } from "@bountee/formats";
 import { actions } from "near-api-js";
-import { events, type Near, tgas } from "./near.ts";
+import { events, Near, NEAR_RPC, tgas } from "./near.ts";
 import { runJudge } from "./proofs.ts";
 import { judgeWasm } from "./test.ts";
 
@@ -39,7 +44,8 @@ interface PublicationView {
   block: unknown;
   header: string;
   proofs_sha256: string;
-  proofs: string | null;
+  /** The NEAR block the claim's submission ran in. */
+  submitted_at_block: string;
   verdict: unknown;
   published: string | null;
 }
@@ -54,6 +60,72 @@ async function publicationOf(near: Near, contract: string, bounty: BountyId): Pr
   if (!view) throw new Error(`${contract} has no bounty ${label(bounty)}`);
   const pub = await near.view<PublicationView | null>(contract, "published_exploit", { id: bounty });
   return { rules: view.rules, pub: view.state === "paid" ? pub : null };
+}
+
+/** Archival RPCs, for blocks an ordinary RPC no longer keeps (FastNEAR, checked Nov 5). */
+const ARCHIVAL_RPC = { testnet: "https://archival-rpc.testnet.fastnear.com", mainnet: "https://archival-rpc.mainnet.fastnear.com" } as const;
+/** How many blocks before the submission's block its transaction may sit in. */
+const TX_BLOCKS_BEFORE = 10;
+
+interface RpcTx {
+  hash: string;
+  receiver_id: string;
+  actions: { FunctionCall?: { method_name: string; args: string }; Delegate?: { delegate_action: { receiver_id: string; actions: RpcTx["actions"] } } }[];
+}
+
+/** The `submit_claim` calls to `contract` in a transaction, a meta transaction's included. */
+function submitClaimArgs(tx: RpcTx, contract: string): string[] {
+  const calls = (receiver: string, actions: RpcTx["actions"]): string[] =>
+    actions.flatMap((a) => {
+      if (a.Delegate) return calls(a.Delegate.delegate_action.receiver_id, a.Delegate.delegate_action.actions);
+      return receiver === contract && a.FunctionCall?.method_name === "submit_claim" ? [a.FunctionCall.args] : [];
+    });
+  return calls(tx.receiver_id, tx.actions);
+}
+
+/**
+ * The winning claim's proofs, from the arguments of its `submit_claim` transaction: the one
+ * whose `proofs` hash to the claim's recorded sha256, in the block its submission ran in or
+ * one of the few before. With the default RPC, a block it no longer keeps is read from the
+ * network's archival RPC; with `--near-rpc`, that RPC must keep the block.
+ */
+export async function claimProofs(near: Near, contract: string, claimId: number): Promise<string> {
+  const claim = await near.view<{ proofs_sha256: string; submitted_at_block: string } | null>(contract, "claim", { claim_id: claimId });
+  if (!claim) throw new Error(`${contract} has no claim ${claimId}`);
+  const at = Number(claim.submitted_at_block);
+  const rpcs = near.url === NEAR_RPC[near.network] ? [near, new Near(near.network, ARCHIVAL_RPC[near.network])] : [near];
+  const block = async (height: number): Promise<{ rpc: Near; chunks: string[] } | null> => {
+    for (const rpc of rpcs) {
+      try {
+        const b = await rpc.rpc<{ chunks: { chunk_hash: string; height_included: number }[] }>("block", { block_id: height });
+        return { rpc, chunks: b.chunks.filter((c) => c.height_included === height).map((c) => c.chunk_hash) };
+      } catch {
+        // not kept by this RPC, or no block at this height
+      }
+    }
+    return null;
+  };
+  for (let height = at; height >= at - TX_BLOCKS_BEFORE; height--) {
+    const b = await block(height);
+    for (const chunk of b?.chunks ?? []) {
+      const { transactions } = await b!.rpc.rpc<{ transactions: RpcTx[] }>("chunk", { chunk_id: chunk });
+      for (const tx of transactions) {
+        for (const args of submitClaimArgs(tx, contract)) {
+          let proofs: unknown;
+          try {
+            proofs = JSON.parse(Buffer.from(args, "base64").toString("utf8")).proofs;
+          } catch {
+            continue;
+          }
+          if (typeof proofs === "string" && sha256(proofs) === claim.proofs_sha256) return proofs;
+        }
+      }
+    }
+  }
+  throw new Error(
+    `couldn't find claim ${claimId}'s proofs in a submit_claim transaction at NEAR blocks ${at - TX_BLOCKS_BEFORE}-${at}: ` +
+      "pass --proofs, or a --near-rpc that keeps those blocks (an archival RPC)",
+  );
 }
 
 /** The winning claim's proofs as its `submit_claim` carried them: the array as JSON text. */
@@ -73,7 +145,7 @@ export interface PublishResult {
 }
 
 /** Ask the contract to publish the bounty's winning exploit, as `account`, and wait for it. */
-export async function publishExploit(o: { near: Near; contract: string; bounty: BountyId; as: string; proofs: string }): Promise<PublishResult> {
+export async function publishExploit(o: { near: Near; contract: string; bounty: BountyId; as: string; proofs?: string }): Promise<PublishResult> {
   const { pub } = await publicationOf(o.near, o.contract, o.bounty);
   if (!pub) throw new Error(`${label(o.bounty)} has not been paid, so it has no winning exploit to publish`);
   if (pub.state === "published") throw new Error(`${label(o.bounty)}'s exploit is already published: bountee rerun ${label(o.bounty)}`);
@@ -81,15 +153,14 @@ export async function publishExploit(o: { near: Near; contract: string; bounty: 
   if (pub.state === "delayed") {
     throw new Error(`${label(o.bounty)}'s disclosure delay hasn't passed: anyone may publish it from ${when(pub.publishable_from_ns)}`);
   }
-  const proofs = proofsFrom(o.proofs);
+  const proofs = o.proofs ? proofsFrom(o.proofs) : await claimProofs(o.near, o.contract, pub.claim_id);
   if (sha256(proofs) !== pub.proofs_sha256) {
     throw new Error(`these aren't the proofs the winning claim was filed with (sha256 ${sha256(proofs)}, the claim's ${pub.proofs_sha256})`);
   }
-  const fees = await o.near.view<{ publish_hold_per_proof_byte: string }>(o.contract, "fees");
-  const deposit = BigInt(fees.publish_hold_per_proof_byte) * BigInt(Buffer.byteLength(proofs));
+  // The bounty's posting fee pays for the job and the record (R11.4): nothing is attached.
   const r = await o.near.account(o.as).signAndSendTransaction({
     receiverId: o.contract,
-    actions: [actions.functionCall("publish_exploit", { id: o.bounty, proofs }, tgas(150), deposit)],
+    actions: [actions.functionCall("publish_exploit", { id: o.bounty, proofs }, tgas(150), 0n)],
     waitUntil: "FINAL",
     throwOnFailure: false,
   });
@@ -127,14 +198,15 @@ export interface RerunResult {
 }
 
 /** Re-run a published exploit locally to the enclave's verdict (D7.1). */
-export async function rerunPublished(o: { near: Near; contract: string; bounty: BountyId; judge?: string; out?: string }): Promise<RerunResult> {
+export async function rerunPublished(o: { near: Near; contract: string; bounty: BountyId; judge?: string; out?: string; proofs?: string }): Promise<RerunResult> {
   const { rules, pub } = await publicationOf(o.near, o.contract, o.bounty);
-  if (!pub || pub.state !== "published" || !pub.published || pub.proofs === null) {
+  if (!pub || pub.state !== "published" || !pub.published) {
     const opens = pub ? `; anyone may publish it from ${when(pub.publishable_from_ns)}` : "";
     throw new Error(`${label(o.bounty)}'s winning exploit is not yet published${opens}`);
   }
-  if (sha256(pub.proofs) !== pub.proofs_sha256) {
-    throw new Error(`the published proofs (sha256 ${sha256(pub.proofs)}) aren't the ones the claim was filed with (${pub.proofs_sha256})`);
+  const proofs = o.proofs ? proofsFrom(o.proofs) : await claimProofs(o.near, o.contract, pub.claim_id);
+  if (sha256(proofs) !== pub.proofs_sha256) {
+    throw new Error(`these proofs (sha256 ${sha256(proofs)}) aren't the ones the claim was filed with (${pub.proofs_sha256})`);
   }
   const released = parseReleasedExploit(JSON.parse(inflateRawSync(Buffer.from(pub.published, "base64")).toString("utf8")));
   if (released.bounty.protocol !== o.bounty.protocol || released.bounty.name !== o.bounty.name || released.claim_id !== pub.claim_id) {
@@ -144,7 +216,7 @@ export async function rerunPublished(o: { near: Near; contract: string; bounty: 
     rules: parseRules(rules),
     block: parseBlockRef(pub.block),
     header: pub.header,
-    proofs: (JSON.parse(pub.proofs) as unknown[]).map(parseAccountProof),
+    proofs: (JSON.parse(proofs) as unknown[]).map(parseAccountProof),
     exploit: released.exploit,
   };
   if (o.out) writeFileSync(o.out, `${toJson({ replay })}\n`);
@@ -170,7 +242,7 @@ export async function rerunPublished(o: { near: Near; contract: string; bounty: 
 export function formatRerunResult(r: RerunResult): string {
   const enclave = r.enclave_verdict ? `${r.enclave_verdict.outcome} (${r.enclave_verdict.reason})` : "none recorded";
   return [
-    `${label(r.bounty)}: claim ${r.claim_id} by ${r.whitehat}, re-run from its published header and proofs (no RPC)`,
+    `${label(r.bounty)}: claim ${r.claim_id} by ${r.whitehat}, re-run from its published header and its claim's proofs (no RPC)`,
     `verdict: ${r.verdict.outcome} (${r.verdict.reason})`,
     `enclave: ${enclave}`,
     r.same_verdict ? "same verdict as the enclave" : "NOT the enclave's verdict",
