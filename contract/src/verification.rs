@@ -127,8 +127,15 @@ impl Contract {
             .filter(|p| p.chain_id == chain_id)
             .map(|p| p.tx_hash.clone())
             .collect();
-        require!(!hashes.is_empty(), "this bounty has no signed pause on this chain");
-        let mut records = self.pause_verifications.get(&id).cloned().unwrap_or_default();
+        require!(
+            !hashes.is_empty(),
+            "this bounty has no signed pause on this chain"
+        );
+        let mut records = self
+            .pause_verifications
+            .get(&id)
+            .cloned()
+            .unwrap_or_default();
         let at = match records.iter().position(|r| r.chain_id == chain_id) {
             Some(i) => i,
             None => {
@@ -143,12 +150,18 @@ impl Contract {
             }
         };
         let record = &mut records[at];
-        require!(!record.in_flight(), "a verification of this chain is already under way");
+        require!(
+            !record.in_flight(),
+            "a verification of this chain is already under way"
+        );
         let pending: Vec<B256> = hashes
             .into_iter()
             .filter(|h| !record.verified.contains(h))
             .collect();
-        require!(!pending.is_empty(), "this chain's pause is already verified");
+        require!(
+            !pending.is_empty(),
+            "this chain's pause is already verified"
+        );
         let needed = gas::pause_verifying(pending.len());
         require!(
             Self::gas_left(gas::TAIL) >= needed,
@@ -164,8 +177,7 @@ impl Contract {
             .winning_claim
             .and_then(|c| self.claims.get(&c))
             .map(|c| &c.whitehat);
-        let may_use_prepaid =
-            winner == Some(&caller) || caller.as_str() == id.protocol.as_str();
+        let may_use_prepaid = winner == Some(&caller) || caller.as_str() == id.protocol.as_str();
         let prepaid = may_use_prepaid
             && record.prepaid_used < PREPAID_ATTEMPTS
             && bounty.draw_fee(cost).is_ok();
@@ -287,7 +299,11 @@ impl Contract {
         let done = record.verified.clone();
         self.pause_verifications.insert(id.clone(), records);
         emit(
-            if verified { "pause_verified" } else { "pause_verification_failed" },
+            if verified {
+                "pause_verified"
+            } else {
+                "pause_verification_failed"
+            },
             json!({ "bounty": id, "chain_id": chain_id, "verified_pauses": done }),
         );
         verified

@@ -28,6 +28,7 @@ use near_sdk::{
 };
 
 mod claims;
+mod exploit_job;
 mod outlayer;
 mod pauses;
 mod payout;
@@ -65,6 +66,11 @@ pub mod fees {
 
     /// NEAR's storage price: 10^19 yoctoNEAR per byte.
     pub const STORAGE_PRICE_PER_BYTE: u128 = 10_000_000_000_000_000_000;
+
+    /// What `bytes` of storage cost.
+    pub const fn storage_cost(bytes: u64) -> NearToken {
+        NearToken::from_yoctonear(bytes as u128 * STORAGE_PRICE_PER_BYTE)
+    }
     /// Attached to every OutLayer job; covers the job's resource limits (0.00701 NEAR on
     /// testnet, Nov 4). OutLayer refunds what the job doesn't use to its payer.
     pub const JOB_DEPOSIT: NearToken = NearToken::from_millinear(20);
@@ -336,12 +342,12 @@ pub struct Contract {
     /// check is pending or it is live (R12.3).
     covered_by: LookupMap<CoveredContract, BountyId>,
     /// Each paid bounty's release of its winning exploit (#22).
-    releases: LookupMap<BountyId, release::ReleaseRecord>,
+    releases: LookupMap<BountyId, exploit_job::JobRecord>,
     /// The claim each sealed exploit (by sha256 of its ciphertext) was filed as, so the
     /// same one is never judged twice (R3.5).
     sealed_exploits: LookupMap<B256, u64>,
     /// Each paid bounty's publication of its winning exploit, once asked for (#23).
-    publications: LookupMap<BountyId, publication::PublicationRecord>,
+    publications: LookupMap<BountyId, exploit_job::JobRecord>,
 }
 
 #[near]
@@ -404,9 +410,9 @@ impl Contract {
             "min_retry_payout_gas": gas::payout(),
             "min_withdraw_bounty_gas": gas::payout(),
             "min_release_gas": gas::release(),
-            "release_hold": release::release_hold(),
+            "release_hold": exploit_job::hold(),
             "min_publish_gas": gas::release(),
-            "publish_hold": publication::publish_hold(),
+            "publish_hold": exploit_job::hold(),
             "claim_place_hold_ns": near_sdk::json_types::U64(claims::CLAIM_PLACE_HOLD_NS),
             "pause_gas_limit": pauses::PAUSE_GAS_LIMIT,
             "pause_max_fee_per_gas": U128(pauses::PAUSE_MAX_FEE_PER_GAS),
@@ -471,9 +477,7 @@ impl Contract {
         let before = env::storage_usage();
         Self::credit(map, who, amount);
         map.flush();
-        let entry = NearToken::from_yoctonear(
-            env::storage_usage().saturating_sub(before) as u128 * fees::STORAGE_PRICE_PER_BYTE,
-        );
+        let entry = fees::storage_cost(env::storage_usage().saturating_sub(before));
         require!(
             amount > entry,
             "the deposit doesn't cover the storage of its balance"
@@ -509,6 +513,11 @@ pub(crate) fn emit(event: &str, data: near_sdk::serde_json::Value) {
             "data": [data],
         })
     ));
+}
+
+/// sha256 of `bytes`, as `0x` and 64 lowercase hex digits.
+pub(crate) fn sha256_hex(bytes: &[u8]) -> B256 {
+    B256::parse(&pauses::hex(&env::sha256_array(bytes))).expect("32 bytes")
 }
 
 pub(crate) fn to_formats_account(id: &AccountId) -> bountee_formats::AccountId {

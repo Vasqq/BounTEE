@@ -20,33 +20,16 @@
 //! (R11.4). NEAR attached to the call joins the posting fee. A publication that fails keeps
 //! nothing and can be asked again.
 
-use bountee_formats::{BlockRef, BountyId, Bytes, PublishOutput, Verdict, B256};
+use bountee_formats::{BlockRef, BountyId, Bytes, Verdict, B256};
 use near_sdk::json_types::U64;
-use near_sdk::serde_json::{self, json};
-use near_sdk::{env, near, require, NearToken, Promise, PromiseResult};
+use near_sdk::serde_json::json;
+use near_sdk::{env, near, require, Promise};
 
-use crate::{emit, fees, gas, outlayer, BountyState, Contract, ContractExt};
+use crate::exploit_job::ExploitJob;
+use crate::{sha256_hex, BountyState, Contract, ContractExt};
 
-/// The most bytes a publication's output may take (as base64). A demo exploit's is about
-/// 300 bytes.
-pub const MAX_PUBLISHED_BYTES: u64 = 16 * 1024;
-/// Storage a publication record takes beyond its output.
-const PUBLICATION_RECORD_BYTES: u64 = 200;
-/// A publication request older than this many blocks is treated as over (OutLayer's own
-/// timeout is about 200 blocks), so a lost callback never blocks a new one.
-pub const PUBLICATION_STALE_BLOCKS: u64 = 300;
 /// A day of NEAR block time.
 const DAY_NS: u64 = 86_400_000_000_000;
-
-/// A bounty's publication: requested, then published.
-#[near(serializers = [borsh])]
-pub struct PublicationRecord {
-    pub claim_id: u64,
-    /// The block height the job under way was requested at.
-    pub requested_at: Option<u64>,
-    /// The publication job's output: the winning exploit in the clear.
-    pub published: Option<String>,
-}
 
 /// Where a paid bounty's publication is.
 #[near(serializers = [json])]
@@ -86,31 +69,6 @@ pub struct PublicationView {
     pub published: Option<String>,
 }
 
-impl PublicationRecord {
-    fn in_flight(&self) -> bool {
-        self.requested_at
-            .is_some_and(|h| env::block_height() < h.saturating_add(PUBLICATION_STALE_BLOCKS))
-    }
-}
-
-fn storage_cost(bytes: u64) -> NearToken {
-    NearToken::from_yoctonear(bytes as u128 * fees::STORAGE_PRICE_PER_BYTE)
-}
-
-/// What a publication request holds from the posting fee: the job's deposit and the most
-/// the publication's storage can cost. The unused part goes back.
-pub fn publish_hold() -> NearToken {
-    fees::JOB_DEPOSIT.saturating_add(storage_cost(MAX_PUBLISHED_BYTES + PUBLICATION_RECORD_BYTES))
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    format!("0x{}", hex_lower(&env::sha256_array(bytes)))
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 #[near]
 impl Contract {
     /// Request the publication of a paid bounty's winning exploit (D7). Anyone may call, once
@@ -124,7 +82,7 @@ impl Contract {
     pub fn publish_exploit(&mut self, id: BountyId, proofs: String) -> Promise {
         let bounty = self
             .bounties
-            .get_mut(&id)
+            .get(&id)
             .unwrap_or_else(|| env::panic_str("no such bounty"));
         require!(
             bounty.state == BountyState::Paid,
@@ -138,119 +96,18 @@ impl Contract {
             env::block_timestamp() >= from,
             &format!("the disclosure delay hasn't passed: publication opens at {from} ns")
         );
-        if let Some(record) = self.publications.get(&id) {
-            require!(
-                record.published.is_none(),
-                "this exploit is already published"
-            );
-            require!(!record.in_flight(), "a publication is already under way");
-        }
-        let claim = self
-            .claims
-            .get(&claim_id)
-            .expect("the winning claim")
-            .clone();
+        let claim = self.claims.get(&claim_id).expect("the winning claim");
         require!(
-            sha256_hex(proofs.as_bytes()) == claim.proofs_sha256.as_str(),
+            sha256_hex(proofs.as_bytes()) == claim.proofs_sha256,
             "these aren't the proofs the winning claim was filed with"
         );
-        require!(
-            Self::gas_left(gas::TAIL) >= gas::release(),
-            "attach more gas: see min_publish_gas in fees()"
-        );
-        let hold = publish_hold();
-        bounty.draw_fee_or_refuse(hold, "the publication");
         let input = json!({ "publish": {
             "bounty": id,
             "claim_id": claim_id,
             "whitehat": crate::to_formats_account(&claim.whitehat),
         } })
         .to_string();
-        let requested_at = env::block_height();
-        self.publications.insert(
-            id.clone(),
-            PublicationRecord {
-                claim_id,
-                requested_at: Some(requested_at),
-                published: None,
-            },
-        );
-        emit(
-            "publication_requested",
-            json!({ "bounty": id, "claim_id": claim_id }),
-        );
-        let protocol: near_sdk::AccountId = id
-            .protocol
-            .as_str()
-            .parse()
-            .expect("a bounty's protocol is a NEAR account");
-        outlayer::request_job(
-            &self.config,
-            &input,
-            Some(&claim.secret_profile),
-            &protocol,
-            fees::JOB_DEPOSIT,
-            || Self::gas_left(gas::ON_RELEASED.saturating_add(gas::TAIL)),
-        )
-        .then(
-            Self::ext(env::current_account_id())
-                .with_static_gas(gas::ON_RELEASED)
-                .with_unused_gas_weight(0)
-                .on_exploit_published(id, requested_at, hold),
-        )
-    }
-
-    /// The publication job's result: its output is kept only if it is a publication. A
-    /// failed, refused or malformed job keeps nothing and leaves the publication to be asked
-    /// again. Whatever of `hold` isn't spent goes back to the bounty's posting fee. A
-    /// callback for a request that is no longer the one in flight changes nothing but that
-    /// refund.
-    #[private]
-    pub fn on_exploit_published(&mut self, id: BountyId, requested_at: u64, hold: NearToken) {
-        #[allow(deprecated)]
-        let (output, job_spent) = match env::promise_result(0) {
-            PromiseResult::Successful(bytes) => (
-                serde_json::from_slice::<Option<PublishOutput>>(&bytes)
-                    .ok()
-                    .flatten()
-                    .filter(|o| o.published.as_str().len() as u64 <= MAX_PUBLISHED_BYTES),
-                fees::JOB_DEPOSIT,
-            ),
-            // OutLayer refused the request; its deposit came back here.
-            PromiseResult::Failed => (None, NearToken::from_yoctonear(0)),
-        };
-        if self
-            .publications
-            .get(&id)
-            .is_none_or(|r| r.requested_at != Some(requested_at))
-        {
-            self.refund_publish_hold(&id, hold.saturating_sub(job_spent));
-            return;
-        }
-        let mut record = self.publications.remove(&id).expect("checked above");
-        let mut storage = NearToken::from_yoctonear(0);
-        match output {
-            Some(output) => {
-                let published = output.published.as_str().to_owned();
-                storage = storage_cost(published.len() as u64 + PUBLICATION_RECORD_BYTES);
-                record.requested_at = None;
-                record.published = Some(published);
-                let claim_id = record.claim_id;
-                self.publications.insert(id.clone(), record);
-                emit(
-                    "exploit_published",
-                    json!({ "bounty": id, "claim_id": claim_id }),
-                );
-            }
-            None => {
-                // Nothing kept: the record goes, so the publication can be asked again.
-                emit(
-                    "publication_failed",
-                    json!({ "bounty": id, "claim_id": record.claim_id }),
-                );
-            }
-        }
-        self.refund_publish_hold(&id, hold.saturating_sub(job_spent).saturating_sub(storage));
+        self.request_exploit_job(ExploitJob::Publication, id, claim_id, input)
     }
 
     /// A paid bounty's publication: when it opens, and once published, the winning exploit
@@ -267,7 +124,7 @@ impl Contract {
         let from = publishable_from(bounty.paid_at_ns, bounty.rules.disclosure_delay_days);
         let record = self.publications.get(&id);
         let state = match record {
-            Some(r) if r.published.is_some() => PublicationState::Published,
+            Some(r) if r.output.is_some() => PublicationState::Published,
             Some(r) if r.in_flight() => PublicationState::Requested,
             _ if env::block_timestamp() < from => PublicationState::Delayed,
             _ => PublicationState::Publishable,
@@ -281,7 +138,7 @@ impl Contract {
             proofs_sha256: claim.proofs_sha256.clone(),
             submitted_at_block: claim.submitted_at_block,
             verdict: claim.verdict.clone(),
-            published: record.and_then(|r| r.published.clone()),
+            published: record.and_then(|r| r.output.clone()),
         })
     }
 }
@@ -292,13 +149,4 @@ fn publishable_from(paid_at_ns: Option<u64>, days: u16) -> u64 {
     paid_at_ns.map_or(u64::MAX, |paid| {
         paid.saturating_add(u64::from(days).saturating_mul(DAY_NS))
     })
-}
-
-impl Contract {
-    /// Give the unspent part of a publication's hold back to the bounty's posting fee.
-    fn refund_publish_hold(&mut self, id: &BountyId, back: NearToken) {
-        if let Some(bounty) = self.bounties.get_mut(id) {
-            bounty.fee_reserve = bounty.fee_reserve.saturating_add(back);
-        }
-    }
 }

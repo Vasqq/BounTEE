@@ -19,17 +19,17 @@
 //!   holds its place for [`CLAIM_PLACE_HOLD_NS`] from its submission; after that a later
 //!   winner is paid and the lapsed claim can't win.
 
-use bountee_formats::{BlockRef, BountyId, Bytes, Outcome, Rules, Verdict, B256};
+use bountee_formats::{BlockRef, BountyId, Bytes, Outcome, Rules, Verdict};
 use near_sdk::json_types::U64;
-use near_sdk::store::LookupMap;
 use near_sdk::serde_json::{self, json};
+use near_sdk::store::LookupMap;
 use near_sdk::{
     env, near, require, AccountId, Gas, NearToken, Promise, PromiseOrValue, PromiseResult,
 };
 
 use crate::{
-    emit, fees, gas, outlayer, to_formats_account, Bounty, BountyState, ClaimRecord, ClaimState,
-    Contract, ContractExt,
+    emit, fees, gas, outlayer, sha256_hex, to_formats_account, Bounty, BountyState, ClaimRecord,
+    ClaimState, Contract, ContractExt,
 };
 
 /// How long a claim with no verdict holds its place against a later PAYS, from its
@@ -38,10 +38,6 @@ pub const CLAIM_PLACE_HOLD_NS: u64 = 3_600_000_000_000;
 
 /// For the withdrawal's callback.
 const ON_CLAIM_BALANCE_WITHDRAWN: Gas = Gas::from_tgas(5);
-
-fn storage_cost(bytes: u64) -> NearToken {
-    NearToken::from_yoctonear(bytes as u128 * fees::STORAGE_PRICE_PER_BYTE)
-}
 
 /// The claim's job input (see `outlayer`).
 fn judge_input(
@@ -67,7 +63,7 @@ fn judge_input(
 
 /// The job deposit for `input`: the fixed deposit plus OutLayer's hold on large input.
 fn job_deposit(input: &str) -> NearToken {
-    fees::JOB_DEPOSIT.saturating_add(storage_cost(
+    fees::JOB_DEPOSIT.saturating_add(fees::storage_cost(
         (input.len() as u64).saturating_sub(fees::JOB_INPUT_FREE_BYTES),
     ))
 }
@@ -217,11 +213,12 @@ impl Contract {
         self.claims.flush();
         self.sealed_exploits.flush();
         self.bounties.flush();
-        let record_cost = storage_cost(env::storage_usage().saturating_sub(storage_before));
+        let record_cost = fees::storage_cost(env::storage_usage().saturating_sub(storage_before));
 
         let job_deposit = job_deposit(&input);
-        let secret_deposit =
-            storage_cost(sealed_exploit.as_str().len() as u64 + fees::SECRET_ROW_OVERHEAD_BYTES);
+        let secret_deposit = fees::storage_cost(
+            sealed_exploit.as_str().len() as u64 + fees::SECRET_ROW_OVERHEAD_BYTES,
+        );
         let cost = job_deposit
             .saturating_add(secret_deposit)
             .saturating_add(record_cost);
@@ -306,7 +303,7 @@ impl Contract {
             record.open_claims.push((claim_id, submitted));
         }
         self.bounties.flush();
-        let entry_cost = storage_cost(env::storage_usage().saturating_sub(storage_before));
+        let entry_cost = fees::storage_cost(env::storage_usage().saturating_sub(storage_before));
         self.draw_claim_balance(&claim.whitehat, job_deposit.saturating_add(entry_cost));
         self.claims.get_mut(&claim_id).expect("read above").state = ClaimState::Judging;
         emit(
@@ -536,14 +533,4 @@ impl Bounty {
                     .is_some_and(|c| matches!(c.state, ClaimState::Storing | ClaimState::Judging))
         });
     }
-}
-
-fn sha256_hex(bytes: &[u8]) -> B256 {
-    let hash = env::sha256_array(bytes);
-    let mut hex = String::with_capacity(66);
-    hex.push_str("0x");
-    for b in hash {
-        hex.push_str(&format!("{b:02x}"));
-    }
-    B256::parse(&hex).expect("64 lowercase hex digits")
 }

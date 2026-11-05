@@ -329,9 +329,9 @@ impl Contract {
             )
             .collect();
         self.bounties.flush();
-        let stored = env::storage_usage().saturating_sub(before) as u128;
+        let stored = env::storage_usage().saturating_sub(before);
         let bounty = self.bounties.get_mut(&id).expect("still here");
-        let storage = NearToken::from_yoctonear(stored * crate::fees::STORAGE_PRICE_PER_BYTE);
+        let storage = crate::fees::storage_cost(stored);
         if let Err(short) = bounty.draw_fee(storage) {
             // Checked before signing started, so this can't happen; were it to, nothing is
             // stored and the claim waits for a `sign_pauses` that attaches the shortfall.
@@ -377,8 +377,8 @@ impl Contract {
         let deposits = one_yocto.saturating_mul(txs.len() as u128);
         // The signed pauses' storage is drawn when they are stored; make sure now that the
         // posting fee will cover it, so a signing it can't pay for never starts (R11.4).
-        let storage = crate::fees::STORAGE_PRICE_PER_BYTE * (SIGNED_PAUSE_BYTES * txs.len() as u64) as u128;
-        let needed = deposits.saturating_add(NearToken::from_yoctonear(storage));
+        let storage = crate::fees::storage_cost(SIGNED_PAUSE_BYTES * txs.len() as u64);
+        let needed = deposits.saturating_add(storage);
         if let Some(short) = bounty.fee_short_of(needed) {
             return Err(NotSigning::Short(short));
         }
@@ -404,14 +404,12 @@ impl Contract {
                 Some(p) => p.and(sign),
             });
         }
-        Ok(
-            joined.ok_or(NotSigning::NoPauses)?.then(
-                Self::ext(env::current_account_id())
-                    .with_static_gas(gas::ON_PAUSES_SIGNED)
-                    .with_unused_gas_weight(0)
-                    .on_pauses_signed(id.clone(), started_at),
-            ),
-        )
+        Ok(joined.ok_or(NotSigning::NoPauses)?.then(
+            Self::ext(env::current_account_id())
+                .with_static_gas(gas::ON_PAUSES_SIGNED)
+                .with_unused_gas_weight(0)
+                .on_pauses_signed(id.clone(), started_at),
+        ))
     }
 }
 
