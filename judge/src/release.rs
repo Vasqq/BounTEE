@@ -19,7 +19,8 @@
 
 use base64::Engine;
 use bountee_formats::{
-    to_json, Base64, Publish, PublishOutput, Release, ReleaseOutput, ReleasedExploit,
+    to_json, AccountId, Base64, BountyId, Publish, PublishOutput, Release, ReleaseOutput,
+    ReleasedExploit, SafeU64,
 };
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::ChaCha20Poly1305;
@@ -32,15 +33,8 @@ const INFO: &[u8] = b"bountee-release-v1";
 
 /// The release's stdout, or `None` when nothing may be released.
 pub fn release(job: &Release) -> Option<ReleaseOutput> {
-    let exploit = sealed::exploit(&job.whitehat)?.ok()?;
+    let compressed = winning_exploit(&job.bounty, job.claim_id, &job.whitehat)?;
     let recipient = x25519_key(job.exploit_public_key.as_str())?;
-    let released = ReleasedExploit {
-        bounty: job.bounty.clone(),
-        claim_id: job.claim_id,
-        whitehat: job.whitehat.clone(),
-        exploit,
-    };
-    let compressed = miniz_oxide::deflate::compress_to_vec(to_json(&released).as_bytes(), 9);
     let sealed = encrypt(&recipient, &compressed)?;
     let text = base64::engine::general_purpose::STANDARD.encode(sealed);
     Some(ReleaseOutput {
@@ -53,18 +47,27 @@ pub fn release(job: &Release) -> Option<ReleaseOutput> {
 /// `whitehat`), then the [`ReleasedExploit`] in the clear, as raw DEFLATE in base64. The
 /// bounty contract asks for it only once the disclosure delay has passed.
 pub fn publish(job: &Publish) -> Option<PublishOutput> {
-    let exploit = sealed::exploit(&job.whitehat)?.ok()?;
-    let published = ReleasedExploit {
-        bounty: job.bounty.clone(),
-        claim_id: job.claim_id,
-        whitehat: job.whitehat.clone(),
-        exploit,
-    };
-    let compressed = miniz_oxide::deflate::compress_to_vec(to_json(&published).as_bytes(), 9);
+    let compressed = winning_exploit(&job.bounty, job.claim_id, &job.whitehat)?;
     let text = base64::engine::general_purpose::STANDARD.encode(compressed);
     Some(PublishOutput {
         published: Base64::parse(&text).ok()?,
     })
+}
+
+/// The winning claim's sealed exploit as a [`ReleasedExploit`], JSON in raw DEFLATE, or
+/// `None` unless this is the pinned contract's job with a secret sealed for `whitehat`.
+fn winning_exploit(bounty: &BountyId, claim_id: SafeU64, whitehat: &AccountId) -> Option<Vec<u8>> {
+    let exploit = sealed::exploit(whitehat)?.ok()?;
+    let released = ReleasedExploit {
+        bounty: bounty.clone(),
+        claim_id,
+        whitehat: whitehat.clone(),
+        exploit,
+    };
+    Some(miniz_oxide::deflate::compress_to_vec(
+        to_json(&released).as_bytes(),
+        9,
+    ))
 }
 
 /// The 32 bytes of an `x25519:<base58>` key.

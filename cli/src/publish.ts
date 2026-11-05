@@ -49,14 +49,11 @@ const label = (b: BountyId) => `${b.protocol}/${b.name}`;
 const when = (ns: string) => new Date(Number(BigInt(ns) / 1_000_000n)).toISOString();
 
 /** A paid bounty's publication, or why there is none yet. */
-async function publicationOf(near: Near, contract: string, bounty: BountyId): Promise<PublicationView> {
-  const view = await near.view<{ state: string } | null>(contract, "bounty", { id: bounty });
+async function publicationOf(near: Near, contract: string, bounty: BountyId): Promise<{ rules: unknown; pub: PublicationView | null }> {
+  const view = await near.view<{ state: string; rules: unknown } | null>(contract, "bounty", { id: bounty });
   if (!view) throw new Error(`${contract} has no bounty ${label(bounty)}`);
   const pub = await near.view<PublicationView | null>(contract, "published_exploit", { id: bounty });
-  if (view.state !== "paid" || !pub) {
-    throw new Error(`${label(bounty)} has not been paid (it is ${view.state}), so it has no winning exploit to publish`);
-  }
-  return pub;
+  return { rules: view.rules, pub: view.state === "paid" ? pub : null };
 }
 
 /** The winning claim's proofs as its `submit_claim` carried them: the array as JSON text. */
@@ -77,7 +74,8 @@ export interface PublishResult {
 
 /** Ask the contract to publish the bounty's winning exploit, as `account`, and wait for it. */
 export async function publishExploit(o: { near: Near; contract: string; bounty: BountyId; as: string; proofs: string }): Promise<PublishResult> {
-  const pub = await publicationOf(o.near, o.contract, o.bounty);
+  const { pub } = await publicationOf(o.near, o.contract, o.bounty);
+  if (!pub) throw new Error(`${label(o.bounty)} has not been paid, so it has no winning exploit to publish`);
   if (pub.state === "published") throw new Error(`${label(o.bounty)}'s exploit is already published: bountee rerun ${label(o.bounty)}`);
   if (pub.state === "requested") throw new Error(`${label(o.bounty)}'s publication is under way; try again in a minute`);
   if (pub.state === "delayed") {
@@ -130,9 +128,7 @@ export interface RerunResult {
 
 /** Re-run a published exploit locally to the enclave's verdict (D7.1). */
 export async function rerunPublished(o: { near: Near; contract: string; bounty: BountyId; judge?: string; out?: string }): Promise<RerunResult> {
-  const view = await o.near.view<{ state: string; rules: unknown } | null>(o.contract, "bounty", { id: o.bounty });
-  if (!view) throw new Error(`${o.contract} has no bounty ${label(o.bounty)}`);
-  const pub = await o.near.view<PublicationView | null>(o.contract, "published_exploit", { id: o.bounty });
+  const { rules, pub } = await publicationOf(o.near, o.contract, o.bounty);
   if (!pub || pub.state !== "published" || !pub.published || pub.proofs === null) {
     const opens = pub ? `; anyone may publish it from ${when(pub.publishable_from_ns)}` : "";
     throw new Error(`${label(o.bounty)}'s winning exploit is not yet published${opens}`);
@@ -145,7 +141,7 @@ export async function rerunPublished(o: { near: Near; contract: string; bounty: 
     throw new Error(`the publication names another claim (${label(released.bounty)} claim ${released.claim_id})`);
   }
   const replay: Replay = {
-    rules: parseRules(view.rules),
+    rules: parseRules(rules),
     block: parseBlockRef(pub.block),
     header: pub.header,
     proofs: (JSON.parse(pub.proofs) as unknown[]).map(parseAccountProof),
