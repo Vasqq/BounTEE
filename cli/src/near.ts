@@ -22,8 +22,7 @@ export function credentialsDir(network: Network): string {
   return process.env.BOUNTEE_CREDENTIALS_DIR ?? join(homedir(), ".near-credentials", network);
 }
 
-export function saveKey(network: Network, accountId: string, key: KeyPair): string {
-  const dir = credentialsDir(network);
+export function saveKey(network: Network, accountId: string, key: KeyPair, dir: string = credentialsDir(network)): string {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = join(dir, `${accountId}.json`);
   if (existsSync(file)) throw new Error(`${file} already exists`);
@@ -33,8 +32,7 @@ export function saveKey(network: Network, accountId: string, key: KeyPair): stri
   return file;
 }
 
-export function loadKey(network: Network, accountId: string): KeyPairString {
-  const dir = credentialsDir(network);
+export function loadKey(network: Network, accountId: string, dir: string = credentialsDir(network)): KeyPairString {
   const file = JSON.parse(readFileSync(join(dir, `${accountId}.json`), "utf8"));
   const key = file.private_key ?? file.secret_key;
   if (typeof key !== "string") throw new Error(`no key for ${accountId} in ${dir}`);
@@ -53,6 +51,13 @@ export class Near {
 
   account(id: string): Account {
     return new Account(id, this.provider, loadKey(this.network, id));
+  }
+
+  /** Whether the local key for `id` is a function-call key (a claim key, #25) rather than a full-access one. */
+  async signsWithFunctionCallKey(id: string): Promise<boolean> {
+    const publicKey = KeyPair.fromString(loadKey(this.network, id)).getPublicKey().toString();
+    const r = await this.rpc<{ permission: unknown }>("query", { request_type: "view_access_key", finality: "final", account_id: id, public_key: publicKey });
+    return r.permission !== "FullAccess";
   }
 
   async rpc<T = any>(method: string, params: unknown): Promise<T> {
