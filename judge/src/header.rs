@@ -27,6 +27,12 @@ const TIMESTAMP: usize = 11;
 const MIX_HASH: usize = 13;
 /// Fields up to `parent_beacon_block_root` (Cancun); one more is `requests_hash`.
 const CANCUN_FIELDS: usize = 20;
+/// Fields up to `withdrawals_root` (Shanghai/Shapella, EIP-4895): the oldest header era the
+/// judge accepts. From the Merge on, `mix_hash` carries `prevRandao`, so the field the block
+/// env reads as randomness is valid; a header with `requests_hash` is Prague, any other is
+/// judged under Cancun rules (the spec's default). Accepting pre-Cancun headers lets a replay
+/// run against a historical pre-hack block (ticket #28), not only recent state.
+const SHANGHAI_FIELDS: usize = 17;
 
 /// Decode `rlp` and check it hashes to `hash`; `None` if it doesn't or isn't a header.
 pub fn verified(rlp: &[u8], hash: B256) -> Option<Header> {
@@ -47,7 +53,7 @@ pub fn verified(rlp: &[u8], hash: B256) -> Option<Header> {
         fields.push(&buf[..item.payload_length]);
         buf = &buf[item.payload_length..];
     }
-    if fields.len() < CANCUN_FIELDS {
+    if fields.len() < SHANGHAI_FIELDS {
         return None;
     }
     Some(Header {
