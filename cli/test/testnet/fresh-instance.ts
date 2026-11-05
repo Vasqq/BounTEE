@@ -7,9 +7,11 @@
 //    checks it against the formats' own derivation (D25).
 // 2. Deploys a new MockUSDC + DemoVault (demo/script/Deploy.s.sol, --broadcast), granting the
 //    pause role to that address.
-// 3. Funds the pause-role address with the gas its signed pause may burn at its fee limit
-//    (200,000 gas at 1 gwei = 0.0002 ETH; `fees()` on the contract), plus Base's L1 data fee.
-// 4. Posts the bounty: one USDC `ft_transfer_call` carrying the rules, covering the vault.
+// 3. Funds the pause-role address with the pause gas the posting check asks for (R7.6): the
+//    gas its signed pause may burn at its fee limit (200,000 gas at 1 gwei = 0.0002 ETH),
+//    plus Base's L1 data fee allowance (0.00001 ETH); the formats' `PAUSE_GAS_PER_PAUSE`.
+// 4. Posts the bounty with `bountee post` (#17), covering the vault; it goes live once the
+//    enclave's posting check passes.
 //
 // Writes the instance to $BOUNTEE_INSTANCE (default ~/.bountee-testnet/day3-instance.json)
 // and prints it as one JSON line. Exit status 3 = a balance is short (nothing was spent).
@@ -20,17 +22,16 @@
 // CLAIMS (the Whitehat and how many claims the run files, for the preflight), DEPLOYER_ENV
 // (default ~/.bountee-testnet/base-sepolia-deployer.env), RPC (default: Base Sepolia's in cli/src/chains.ts),
 // PREFLIGHT_ONLY=1 to stop after step 0.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { base58 } from "@scure/base";
-import { actions } from "near-api-js";
-import { pauseRole } from "@bountee/formats";
+import { PAUSE_GAS_PER_PAUSE, pauseRole } from "@bountee/formats";
 import { defaultRpc } from "../../src/chains.ts";
-import { Near, events, formatNear, milliNear, tgas } from "../../src/near.ts";
+import { Near, formatNear, milliNear } from "../../src/near.ts";
 
 const home = homedir();
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -63,9 +64,8 @@ const eth = (wei: bigint) => `${(Number(wei) / 1e18).toFixed(6)} ETH`;
 const fees = await near.view(CONTRACT, "fees");
 // Gas limit at the fee limit (0.0002 ETH, R7.6), plus the L1 data fee an OP-stack chain such as
 // Base charges on top: its pool refuses a pause whose sender holds exactly gas x max fee (Day-3
-// run, Nov 5: "have 200000000000000 want 200000000001544"). 0.00001 ETH covers it many times over.
-const OP_STACK_L1_FEE_WEI = 10_000_000_000_000n;
-const pauseGasWei = BigInt(fees.pause_gas_limit) * BigInt(fees.pause_max_fee_per_gas) + OP_STACK_L1_FEE_WEI;
+// run, Nov 5: "have 200000000000000 want 200000000001544"). The posting check asks for this.
+const pauseGasWei = PAUSE_GAS_PER_PAUSE;
 const gasPrice = BigInt(cast("gas-price", "--rpc-url", RPC));
 // Deploy.s.sol plus the pause-gas transfer, ~3.2M gas: at 3x today's price (floor 0.05 gwei),
 // plus 0.00005 ETH of slack.
@@ -152,23 +152,16 @@ const rules = {
   exploit_public_key: `x25519:${base58.encode(pub)}`,
   judge_build_hash: config.judge_build_hash,
 };
-const protocol = near.account(PROTOCOL);
-await protocol.callFunction({
-  contractId: CONTRACT,
-  methodName: "prepay_posting_fee",
-  args: {},
-  deposit: BigInt(fees.posting_fee) + milliNear(10),
-  gas: tgas(30),
-});
-const post = await protocol.signAndSendTransaction({
-  receiverId: USDC,
-  actions: [actions.functionCall("ft_transfer_call", { receiver_id: CONTRACT, amount: BOUNTY_AMOUNT, msg: JSON.stringify({ name: NAME, rules }) }, tgas(270), 1n)],
-  waitUntil: "FINAL",
-});
-const postStatus = await near.txStatus(post.transaction.hash, PROTOCOL);
-const bounty = await near.view(CONTRACT, "bounty", { id });
-if (bounty?.state !== "live") {
-  throw new Error(`the bounty isn't live (${bounty?.state ?? "absent"}): ${JSON.stringify(events(postStatus))}`);
+const rulesFile = join(home, ".bountee-testnet", `${NAME}-rules.json`);
+writeFileSync(rulesFile, `${JSON.stringify(rules, null, 2)}\n`, { mode: 0o600 });
+const posted = spawnSync(
+  process.execPath,
+  [join(root, "cli/src/main.ts"), "post", `${PROTOCOL}/${NAME}`, "--rules", rulesFile, "--contract", CONTRACT, "--json"],
+  { encoding: "utf8" },
+);
+const postResult = JSON.parse(posted.stdout.trim().split("\n").pop() || posted.stderr.trim().split("\n").pop() || "{}");
+if (posted.status !== 0 || postResult.state !== "live") {
+  throw new Error(`the bounty isn't live: ${posted.stdout}${posted.stderr}`);
 }
 
 const instance = {
@@ -184,7 +177,7 @@ const instance = {
   pause_role_balance_wei: pauserBalance.toString(),
   deploy_txs: deployTxs,
   pause_gas_tx: fund.transactionHash,
-  post_tx: post.transaction.hash,
+  post_tx: postResult.post_tx,
   rules,
   balances: needs,
 };

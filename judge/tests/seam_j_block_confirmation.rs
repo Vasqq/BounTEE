@@ -28,53 +28,11 @@ mod test_rpc;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
-use std::sync::OnceLock;
 
 use bountee_formats::{from_json, Reason, Verdict};
-use common::{repo_root, wasm_target};
+use common::{attested_build, repo_root, test_build};
 use serde_json::{json, Value};
 use test_rpc::{Answer, TestRpc};
-
-/// Build the judge for its WebAssembly target, with `features`, into its own target
-/// directory so the test build never overwrites the attested one.
-fn build(features: &[&str], target_dir: &str) -> PathBuf {
-    let target = wasm_target();
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let mut args = vec![
-        "build",
-        "--release",
-        "-p",
-        "bountee-judge",
-        "--target",
-        &target,
-    ];
-    let joined = features.join(",");
-    if !features.is_empty() {
-        args.extend(["--features", &joined]);
-    }
-    let dir = repo_root().join(target_dir);
-    let status = Command::new(cargo)
-        .current_dir(repo_root())
-        .args(&args)
-        .arg("--target-dir")
-        .arg(&dir)
-        .status()
-        .expect("cargo runs");
-    assert!(status.success(), "the judge builds for {target}");
-    dir.join(format!("{target}/release/bountee-judge.wasm"))
-}
-
-/// The judge's test build: the attested build plus `test-stand-in-rpcs`.
-fn test_build() -> &'static PathBuf {
-    static WASM: OnceLock<PathBuf> = OnceLock::new();
-    WASM.get_or_init(|| build(&["test-stand-in-rpcs"], "target/judge-test-stand-in-rpcs"))
-}
-
-/// The attested build, exactly as `seam_j.rs` and the enclave run it.
-fn attested_build() -> &'static PathBuf {
-    static WASM: OnceLock<PathBuf> = OnceLock::new();
-    WASM.get_or_init(|| build(&[], "target"))
-}
 
 /// The bounty contract a default build of the judge is pinned to (`src/sealed.rs`).
 const BOUNTY_CONTRACT: &str = "bounty.bountee.testnet";

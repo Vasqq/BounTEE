@@ -22,6 +22,8 @@ const JUDGE_WASM_URL: &str = "https://example.test/judge.wasm";
 const SEED_NATIVE: &str = "1000000000000000000";
 const BOUNTY_AMOUNT: u128 = 5_000_000_000; // 5,000 USDC
 const SEALED: &str = "AXNlYWxlZCBleHBsb2l0IGNpcGhlcnRleHQ=";
+/// The judge's answer to a posting check that passed (`bountee_formats::PostingCheckResult`).
+const PASSED: &str = r#"{"failures":[]}"#;
 const PROOFS: &str = r#"[{"address":"0x00000000000000000000000000000000000000aa"}]"#;
 
 fn tgas(n: u64) -> Gas {
@@ -203,7 +205,7 @@ impl Sandbox {
     async fn post(&self, name: &str, rules: &Value) -> anyhow::Result<ExecutionFinalResult> {
         self.prepay_posting_fee(&self.protocol, self.fee("posting_fee").await?)
             .await?;
-        self.script(json!({ "output": "{}" })).await?;
+        self.script(json!({ "output": PASSED })).await?;
         let amount: u128 = rules["bounty_amount"].as_str().unwrap().parse()?;
         self.transfer_call(
             &self.protocol,
@@ -889,7 +891,7 @@ async fn claims_wait_for_the_posting_check() -> anyhow::Result<()> {
     );
     assert_eq!(s.requests().await?.len(), jobs.len());
 
-    s.resolve(jobs[0]["id"].as_u64().unwrap(), Some("{}"))
+    s.resolve(jobs[0]["id"].as_u64().unwrap(), Some(PASSED))
         .await?;
     posting.await?.into_result()?;
     assert_eq!(s.bounty("checking").await?["state"], "live");
@@ -1563,9 +1565,11 @@ impl Sandbox {
 async fn a_failed_payout_transfer_is_retried_to_the_same_winner_exactly_once() -> anyhow::Result<()>
 {
     let s = live_bounty("vault").await?;
-    s.post("vault-2", &valid_rules(&s).await?)
-        .await?
-        .into_result()?;
+    // A second bounty, on another contract (R12.3: one live bounty per covered contract).
+    let mut other_rules = valid_rules(&s).await?;
+    other_rules["covered_contracts"][0]["address"] =
+        json!("0x00000000000000000000000000000000000000ab");
+    s.post("vault-2", &other_rules).await?.into_result()?;
     let held = 2 * BOUNTY_AMOUNT;
     assert_eq!(s.usdc_balance(s.contract.id()).await?, held);
     let r = s.retry_payout(&s.other, "vault").await?.await?;
@@ -1999,5 +2003,197 @@ async fn three_attempts_per_chain_are_prepaid_and_later_ones_pay_their_own_cost(
         after < before + extra.as_yoctonear() / 2,
         "the excess went back to the caller"
     );
+    Ok(())
+}
+
+// ---- posting check (#17) ----
+
+impl Sandbox {
+    /// Post `name` covering `covered` (chain 84532), with the posting check's job answered
+    /// by `answer` (a stand-in script: `{"output": …}` or `{"fail": true}`; `null` scripts
+    /// nothing, for a posting refused before it requests a job).
+    async fn post_answered(
+        &self,
+        name: &str,
+        covered: &[&str],
+        answer: Value,
+    ) -> anyhow::Result<ExecutionFinalResult> {
+        self.prepay_posting_fee(&self.protocol, self.fee("posting_fee").await?)
+            .await?;
+        if !answer.is_null() {
+            self.script(answer).await?;
+        }
+        let mut rules = valid_rules(self).await?;
+        rules["covered_contracts"] = covered
+            .iter()
+            .map(|a| json!({ "chain_id": 84532, "address": a }))
+            .collect();
+        self.transfer_call(
+            &self.protocol,
+            BOUNTY_AMOUNT,
+            &json!({ "name": name, "rules": rules }),
+            tgas(270),
+        )
+        .await
+    }
+}
+
+const VAULT_A: &str = "0x00000000000000000000000000000000000000a1";
+const VAULT_B: &str = "0x00000000000000000000000000000000000000b2";
+
+/// R1.6, R7.6, R12.1, R12.2: the bounty goes live only on a passing posting check. A check
+/// that fails for any reason (the pause role not granted or the contract not pausable, too
+/// little pause gas, the chain unconfirmed), a failed or refused job, or an answer that
+/// isn't a posting check result leaves the bounty `check_failed` and refunds the bounty
+/// amount in full to the Protocol. The job's input is the posting check, exactly.
+#[tokio::test]
+async fn r1_6_a_failed_posting_check_refunds_the_bounty_amount_in_full() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+    let start = s.usdc_balance(s.protocol.id()).await?;
+
+    // A passing check makes a posting live and keeps its USDC.
+    s.post_answered("passing", &[VAULT_A], json!({ "output": PASSED }))
+        .await?
+        .into_result()?;
+    assert_eq!(s.bounty("passing").await?["state"], "live");
+    let held = start - s.usdc_balance(s.protocol.id()).await?;
+    assert_eq!(held, BOUNTY_AMOUNT);
+
+    let failing = [
+        // R12.1 / R12.2: pause() from the pause-role address reverts.
+        json!({ "output": r#"{"failures":[{"index":0,"reason":"cannot_pause"}]}"# }),
+        // R7.6: the pause-role address holds too little pause gas.
+        json!({ "output": r#"{"failures":[{"index":0,"reason":"pause_gas_short"}]}"# }),
+        // R12.5: fewer than two pinned RPCs answered, or they disagreed.
+        json!({ "output": r#"{"failures":[{"index":0,"reason":"chain_unconfirmed"}]}"# }),
+        // A failed job reaches the callback as null.
+        json!({ "output": null }),
+        // Anything but a posting check result: a verdict, or nothing in particular.
+        json!({ "output": r#"{"outcome":"PAYS","reason":"minimum_theft_reached"}"# }),
+        json!({ "output": "{}" }),
+        // OutLayer refuses the request outright (the stand-in keeps this answer queued, so
+        // it goes last).
+        json!({ "fail": true }),
+    ];
+    for (i, answer) in failing.iter().enumerate() {
+        let name = format!("failing-{i}");
+        let r = s.post_answered(&name, &[VAULT_B], answer.clone()).await?;
+        if i == 0 {
+            // The judge's reasons reach the Protocol in the bounty's event.
+            let failures = r
+                .logs()
+                .iter()
+                .filter_map(|l| l.strip_prefix("EVENT_JSON:"))
+                .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                .find(|e| e["event"] == "bounty_check_failed")
+                .map(|e| e["data"][0]["failures"].clone());
+            assert_eq!(
+                failures,
+                Some(json!([{ "index": 0, "reason": "cannot_pause" }]))
+            );
+        }
+        let bounty = s.bounty(&name).await?;
+        assert_eq!(bounty["state"], "check_failed", "{answer}: {r:?}");
+        assert_eq!(
+            s.usdc_balance(s.protocol.id()).await?,
+            start - held,
+            "{answer}: refunded in full"
+        );
+        assert_eq!(s.usdc_balance(s.contract.id()).await?, held, "{answer}");
+        let r = s.submit_claim(&s.whitehat, &name).await?;
+        assert!(r.is_failure(), "{answer}: a failed bounty takes no claims");
+    }
+
+    let jobs = s.requests().await?;
+    let input: Value = serde_json::from_str(jobs[1]["input_data"].as_str().unwrap())?;
+    assert_eq!(
+        input,
+        json!({ "posting_check": {
+            "bounty": { "protocol": s.protocol.id(), "name": "failing-0" },
+            "rules": s.bounty("failing-0").await?["rules"],
+        }})
+    );
+    Ok(())
+}
+
+/// R12.3: a posting covering a contract that a live bounty, or one whose posting check is
+/// still pending, already covers is refused and its USDC goes back; a contract whose
+/// bounty failed its check can be covered again.
+#[tokio::test]
+async fn r12_3_a_contract_already_covered_by_a_live_or_pending_bounty_is_refused(
+) -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let start = s.usdc_balance(s.protocol.id()).await?;
+
+    // VAULT_A: covered by a live bounty. A refused posting requests no job, so nothing is
+    // scripted for it (`Value::Null`).
+    s.post_answered("live", &[VAULT_A], json!({ "output": PASSED }))
+        .await?
+        .into_result()?;
+    let r = s
+        .post_answered("again", &[VAULT_B, VAULT_A], Value::Null)
+        .await?;
+    assert!(failure_text(&r).contains("already covered"), "{r:?}");
+    assert!(s.bounty("again").await?.is_null());
+    assert_eq!(s.usdc_balance(s.protocol.id()).await?, start - BOUNTY_AMOUNT);
+
+    // VAULT_B: covered by a bounty whose posting check hasn't answered yet.
+    s.prepay_posting_fee(&s.protocol, s.fee("posting_fee").await?)
+        .await?;
+    let mut rules = valid_rules(&s).await?;
+    rules["covered_contracts"] = json!([{ "chain_id": 84532, "address": VAULT_B }]);
+    let pending = s
+        .protocol
+        .call(s.test_usdc.id(), "ft_transfer_call")
+        .args_json(json!({
+            "receiver_id": s.contract.id(),
+            "amount": BOUNTY_AMOUNT.to_string(),
+            "msg": json!({ "name": "pending", "rules": rules }).to_string(),
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(tgas(270))
+        .transact_async()
+        .await?;
+    let jobs = s.wait_for_requests(2).await?;
+    assert_eq!(s.bounty("pending").await?["state"], "checking");
+    let r = s
+        .post_answered("while-pending", &[VAULT_B], Value::Null)
+        .await?;
+    assert!(failure_text(&r).contains("already covered"), "{r:?}");
+
+    // Its check fails: VAULT_B is free again.
+    s.resolve(jobs[1]["id"].as_u64().unwrap(), None).await?;
+    pending.await?.into_result()?;
+    assert_eq!(s.bounty("pending").await?["state"], "check_failed");
+    s.post_answered("after-failure", &[VAULT_B], json!({ "output": PASSED }))
+        .await?
+        .into_result()?;
+    assert_eq!(s.bounty("after-failure").await?["state"], "live");
+    assert_eq!(
+        s.usdc_balance(s.protocol.id()).await?,
+        start - 2 * BOUNTY_AMOUNT
+    );
+    Ok(())
+}
+
+/// R7.6: the pause gas the posting check asks of each pause is what the contract's own
+/// signed pause can burn, gas limit at fee limit, plus the L1 data fee allowance, all as
+/// `fees()` shows them.
+#[tokio::test]
+async fn r7_6_fees_show_the_pause_gas_the_posting_check_asks_for() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let fees = s.fees().await?;
+    assert_eq!(fees["pause_gas_limit"], bountee_formats::PAUSE_GAS_LIMIT);
+    assert_eq!(
+        fees["pause_max_fee_per_gas"],
+        bountee_formats::PAUSE_MAX_FEE_PER_GAS.to_string()
+    );
+    assert_eq!(
+        fees["pause_l1_data_fee_allowance"],
+        bountee_formats::PAUSE_L1_DATA_FEE_ALLOWANCE.to_string()
+    );
+    // 0.0002 ETH + 0.00001 ETH, from the spec.
+    assert_eq!(fees["pause_gas_per_pause"], "210000000000000");
     Ok(())
 }

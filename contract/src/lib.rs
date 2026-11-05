@@ -15,7 +15,7 @@
 //! the account's only key. Nothing in the contract adds a key, deploys code or changes the
 //! configuration afterwards.
 
-use bountee_formats::{BlockRef, BountyId, Bytes, Rules, Seed, Verdict, B256};
+use bountee_formats::{BlockRef, BountyId, Bytes, CoveredContract, Rules, Seed, Verdict, B256};
 use near_sdk::json_types::U128;
 use near_sdk::store::LookupMap;
 use near_sdk::{
@@ -145,6 +145,7 @@ enum Key {
     PostingFees,
     ClaimBalances,
     PauseVerifications,
+    CoveredBy,
 }
 
 /// Where a bounty is in its life.
@@ -250,6 +251,9 @@ pub struct Contract {
     claim_balances: LookupMap<AccountId, NearToken>,
     /// Each bounty's pause verifications, per chain (R7.10).
     pause_verifications: LookupMap<BountyId, Vec<verification::ChainVerification>>,
+    /// The bounty that last covered each contract; it still covers it while its posting
+    /// check is pending or it is live (R12.3).
+    covered_by: LookupMap<CoveredContract, BountyId>,
 }
 
 #[near]
@@ -286,6 +290,7 @@ impl Contract {
             posting_fees: LookupMap::new(Key::PostingFees),
             claim_balances: LookupMap::new(Key::ClaimBalances),
             pause_verifications: LookupMap::new(Key::PauseVerifications),
+            covered_by: LookupMap::new(Key::CoveredBy),
         }
     }
 
@@ -313,6 +318,13 @@ impl Contract {
             "prepaid_verify_attempts": verification::PREPAID_ATTEMPTS,
             "min_verify_pause_gas_base": gas::pause_verifying(0),
             "min_verify_pause_gas_per_pause": gas::VERIFY_PAUSE,
+            // What the posting check asks each pause-role address to hold per pause on a
+            // chain: gas limit at fee limit, plus an OP-stack chain's L1 data fee (R7.6).
+            "pause_l1_data_fee_allowance": U128(bountee_formats::PAUSE_L1_DATA_FEE_ALLOWANCE),
+            "pause_gas_per_pause": U128(
+                pauses::PAUSE_GAS_LIMIT as u128 * pauses::PAUSE_MAX_FEE_PER_GAS
+                    + bountee_formats::PAUSE_L1_DATA_FEE_ALLOWANCE
+            ),
         })
     }
 

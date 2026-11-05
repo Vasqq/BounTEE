@@ -4,11 +4,11 @@
 //! token; the callback answers the amount to refund, so the token's own resolve gives the
 //! USDC back on a failed check (R1.6). Any refusal panics, so the token refunds in full.
 
-use bountee_formats::{BountyId, BountyName, Rules, RECENCY_LIMIT_SECS};
+use bountee_formats::{BountyId, BountyName, PostingCheckResult, Rules, RECENCY_LIMIT_SECS};
 use near_sdk::json_types::U128;
 use near_sdk::serde::Deserialize;
 use near_sdk::serde_json::{self, json};
-use near_sdk::{env, near, require, AccountId, NearToken, PromiseOrValue};
+use near_sdk::{env, near, require, AccountId, NearToken, PromiseOrValue, PromiseResult};
 
 use crate::{
     emit, fees, gas, outlayer, to_formats_account, Bounty, BountyState, Contract, ContractExt,
@@ -68,6 +68,7 @@ impl Contract {
             "this bounty name is already used; a bounty takes no funds after it is posted"
         );
         self.check_rules(&posting.rules, amount.0);
+        self.check_not_covered(&posting.rules);
 
         let fee = self.posting_fee_balance(sender_id.clone());
         require!(
@@ -77,6 +78,7 @@ impl Contract {
         self.posting_fees
             .insert(sender_id.clone(), fee.saturating_sub(fees::POSTING_FEE));
 
+        let covered = posting.rules.covered_contracts.clone();
         let storage_before = env::storage_usage();
         self.bounties.insert(
             id.clone(),
@@ -90,7 +92,12 @@ impl Contract {
                 paying_out: false,
             },
         );
+        // R12.3: these contracts are now covered by a pending bounty.
+        for contract in covered {
+            self.covered_by.insert(contract, id.clone());
+        }
         self.bounties.flush();
+        self.covered_by.flush();
         let used = env::storage_usage().saturating_sub(storage_before);
         require!(
             used <= fees::BOUNTY_STORAGE_BYTES,
@@ -123,33 +130,70 @@ impl Contract {
         .into()
     }
 
-    /// The posting check's result: answers the token with the USDC to refund.
+    /// The posting check's result: answers the token with the USDC to refund, none when the
+    /// check passed, all of it otherwise (R1.6).
     #[private]
     pub fn on_posting_checked(&mut self, id: BountyId, amount: U128) -> U128 {
-        let passed = posting_check_passed();
+        let result = posting_check_result();
         let Some(bounty) = self.bounties.get_mut(&id) else {
             return amount;
         };
-        if passed {
+        if result.as_ref().is_some_and(PostingCheckResult::passed) {
             bounty.state = BountyState::Live;
             emit("bounty_live", json!({ "bounty": id }));
             U128(0)
         } else {
             bounty.state = BountyState::CheckFailed;
-            emit("bounty_check_failed", json!({ "bounty": id }));
+            // The judge's reasons, so the Protocol sees what to fix; null for a failed job.
+            let failures = result.map(|r| r.failures);
+            emit(
+                "bounty_check_failed",
+                json!({ "bounty": id, "failures": failures }),
+            );
             amount
         }
     }
 }
 
-/// STAND-IN until ticket #17: the posting check always passes, whatever the job returned.
-/// #17 reads the job's result here (`env::promise_result(0)`) and fails the check on
-/// anything but a passing answer, including a failed or `null` job.
-fn posting_check_passed() -> bool {
-    true
+/// The posting check job's answer, if it gave one. The check passes only on an answer with
+/// no failures: on every covered chain the pause role can pause each covered contract and
+/// holds its pause gas, read through at least two agreeing pinned RPCs (R7.6, R12.1, R12.2,
+/// R12.5). A failed or refused job (`null`, or a failed promise) or any other output is
+/// `None`, and fails the check.
+fn posting_check_result() -> Option<PostingCheckResult> {
+    #[allow(deprecated)]
+    match env::promise_result(0) {
+        PromiseResult::Successful(bytes) => {
+            serde_json::from_slice::<Option<PostingCheckResult>>(&bytes)
+                .ok()
+                .flatten()
+        }
+        PromiseResult::Failed => None,
+    }
 }
 
 impl Contract {
+    /// R12.3: refuse a contract another bounty covers while that bounty's posting check is
+    /// pending, or while it is live and hasn't ended.
+    fn check_not_covered(&self, rules: &Rules) {
+        let now = env::block_timestamp();
+        for contract in &rules.covered_contracts {
+            let covering = self
+                .covered_by
+                .get(contract)
+                .and_then(|id| self.bounties.get(id))
+                .is_some_and(|other| match other.state {
+                    BountyState::Checking => true,
+                    BountyState::Live => other.rules.end_date_ns.get() > now,
+                    _ => false,
+                });
+            require!(
+                !covering,
+                "a covered contract is already covered by a live or pending bounty"
+            );
+        }
+    }
+
     /// Refuse missing or invalid rules (R1.3, R1.4, R1.5). The format already checked
     /// every value's shape; this checks what BounTEE fixes and what must hold at posting.
     fn check_rules(&self, rules: &Rules, amount: u128) {
