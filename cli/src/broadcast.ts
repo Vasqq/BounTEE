@@ -3,7 +3,7 @@
 // each to land. Anyone may run it: a signed pause needs no wallet, only an RPC.
 //
 // A pause someone else already sent is reported as `known`, not as an error, so running it
-// twice is harmless. Verification on NEAR (R7.3's second half) is ticket #21.
+// twice is harmless. Verification on NEAR (R7.3's second half) is `verify-pause.ts`.
 import { defaultRpcs } from "./chains.ts";
 import { NEAR_RPC } from "./near.ts";
 import { rpc } from "./proofs.ts";

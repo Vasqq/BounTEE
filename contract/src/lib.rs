@@ -9,6 +9,8 @@
 //! - [`payout`]: the whole bounty is paid to the Whitehat.
 //! - [`release`]: after the payout, the winning exploit is released to the Protocol's
 //!   exploit key by a job the contract requests (R6).
+//! - [`verification`]: anyone can have a chain's landed pause verified by NEAR's MPC network;
+//!   off the money path.
 //! - [`outlayer`]: the exact OutLayer requests (secret, access rule, job).
 //!
 //! Deployment (R2.1): one transaction deploys the code, calls [`Contract::new`] and deletes
@@ -28,6 +30,7 @@ mod pauses;
 mod payout;
 mod posting;
 mod release;
+mod verification;
 
 /// What the contract is pinned to at deployment and never changes (R1.3).
 #[near(serializers = [json, borsh])]
@@ -74,6 +77,10 @@ pub mod fees {
     /// registration and the payout's yoctoNEAR, the release and publication jobs, and up to
     /// three pause verifications per covered chain. Not refunded if the posting is refused.
     pub const POSTING_FEE: NearToken = NearToken::from_millinear(500);
+    /// What one pause's verification attempt costs the contract: the MPC call's 1 yoctoNEAR
+    /// and up to 200 bytes of storage for the record. Taken from the posting fee for the
+    /// first three attempts per chain, from the caller's deposit after that (R7.10).
+    pub const VERIFY_PAUSE: NearToken = NearToken::from_millinear(2);
 }
 
 /// Gas floors and the gas kept for callbacks.
@@ -109,6 +116,11 @@ pub mod gas {
     pub const ON_PAUSES_SIGNED: Gas = Gas::from_tgas(50);
     /// What the claim's job is left at least, before gas is kept back to sign pauses.
     pub const MIN_JOB: Gas = Gas::from_tgas(60);
+    /// For each pause's `verify_foreign_transaction` on the MPC contract, which asks for at
+    /// least 15 Tgas (testnet config, Nov 4; about 13.4 Tgas burnt in all, spike #3).
+    pub const VERIFY_PAUSE: Gas = Gas::from_tgas(20);
+    /// For recording a verification's answers.
+    pub const ON_PAUSE_VERIFIED: Gas = Gas::from_tgas(10);
 
     /// Gas for the payout's three steps, from the call that starts it.
     pub const fn payout() -> Gas {
@@ -123,6 +135,11 @@ pub mod gas {
     /// Gas to request a release job and keep its result, from the call that starts it.
     pub const fn release() -> Gas {
         Gas::from_gas(REQUEST_JOB.as_gas() + ON_RELEASED.as_gas() + TAIL.as_gas())
+    }
+
+    /// Gas to verify `n` pauses on one chain, from the call that starts it.
+    pub const fn pause_verifying(n: usize) -> Gas {
+        Gas::from_gas(VERIFY_PAUSE.as_gas() * n as u64 + ON_PAUSE_VERIFIED.as_gas() + TAIL.as_gas())
     }
 
     /// Gas to sign the pauses of `n` covered contracts and pay, from the call that starts it.
@@ -140,6 +157,7 @@ enum Key {
     Claims,
     PostingFees,
     ClaimBalances,
+    PauseVerifications,
     CoveredBy,
     Releases,
 }
@@ -246,6 +264,8 @@ pub struct Contract {
     posting_fees: LookupMap<AccountId, NearToken>,
     /// NEAR each Whitehat has prepaid toward claims (ADR-0007).
     claim_balances: LookupMap<AccountId, NearToken>,
+    /// Each bounty's pause verifications, per chain (R7.10).
+    pause_verifications: LookupMap<BountyId, Vec<verification::ChainVerification>>,
     /// The bounty that last covered each contract; it still covers it while its posting
     /// check is pending or it is live (R12.3).
     covered_by: LookupMap<CoveredContract, BountyId>,
@@ -286,6 +306,7 @@ impl Contract {
             next_claim_id: 0,
             posting_fees: LookupMap::new(Key::PostingFees),
             claim_balances: LookupMap::new(Key::ClaimBalances),
+            pause_verifications: LookupMap::new(Key::PauseVerifications),
             covered_by: LookupMap::new(Key::CoveredBy),
             releases: LookupMap::new(Key::Releases),
         }
@@ -313,6 +334,10 @@ impl Contract {
             "pause_gas_limit": pauses::PAUSE_GAS_LIMIT,
             "pause_max_fee_per_gas": U128(pauses::PAUSE_MAX_FEE_PER_GAS),
             "pause_max_priority_fee_per_gas": U128(pauses::PAUSE_MAX_PRIORITY_FEE_PER_GAS),
+            "verify_pause_fee_per_pause": fees::VERIFY_PAUSE,
+            "prepaid_verify_attempts": verification::PREPAID_ATTEMPTS,
+            "min_verify_pause_gas_base": gas::pause_verifying(0),
+            "min_verify_pause_gas_per_pause": gas::VERIFY_PAUSE,
             // What the posting check asks each pause-role address to hold per pause on a
             // chain: gas limit at fee limit, plus an OP-stack chain's L1 data fee (R7.6).
             "pause_l1_data_fee_allowance": U128(bountee_formats::PAUSE_L1_DATA_FEE_ALLOWANCE),
