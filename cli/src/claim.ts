@@ -7,7 +7,9 @@
 //                 [--sig <fn>] [--job <saved test job.json>]
 //                 [--exploit <exploit.json> --evidence <{block, header, proofs}.json>]
 //                 [--network testnet|mainnet] [--rpc <NEAR rpc>] [--proof-rpc <chain rpc>]
-//                 [--outlayer-api <url>] [--no-wait] [--no-broadcast] [--dry-run] [--json]
+//                 [--outlayer-api <url>] [--chain-rpc <chain id>=<url>[,...]]
+//                 [--timeout <secs>] [--interval <secs>]
+//                 [--no-wait] [--no-broadcast] [--dry-run] [--json]
 //
 // With a Foundry script (or `--job`, a job `bountee test` saved), claim runs `test`'s
 // collection and submits exactly the inputs it judged, re-running it if the saved block is
@@ -17,12 +19,21 @@
 // is sent. The claim balance is topped up with what the claim draws if it's short. Then it
 // waits for the verdict; on PAYS it sees the pauses signed and the bounty paid, and
 // broadcasts every signed pause (R7.3). `--dry-run` seals and prints without filing.
+//
+// From filing on, each stage of the claim is shown the moment the chains show it (D23:
+// sealed, checking, the verdict, and on PAYS pauses signed, paid, then each pause landed and
+// verified), until nothing more will happen or `--timeout` (default 30 min: a pause is
+// verified only once its chain's safe head passes it). A paid claim ends with its receipt
+// (D24). The transactions sent are saved under `.bountee/claims/`, so `bountee status` can
+// build the receipt again later.
 import { readFileSync } from "node:fs";
 import { actions } from "near-api-js";
 import { parseBlockRef, parseExploit, parseAccountProof, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
+import { parseRpcFlags } from "./broadcast.ts";
 import { claimCost, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
 import { formatNear, Near, NEAR_RPC, parseNetwork } from "./near.ts";
 import { KEYSTORE_API, seal } from "./seal.ts";
+import { claimStatus, formatReceipt, saveClaimTxs, watchClaim, type ClaimStatus, type Receipt, type Stage, type StatusOptions } from "./status.ts";
 
 /** `submit_claim` needs at least 200 Tgas; the rest goes to storing the secret, the job and, on PAYS, signing the pauses. */
 const CLAIM_GAS = 300_000_000_000_000n;
@@ -40,7 +51,7 @@ function required(args: string[], name: string): string {
 
 /** The first argument that is neither a flag nor a flag's value. */
 function positional(args: string[]): string | undefined {
-  const bare = new Set(["--json", "--dry-run", "--no-wait", "--no-broadcast"]);
+  const bare = new Set(["--json", "--watch", "--dry-run", "--no-wait", "--no-broadcast"]);
   for (let i = 0; i < args.length; i++) {
     if (bare.has(args[i]!)) continue;
     if (args[i]!.startsWith("--")) { i++; continue; }
@@ -75,9 +86,13 @@ export interface ClaimResult {
   paid?: boolean;
   sign_pauses_tx?: string;
   broadcast?: Settlement["broadcast"];
+  /** Every stage the claim reached, as shown live (D23). */
+  stages?: Stage[];
+  /** On a paid claim: the payout, attestation and each pause's transaction (D24). */
+  receipt?: Receipt;
 }
 
-export async function claim(args: string[]): Promise<ClaimResult> {
+export async function claim(args: string[], onStage: (s: Stage) => void = () => {}): Promise<ClaimResult> {
   const network = parseNetwork(flag(args, "network"));
   const contract = required(args, "contract");
   const bountyText = required(args, "bounty");
@@ -122,6 +137,8 @@ export async function claim(args: string[]): Promise<ClaimResult> {
   });
   const out: ClaimResult = { bounty_contract: contract, judge_build_hash: config.judge_build_hash, sealed_exploit: sealed, ...result };
   if (args.includes("--dry-run")) return out;
+  // Filing waits for the whole claim transaction, often the verdict too: say it's sealed first.
+  onStage({ stage: "sealed", claim_id: null });
 
   const proofsJson = JSON.stringify(proofs);
   const fees = await near.view(contract, "fees");
@@ -141,16 +158,48 @@ export async function claim(args: string[]): Promise<ClaimResult> {
   }
   out.claim_id = Number(JSON.parse(Buffer.from(status.SuccessValue, "base64").toString("utf8")));
   out.tx_hash = outcome.transaction.hash;
+  saveClaimTxs(contract, out.claim_id, [out.tx_hash]);
   if (args.includes("--no-wait")) return out;
 
-  const s = await settle(near, {
+  // See the claim through (settle) while following it (watchClaim), side by side.
+  const chainRpc = flag(args, "chain-rpc");
+  const chainRpcs = chainRpc === undefined ? undefined : parseRpcFlags(chainRpc.split(","));
+  const statusOptions: StatusOptions = {
+    contract,
+    claimId: out.claim_id,
+    network,
+    near,
+    rpcs: chainRpcs,
+    outlayerApi: flag(args, "outlayer-api"),
+    txs: [out.tx_hash],
+  };
+  let failed = false;
+  const settling = settle(near, {
     contract,
     bounty,
     claimId: out.claim_id,
     txHash: out.tx_hash,
     whitehat,
     broadcast: !args.includes("--no-broadcast"),
+    rpcs: chainRpcs,
+  }).catch((e) => {
+    failed = true;
+    throw e;
   });
+  const following = watchClaim(statusOptions, onStage, {
+    timeoutSecs: flag(args, "timeout") === undefined ? 1800 : Number(flag(args, "timeout")),
+    intervalSecs: flag(args, "interval") === undefined ? undefined : Number(flag(args, "interval")),
+    stop: () => failed,
+    seen: new Set(["sealed"]), // shown above, before filing
+  });
+  const [s, followed] = await Promise.all([settling, following]);
+  let last: ClaimStatus = followed;
+  if (s.sign_pauses_tx) {
+    // The payout may sit in the `sign_pauses` retry's transaction rather than the claim's.
+    statusOptions.txs = [out.tx_hash, s.sign_pauses_tx];
+    saveClaimTxs(contract, out.claim_id, statusOptions.txs);
+    if (last.receipt && !last.receipt.payout) last = await claimStatus(statusOptions);
+  }
   return {
     ...out,
     verdict: s.verdict,
@@ -160,6 +209,8 @@ export async function claim(args: string[]): Promise<ClaimResult> {
     ...(s.paid !== undefined ? { paid: s.paid } : {}),
     ...(s.sign_pauses_tx ? { sign_pauses_tx: s.sign_pauses_tx } : {}),
     ...(s.broadcast ? { broadcast: s.broadcast } : {}),
+    stages: last.stages,
+    ...(last.receipt ? { receipt: last.receipt } : {}),
   };
 }
 
@@ -172,5 +223,6 @@ export function formatClaimResult(r: ClaimResult): string {
   if (r.bounty_state) lines.push(`bounty: ${r.bounty_state}${r.paid ? " (paid to you)" : ""}`);
   if (r.sign_pauses_tx) lines.push(`pauses signed by retry: ${r.sign_pauses_tx}`);
   for (const p of r.broadcast?.pauses ?? []) lines.push(`pause on ${p.chain_id} ${p.contract}: ${p.sent} ${p.tx_hash}${p.receipt ? ` (${p.receipt.status})` : ""}`);
+  if (r.receipt) lines.push(formatReceipt(r.receipt));
   return lines.join("\n");
 }
