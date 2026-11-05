@@ -7,7 +7,7 @@
 // (`contract/tests/seam_c.rs`) acts on the answer; T (this file) catches what both miss:
 // the real pinned RPCs answering the posting reads from inside an OutLayer job, a real
 // contract's access control and a real revert, the tool's own preflight, and the USDC
-// really coming back. It misses the second chain (no Arbitrum Sepolia RPCs pinned yet) and
+// really coming back. It misses the second chain (`second-chain-testnet.test.ts`, #20) and
 // the RPC-disagreement cases (J only: testnet RPCs can't be made to disagree at will).
 //
 //   a posting whose pause role has no pause gas: the tool refuses it before spending (R7.6)

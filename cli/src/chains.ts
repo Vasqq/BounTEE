@@ -27,9 +27,14 @@ export const CHAINS: Record<number, Chain> = {
   },
   421614: {
     name: "Arbitrum Sepolia",
-    rpcs: ["https://sepolia-rollup.arbitrum.io/rpc"],
-    proofRpcs: [],
+    rpcs: ["https://sepolia-rollup.arbitrum.io/rpc", "https://421614.rpc.thirdweb.com"],
+    proofRpcs: ["https://sepolia-rollup.arbitrum.io/rpc", "https://421614.rpc.thirdweb.com"],
     explorerTx: "https://sepolia.arbiscan.io/tx/",
+    judgeRpcs: [
+      "https://sepolia-rollup.arbitrum.io/rpc",
+      "https://arbitrum-sepolia-rpc.publicnode.com",
+      "https://arbitrum-sepolia.gateway.tenderly.co",
+    ],
   },
   8453: { name: "Base", rpcs: ["https://mainnet.base.org"], proofRpcs: [], explorerTx: "https://basescan.org/tx/" },
   42161: { name: "Arbitrum One", rpcs: ["https://arb1.arbitrum.io/rpc"], proofRpcs: [], explorerTx: "https://arbiscan.io/tx/" },

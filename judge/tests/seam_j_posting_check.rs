@@ -87,11 +87,32 @@ fn granted(balance: u128) -> Chain {
 }
 
 fn run(wasm: &PathBuf, job: &Value, rpcs: &[TestChainRpc]) -> Output {
-    let urls: Vec<&str> = rpcs.iter().map(|r| r.url.as_str()).collect();
-    let mut child = Command::new("wasmtime")
+    run_per_chain(wasm, job, rpcs, &[])
+}
+
+fn urls(rpcs: &[TestChainRpc]) -> String {
+    rpcs.iter().map(|r| r.url.as_str()).collect::<Vec<_>>().join(",")
+}
+
+/// Run `wasm` on `job` with `rpcs` as every chain's stand-ins, except the chains named in
+/// `per_chain`, which get their own (`BOUNTEE_TEST_RPCS_<chain id>`).
+fn run_per_chain(
+    wasm: &PathBuf,
+    job: &Value,
+    rpcs: &[TestChainRpc],
+    per_chain: &[(u64, &[TestChainRpc])],
+) -> Output {
+    let mut command = Command::new("wasmtime");
+    command
         .args(["run", "-S", "http"])
         .arg("--env")
-        .arg(format!("BOUNTEE_TEST_RPCS={}", urls.join(",")))
+        .arg(format!("BOUNTEE_TEST_RPCS={}", urls(rpcs)));
+    for (chain, rpcs) in per_chain {
+        command
+            .arg("--env")
+            .arg(format!("BOUNTEE_TEST_RPCS_{chain}={}", urls(rpcs)));
+    }
+    let mut child = command
         .arg("--env")
         .arg(format!("NEAR_PREDECESSOR_ID={BOUNTY_CONTRACT}"))
         .arg("--")
@@ -241,6 +262,50 @@ fn r12_2_a_contract_that_cannot_be_paused_fails() {
             (1, PostingFailureReason::CannotPause),
             (2, PostingFailureReason::CannotPause),
         ]
+    );
+}
+
+// ---- D1, R12.5: a bounty covering two chains ------------------------------------------------
+
+/// D1, R12.5, R7.6: a bounty covering Base Sepolia and Arbitrum Sepolia is checked on each
+/// chain through that chain's own RPCs, at that chain's own block, and one chain's failure
+/// fails only its own contract: here Arbitrum's pause role is one wei short of its pause gas.
+#[test]
+fn d1_r12_5_each_covered_chain_is_read_through_its_own_rpcs() {
+    const ARBITRUM: u64 = 421614;
+    const ARB_VAULT: &str = "0x00000000000000000000000000000000000000ab";
+    let arbitrum = Chain::at(HEAD + 400)
+        .contract(ARB_VAULT, Some(&pause_role()))
+        .balance(&pause_role(), needed(1) - 1);
+    let base_rpcs = all(granted(needed(1))).map(TestChainRpc::answering);
+    let arb_rpcs = all(arbitrum).map(TestChainRpc::answering);
+    let out = run_per_chain(
+        test_build(),
+        &job(&[(CHAIN, VAULT), (ARBITRUM, ARB_VAULT)]),
+        &base_rpcs,
+        &[(ARBITRUM, &arb_rpcs)],
+    );
+    assert_eq!(
+        reasons(&result(&out)),
+        vec![(1, PostingFailureReason::PauseGasShort)]
+    );
+    let asked = |rpcs: &[TestChainRpc]| -> Vec<Value> {
+        rpcs.iter()
+            .flat_map(|r| r.requests())
+            .filter(|r| r["method"] == "eth_getCode")
+            .map(|r| r["params"].clone())
+            .collect()
+    };
+    let (base, arb) = (asked(&base_rpcs), asked(&arb_rpcs));
+    assert_eq!((base.len(), arb.len()), (3, 3), "{base:?} {arb:?}");
+    assert!(
+        base.iter().all(|p| p[0] == VAULT && p[1] == format!("{HEAD:#x}")),
+        "{base:?}"
+    );
+    assert!(
+        arb.iter()
+            .all(|p| p[0] == ARB_VAULT && p[1] == format!("{:#x}", HEAD + 400)),
+        "{arb:?}"
     );
 }
 

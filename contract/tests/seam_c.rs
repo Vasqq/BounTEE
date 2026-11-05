@@ -1366,6 +1366,67 @@ async fn pays_signs_every_pause_from_the_pause_role_address_and_then_pays() -> a
     Ok(())
 }
 
+/// D1, R7.1: a bounty covering Base Sepolia and Arbitrum Sepolia, with Base as its proof
+/// chain. A claim is ONE judge job, carrying the rules with that one proof chain and the
+/// claim's block on it, with nothing asked of the other chain; its PAYS verdict signs a
+/// pause for the covered contract on each chain, each for its own chain ID with that
+/// chain's first nonce, before the payout.
+#[tokio::test]
+async fn d1_a_two_chain_bounty_is_judged_once_on_its_proof_chain_and_pauses_both_chains(
+) -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let mut rules = valid_rules(&s).await?;
+    rules["covered_contracts"] = json!([
+        { "chain_id": 84532, "address": "0x00000000000000000000000000000000000000aa" },
+        { "chain_id": 421614, "address": "0x00000000000000000000000000000000000000dd" },
+    ]);
+    s.post("vault", &rules).await?.into_result()?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+    let jobs_before = s.requests().await?.len();
+
+    let id = s.pay_claim("vault").await?;
+
+    let jobs = s.requests().await?;
+    assert_eq!(jobs.len(), jobs_before + 1, "one job for the claim");
+    let input: Value = serde_json::from_str(jobs.last().unwrap()["input_data"].as_str().unwrap())?;
+    let judged = &input["judge_claim"];
+    assert_eq!(judged["rules"]["proof_chain"], 84532);
+    assert_eq!(judged["rules"]["covered_contracts"], rules["covered_contracts"]);
+    assert_eq!(judged["block"], s.claim_args("vault")["block"]);
+
+    let bounty = s.bounty("vault").await?;
+    assert_eq!(bounty["state"], "paid");
+    assert_eq!(bounty["winning_claim"], id);
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    let role = pause_role_address(&s, "vault");
+    let signed: Vec<(String, String, String)> = bounty["signed_pauses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            let tx: Value =
+                serde_json::from_str(&cast(&["decode-transaction", p["tx"].as_str().unwrap()]))
+                    .unwrap();
+            assert_eq!(mpc::sender(&tx), role, "signed from the pause-role address");
+            assert_eq!(tx["input"], "0x8456cb59");
+            (
+                tx["chainId"].as_str().unwrap().to_owned(),
+                tx["to"].as_str().unwrap().to_owned(),
+                tx["nonce"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    let to = |b: &str| format!("0x{}{b}", "0".repeat(38));
+    assert_eq!(
+        signed,
+        vec![
+            ("0x14a34".to_owned(), to("aa"), "0x0".to_owned()),
+            ("0x66eee".to_owned(), to("dd"), "0x0".to_owned()),
+        ]
+    );
+    Ok(())
+}
+
 impl Sandbox {
     /// Wait until no pause signing is under way, and return the bounty.
     async fn wait_until_not_signing(&self, name: &str) -> anyhow::Result<Value> {
