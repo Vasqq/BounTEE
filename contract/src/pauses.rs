@@ -319,7 +319,8 @@ impl Contract {
             "pauses_signed",
             json!({ "bounty": id, "claim_id": claim_id, "pauses": summary }),
         );
-        self.pay_out(claim_id).into()
+        // Paid at once unless an earlier claim still holds its place (R3.6).
+        self.pay_if_settled(&id)
     }
 }
 

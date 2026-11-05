@@ -128,6 +128,7 @@ enum Key {
     PostingFees,
     ClaimBalances,
     CoveredBy,
+    SealedExploits,
 }
 
 /// Where a bounty is in its life.
@@ -167,6 +168,10 @@ pub struct Bounty {
     /// Set while a payout's transfer is under way and cleared only by its callback, so no
     /// retry can send a second transfer beside it.
     pub paying_out: bool,
+    /// Claims on this bounty with no verdict yet (storing, judging, or waiting for a retry),
+    /// as (claim ID, submission time). Each holds its place against a later PAYS for
+    /// [`claims::CLAIM_PLACE_HOLD_NS`] from its submission (R2.6, R3.6).
+    pub open_claims: Vec<(u64, u64)>,
 }
 
 /// A bounty as its view returns it: every rule exactly as posted (R1.2).
@@ -182,6 +187,9 @@ pub struct BountyView {
     pub signing_pauses: bool,
     /// Whether a payout transfer is under way; a `paying` bounty that isn't waits for a retry.
     pub paying_out: bool,
+    /// While an earlier claim still holds its place, the latest time it can hold the winning
+    /// claim's payout (R3.6); after it, anyone's `retry_payout` pays.
+    pub payout_waits_until_ns: Option<near_sdk::json_types::U64>,
 }
 
 /// Where a claim is in its life.
@@ -234,6 +242,9 @@ pub struct Contract {
     /// The bounty that last covered each contract; it still covers it while its posting
     /// check is pending or it is live (R12.3).
     covered_by: LookupMap<CoveredContract, BountyId>,
+    /// The claim each sealed exploit (by sha256 of its ciphertext) was filed as, so the
+    /// same one is never judged twice (R3.5).
+    sealed_exploits: LookupMap<B256, u64>,
 }
 
 #[near]
@@ -270,6 +281,7 @@ impl Contract {
             posting_fees: LookupMap::new(Key::PostingFees),
             claim_balances: LookupMap::new(Key::ClaimBalances),
             covered_by: LookupMap::new(Key::CoveredBy),
+            sealed_exploits: LookupMap::new(Key::SealedExploits),
         }
     }
 
@@ -290,6 +302,7 @@ impl Contract {
             "min_sign_pauses_gas_per_contract": gas::SIGN_PAUSE,
             "min_sign_pauses_gas_base": gas::pause_signing(0),
             "min_retry_payout_gas": gas::payout(),
+            "claim_place_hold_ns": near_sdk::json_types::U64(claims::CLAIM_PLACE_HOLD_NS),
             "pause_gas_limit": pauses::PAUSE_GAS_LIMIT,
             "pause_max_fee_per_gas": U128(pauses::PAUSE_MAX_FEE_PER_GAS),
             "pause_max_priority_fee_per_gas": U128(pauses::PAUSE_MAX_PRIORITY_FEE_PER_GAS),
@@ -312,6 +325,10 @@ impl Contract {
             signed_pauses: b.signed_pauses.clone(),
             signing_pauses: b.signing_in_flight(),
             paying_out: b.paying_out,
+            payout_waits_until_ns: b
+                .winning_claim
+                .and_then(|w| b.payout_held_until(w, env::block_timestamp()))
+                .map(near_sdk::json_types::U64),
         })
     }
 

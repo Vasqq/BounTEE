@@ -7,9 +7,11 @@
 //! after the end date is the only other path, in its own ticket.
 
 use bountee_formats::BountyId;
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{U128, U64};
 use near_sdk::serde_json::json;
-use near_sdk::{env, ext_contract, near, require, AccountId, NearToken, Promise, PromiseResult};
+use near_sdk::{
+    env, ext_contract, near, require, AccountId, NearToken, Promise, PromiseOrValue, PromiseResult,
+};
 
 use crate::{emit, fees, gas, BountyState, Contract, ContractExt};
 
@@ -22,10 +24,11 @@ pub trait FungibleToken {
 
 #[near]
 impl Contract {
-    /// Retry the payout of a bounty whose transfer failed (R2.4). Anyone may call; it sends
-    /// the same whole amount to the winning claim's Whitehat and no one else, and is refused
-    /// while a transfer is under way or once the bounty is paid, so it never pays twice.
-    /// Attach the gas `fees()` names as `min_retry_payout_gas`.
+    /// Start the payout of a bounty whose transfer failed (R2.4), or that waited for earlier
+    /// claims (R3.6). Anyone may call; it sends the same whole amount to the winning claim's
+    /// Whitehat and no one else, and is refused while a transfer is under way, while an
+    /// earlier claim still holds its place, or once the bounty is paid, so it never pays
+    /// twice or out of order. Attach the gas `fees()` names as `min_retry_payout_gas`.
     pub fn retry_payout(&mut self, id: BountyId) -> Promise {
         let bounty = self
             .bounties
@@ -38,6 +41,12 @@ impl Contract {
         let claim_id = bounty
             .winning_claim
             .unwrap_or_else(|| env::panic_str("this bounty has no winning claim"));
+        if let Some(until) = bounty.payout_held_until(claim_id, env::block_timestamp()) {
+            env::panic_str(&format!(
+                "an earlier claim is still being judged or waiting for its retry; \
+                 it holds its place until {until} ns"
+            ));
+        }
         require!(
             Self::gas_left(gas::TAIL) >= gas::payout(),
             "attach more gas: see min_retry_payout_gas in fees()"
@@ -81,6 +90,36 @@ impl Contract {
 }
 
 impl Contract {
+    /// Start the payout of a `paying` bounty's winning claim if no earlier claim still holds
+    /// its place (R3.6) and enough gas is left; otherwise it waits for an earlier claim's
+    /// verdict (whose callback calls this again) or for anyone's `retry_payout`.
+    pub(crate) fn pay_if_settled(&mut self, id: &BountyId) -> PromiseOrValue<()> {
+        let Some(bounty) = self.bounties.get(id) else {
+            return PromiseOrValue::Value(());
+        };
+        let Some(claim_id) = bounty.winning_claim else {
+            return PromiseOrValue::Value(());
+        };
+        if bounty.state != BountyState::Paying || bounty.paying_out {
+            return PromiseOrValue::Value(());
+        }
+        if let Some(until) = bounty.payout_held_until(claim_id, env::block_timestamp()) {
+            emit(
+                "payout_waiting",
+                json!({ "bounty": id, "claim_id": claim_id, "until_ns": U64(until) }),
+            );
+            return PromiseOrValue::Value(());
+        }
+        if Self::gas_left(near_sdk::Gas::from_gas(0)) < gas::payout() {
+            emit(
+                "payout_waiting",
+                json!({ "bounty": id, "claim_id": claim_id }),
+            );
+            return PromiseOrValue::Value(());
+        }
+        self.pay_out(claim_id).into()
+    }
+
     /// Pay the whole bounty amount to the claim's Whitehat, registering them with USDC
     /// first if needed (R3.2, R2.7). No allowlist and no identity check (D9). The NEAR it
     /// attaches comes from the bounty's posting fee. The caller has checked the bounty is
