@@ -330,6 +330,11 @@ pub struct ClaimRecord {
     /// them from NEAR RPC (an archival one for old blocks) and check them against
     /// `proofs_sha256` (D7.1).
     pub submitted_at_block: near_sdk::json_types::U64,
+    /// The NEAR block the claim's current step began at: its submission while its secret is
+    /// stored, then the request of its job (the first, or a retry's). A claim still storing
+    /// or judging [`claims::CLAIM_RUN_STALE_BLOCKS`] after it no longer blocks the bounty's
+    /// withdrawal: OutLayer's job lapses long before, so its callback was lost (R10.2).
+    pub step_started_at_block: near_sdk::json_types::U64,
     /// The OutLayer secret profile holding this claim's sealed exploit; stored once, read by
     /// the claim's job and, for a winning claim, its release job.
     pub secret_profile: String,

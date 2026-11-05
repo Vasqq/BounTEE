@@ -36,6 +36,23 @@ use crate::{
 /// submission: one hour, time to retry a job that failed (R2.6, R3.6).
 pub const CLAIM_PLACE_HOLD_NS: u64 = 3_600_000_000_000;
 
+/// How many blocks after its step began a claim still storing or judging counts as running:
+/// the stale rule the release and publication jobs use (OutLayer's yield lapses at about 200
+/// blocks, so a callback that hasn't landed by then never will).
+pub const CLAIM_RUN_STALE_BLOCKS: u64 = crate::exploit_job::STALE_BLOCKS;
+
+impl ClaimRecord {
+    /// The claim's secret is being stored or its job is running, and its callback can still
+    /// land: until then it blocks the bounty's withdrawal (R10.2).
+    pub(crate) fn running(&self, height: u64) -> bool {
+        let stale_at = self
+            .step_started_at_block
+            .0
+            .saturating_add(CLAIM_RUN_STALE_BLOCKS);
+        matches!(self.state, ClaimState::Storing | ClaimState::Judging) && height < stale_at
+    }
+}
+
 /// For the withdrawal's callback.
 const ON_CLAIM_BALANCE_WITHDRAWN: Gas = Gas::from_tgas(5);
 
@@ -201,6 +218,7 @@ impl Contract {
                 proofs_sha256: sha256_hex(proofs.as_bytes()),
                 submitted_at_ns: U64(now),
                 submitted_at_block: U64(env::block_height()),
+                step_started_at_block: U64(env::block_height()),
                 secret_profile: secret_profile.clone(),
                 state: ClaimState::Storing,
                 verdict: None,
@@ -305,7 +323,9 @@ impl Contract {
         self.bounties.flush();
         let entry_cost = fees::storage_cost(env::storage_usage().saturating_sub(storage_before));
         self.draw_claim_balance(&claim.whitehat, job_deposit.saturating_add(entry_cost));
-        self.claims.get_mut(&claim_id).expect("read above").state = ClaimState::Judging;
+        let retried = self.claims.get_mut(&claim_id).expect("read above");
+        retried.state = ClaimState::Judging;
+        retried.step_started_at_block = U64(env::block_height());
         emit(
             "claim_retried",
             json!({ "claim_id": claim_id, "bounty": claim.bounty }),
@@ -345,6 +365,7 @@ impl Contract {
             return self.pay_if_settled(&bounty_id);
         }
         claim.state = ClaimState::Judging;
+        claim.step_started_at_block = U64(env::block_height());
         self.request_claim_job(claim_id, &input, job_deposit).into()
     }
 
@@ -523,14 +544,14 @@ impl Bounty {
     }
 
     /// Drop the claims whose place has lapsed; they can't hold a payout any more. A claim
-    /// whose secret is being stored or whose job is running stays, at any age: until its
-    /// verdict it blocks the bounty's withdrawal (R10.2), though a lapsed one holds no payout.
+    /// whose secret is being stored or whose job is running stays while its callback can
+    /// still land: until its verdict it blocks the bounty's withdrawal (R10.2), though a
+    /// lapsed one holds no payout.
     fn prune_lapsed(&mut self, now: u64, claims: &LookupMap<u64, ClaimRecord>) {
+        let height = env::block_height();
         self.open_claims.retain(|(id, submitted)| {
             now < submitted.saturating_add(CLAIM_PLACE_HOLD_NS)
-                || claims
-                    .get(id)
-                    .is_some_and(|c| matches!(c.state, ClaimState::Storing | ClaimState::Judging))
+                || claims.get(id).is_some_and(|c| c.running(height))
         });
     }
 }

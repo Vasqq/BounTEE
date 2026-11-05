@@ -13,7 +13,7 @@ use near_sdk::{env, near, require, NearToken, Promise, PromiseResult};
 
 use crate::claims::CLAIM_PLACE_HOLD_NS;
 use crate::payout::ext_ft;
-use crate::{emit, fees, gas, BountyState, ClaimState, Contract, ContractExt};
+use crate::{emit, fees, gas, BountyState, Contract, ContractExt};
 
 #[near]
 impl Contract {
@@ -51,12 +51,13 @@ impl Contract {
         );
         // R10.2: a claim whose job is under way may still win, and a claim with no verdict
         // may be retried while it holds its place. A PAYS waiting for its pause signatures
-        // has already closed the bounty (`signing`), refused above.
+        // has already closed the bounty (`signing`), refused above. A claim whose callback
+        // hasn't landed within the stale rule never will: it no longer blocks, and should it
+        // land after the withdrawal its verdict can't win (`claim_can_still_win`), so it
+        // moves nothing.
+        let height = env::block_height();
         let unresolved = bounty.open_claims.iter().any(|(claim_id, submitted)| {
-            let running = self
-                .claims
-                .get(claim_id)
-                .is_some_and(|c| matches!(c.state, ClaimState::Storing | ClaimState::Judging));
+            let running = self.claims.get(claim_id).is_some_and(|c| c.running(height));
             running || now < submitted.saturating_add(CLAIM_PLACE_HOLD_NS)
         });
         require!(

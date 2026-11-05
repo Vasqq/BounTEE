@@ -14,6 +14,9 @@
 //!   `{"output": <json>}` returns that JSON (`null` for a refused job), `{"fail": true}`
 //!   hands the caller a failed promise (its deposit sent back). With no answer queued the
 //!   job stays pending (a yield) until a test calls `resolve(request_id, output)`.
+//!   `{"outlive": true}` leaves the job pending too, but when its yield lapses (about 200
+//!   blocks) it opens another in its place, once: the caller's callback lands only after
+//!   about 400 blocks, or when a test resolves it, as a lost or late callback would.
 //! - `requests()` and `secret(owner, profile)` read back exactly what the caller sent.
 
 use near_sdk::json_types::U128;
@@ -28,6 +31,8 @@ pub struct Answer {
     pub output: Option<String>,
     /// Make `request_execution` itself panic, so the caller sees a failed promise.
     pub fail: Option<bool>,
+    /// Keep the job pending past its first yield's timeout (a late callback).
+    pub outlive: Option<bool>,
 }
 
 #[near(serializers = [json, borsh])]
@@ -67,6 +72,8 @@ pub struct TestOutlayer {
     yields: IterableMap<u64, YieldId>,
     secrets: IterableMap<String, Secret>,
     fail_store: bool,
+    /// Requests whose first yield, on lapsing, opens a second.
+    outliving: IterableMap<u64, bool>,
 }
 
 impl Default for TestOutlayer {
@@ -78,6 +85,7 @@ impl Default for TestOutlayer {
             yields: IterableMap::new(b"y"),
             secrets: IterableMap::new(b"s"),
             fail_store: false,
+            outliving: IterableMap::new(b"o"),
         }
     }
 }
@@ -161,6 +169,26 @@ impl TestOutlayer {
             resolved: answer.is_some(),
         });
         match answer {
+            Some(Answer {
+                outlive: Some(true),
+                ..
+            }) => {
+                self.requests
+                    .get_mut(id as u32)
+                    .expect("pushed above")
+                    .resolved = false;
+                self.outliving.insert(id, true);
+                let args = serde_json::json!({ "request_id": id }).to_string();
+                // Room for the callback to open the second yield.
+                let (promise, yield_id) = Promise::new_yield(
+                    "on_execution_response",
+                    args,
+                    Gas::from_tgas(40),
+                    GasWeight(0),
+                );
+                self.yields.insert(id, yield_id);
+                let _ = promise.as_return();
+            }
             Some(a) => env::value_return(output_bytes(&a.output)),
             None => {
                 let args = serde_json::json!({ "request_id": id }).to_string();
@@ -197,11 +225,25 @@ impl TestOutlayer {
     /// on a timeout, as OutLayer does.
     #[private]
     pub fn on_execution_response(&mut self, request_id: u64) {
-        let _ = request_id;
         #[allow(deprecated)]
         let bytes = match env::promise_result(0) {
             PromiseResult::Successful(b) => b,
-            PromiseResult::Failed => b"null".to_vec(),
+            PromiseResult::Failed => {
+                if self.outliving.remove(&request_id).is_some() {
+                    // The first yield lapsed: open another, and hand its result on.
+                    let args = serde_json::json!({ "request_id": request_id }).to_string();
+                    let (promise, yield_id) = Promise::new_yield(
+                        "on_execution_response",
+                        args,
+                        Gas::from_tgas(10),
+                        GasWeight(0),
+                    );
+                    self.yields.insert(request_id, yield_id);
+                    let _ = promise.as_return();
+                    return;
+                }
+                b"null".to_vec()
+            }
         };
         env::value_return(bytes);
     }

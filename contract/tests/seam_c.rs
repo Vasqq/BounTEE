@@ -3991,3 +3991,72 @@ async fn r10_2_a_pays_claim_waiting_for_its_payout_blocks_the_withdrawal() -> an
     Ok(())
 }
 
+
+
+/// R10.2, R11 (second code review): a claim whose job's callback never lands can't block the
+/// Protocol's withdrawal forever. Once its place has lapsed, it still blocks while its job
+/// could answer; past the stale rule (300 blocks from the job's request, OutLayer's yield
+/// lapsing at about 200) it no longer does, and the Protocol withdraws. When the callback
+/// lands late, with PAYS, it wins nothing: the withdrawn USDC stays withdrawn, nothing is
+/// paid and no pause is signed.
+#[tokio::test]
+async fn r10_2_r11_a_claim_whose_callback_never_lands_stops_blocking_the_withdrawal(
+) -> anyhow::Result<()> {
+    // A day node: the claim's place (an hour) lapses in a few dozen blocks.
+    let s = Sandbox::start_with_days().await?;
+    let start = s.usdc_balance(s.protocol.id()).await?;
+    let mut r = rules(&s, 1_800_000_000_000, now_ns(&s).await?);
+    r["covered_contracts"][0]["address"] = json!(VAULT_W);
+    s.post("vault", &r).await?.into_result()?;
+    s.top_up(&s.whitehat, NearToken::from_near(2)).await?;
+
+    // The job's answer arrives only after its first yield lapses and a second one is opened.
+    s.script(json!({ "outlive": true })).await?;
+    let running = s
+        .whitehat
+        .call(s.contract.id(), "submit_claim")
+        .args_json(s.claim_args("vault"))
+        .gas(tgas(300))
+        .transact_async()
+        .await?;
+    let jobs = s.wait_for_requests(2).await?;
+    let job = jobs[1]["id"].as_u64().unwrap();
+    s.wait_for_claim_state(0, "judging").await?;
+    let claim = s.claim(0).await?;
+    let submitted: u64 = claim["submitted_at_ns"].as_str().unwrap().parse()?;
+    let started: u64 = claim["step_started_at_block"].as_str().unwrap().parse()?;
+
+    // Past the end date and the claim's place, but its job could still answer: refused.
+    let end: u64 = r["end_date_ns"].as_str().unwrap().parse()?;
+    s.pass_time_to(end.max(submitted + PLACE_HOLD_NS)).await?;
+    assert!(s.worker.view_block().await?.height() < started + 300);
+    let refused = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert!(failure_text(&refused).contains("unresolved"), "{refused:?}");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+
+    // 300 blocks after the job's request its callback still hasn't landed: withdrawn.
+    let height = s.worker.view_block().await?.height();
+    s.worker.fast_forward(started + 305 - height).await?;
+    assert_eq!(s.claim(0).await?["state"], "judging");
+    s.withdraw_bounty(&s.protocol, "vault")
+        .await?
+        .into_result()?;
+    assert_eq!(s.bounty("vault").await?["state"], "withdrawn");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    assert_eq!(s.usdc_balance(s.protocol.id()).await?, start);
+
+    // The late callback lands with PAYS: it changes nothing about the withdrawn funds.
+    s.resolve(job, Some(PAYS)).await?;
+    running.await?.into_result()?;
+    s.wait_for_claim_state(0, "judged").await?;
+    let claim = s.claim(0).await?;
+    assert_eq!(claim["state"], "judged", "{claim}");
+    let bounty = s.bounty("vault").await?;
+    assert_eq!(bounty["state"], "withdrawn", "{bounty}");
+    assert_eq!(bounty["winning_claim"], Value::Null, "{bounty}");
+    assert!(s.sign_requests().await?.is_empty());
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, 0);
+    assert_eq!(s.usdc_balance(s.protocol.id()).await?, start);
+    Ok(())
+}
