@@ -21,7 +21,16 @@ const JUDGE_BUILD_HASH: &str = "0x1111111111111111111111111111111111111111111111
 const JUDGE_WASM_URL: &str = "https://example.test/judge.wasm";
 const SEED_NATIVE: &str = "1000000000000000000";
 const BOUNTY_AMOUNT: u128 = 5_000_000_000; // 5,000 USDC
-const SEALED: &str = "AXNlYWxlZCBleHBsb2l0IGNpcGhlcnRleHQ=";
+/// What every test sealed exploit starts with; each claim gets its own (see [`sealed`]).
+const SEALED: &str = "AXNlYWxlZCBleHBsb2l0";
+static SEALED_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A new sealed exploit ciphertext (base64), never filed before, so each claim is its own
+/// exploit (R3.5 refuses the same one twice).
+fn sealed() -> String {
+    let n = SEALED_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{SEALED}{n:08}")
+}
 /// The judge's answer to a posting check that passed (`bountee_formats::PostingCheckResult`).
 const PASSED: &str = r#"{"failures":[]}"#;
 const PROOFS: &str = r#"[{"address":"0x00000000000000000000000000000000000000aa"}]"#;
@@ -246,7 +255,7 @@ impl Sandbox {
             "block": { "number": 1234, "hash": format!("0x{}", "ab".repeat(32)) },
             "header": "0xf90200",
             "proofs": PROOFS,
-            "sealed_exploit": SEALED,
+            "sealed_exploit": sealed(),
         })
     }
 
@@ -665,7 +674,10 @@ async fn a_claim_draws_from_the_claim_balance_and_requests_its_job_at_once() -> 
         .args_json(json!({ "owner": s.contract.id(), "profile": profile }))
         .await?
         .json()?;
-    assert_eq!(secret["encrypted_secrets_base64"], SEALED);
+    assert!(secret["encrypted_secrets_base64"]
+        .as_str()
+        .unwrap()
+        .starts_with(SEALED));
     assert_eq!(secret["stores"], 1);
     let access: Value = serde_json::from_str(secret["access"].as_str().unwrap())?;
     assert_eq!(
@@ -2136,7 +2148,10 @@ async fn r12_3_a_contract_already_covered_by_a_live_or_pending_bounty_is_refused
         .await?;
     assert!(failure_text(&r).contains("already covered"), "{r:?}");
     assert!(s.bounty("again").await?.is_null());
-    assert_eq!(s.usdc_balance(s.protocol.id()).await?, start - BOUNTY_AMOUNT);
+    assert_eq!(
+        s.usdc_balance(s.protocol.id()).await?,
+        start - BOUNTY_AMOUNT
+    );
 
     // VAULT_B: covered by a bounty whose posting check hasn't answered yet.
     s.prepay_posting_fee(&s.protocol, s.fee("posting_fee").await?)
@@ -2195,6 +2210,530 @@ async fn r7_6_fees_show_the_pause_gas_the_posting_check_asks_for() -> anyhow::Re
     );
     // 0.0002 ETH + 0.00001 ETH, from the spec.
     assert_eq!(fees["pause_gas_per_pause"], "210000000000000");
+    Ok(())
+}
+
+// ---- claim fairness (#18) ----
+//
+// Seam C: claims on one bounty resolve fairly. The OutLayer stand-in holds jobs pending so a
+// test chooses the order verdicts arrive in, answers `null` or fails a request, or lets a
+// job's yield time out. Misses: real OutLayer timing and failures (T), real gas.
+
+impl Sandbox {
+    /// Post `name` covering its own contract, so several bounties can live in one sandbox
+    /// (R12.3), ending `end_in_ns` from now.
+    async fn post_covering(&self, name: &str, last_byte: u8, end_in_ns: u64) -> anyhow::Result<()> {
+        let mut r = rules(self, end_in_ns, now_ns(self).await?);
+        r["covered_contracts"][0]["address"] =
+            json!(format!("0x{}{last_byte:02x}", "00".repeat(19)));
+        self.post(name, &r).await?.into_result()?;
+        Ok(())
+    }
+
+    /// File a claim with exactly these arguments, without waiting for its receipts.
+    async fn file(&self, by: &Account, args: &Value) -> anyhow::Result<Pending> {
+        Ok(by
+            .call(self.contract.id(), "submit_claim")
+            .args_json(args)
+            .gas(tgas(300))
+            .transact_async()
+            .await?)
+    }
+
+    /// File a claim with exactly these arguments and wait for every receipt.
+    async fn file_now(&self, by: &Account, args: &Value) -> anyhow::Result<ExecutionFinalResult> {
+        Ok(by
+            .call(self.contract.id(), "submit_claim")
+            .args_json(args)
+            .gas(tgas(300))
+            .transact()
+            .await?)
+    }
+
+    /// `by` retries claim `id` with these proofs and waits for every receipt.
+    async fn retry_now(
+        &self,
+        by: &Account,
+        id: u64,
+        proofs: &str,
+    ) -> anyhow::Result<ExecutionFinalResult> {
+        Ok(by
+            .call(self.contract.id(), "retry_claim")
+            .args_json(json!({ "claim_id": id, "proofs": proofs }))
+            .gas(tgas(300))
+            .transact()
+            .await?)
+    }
+
+    /// Answer every pause signature request of `name` from index `from` on, once they arrive.
+    async fn sign_pauses_from(&self, name: &str, from: usize) -> anyhow::Result<()> {
+        let covered = self.bounty(name).await?["rules"]["covered_contracts"]
+            .as_array()
+            .unwrap()
+            .len();
+        let requests = self.wait_for_sign_requests(from + covered).await?;
+        self.answer_from(&requests, from, &self.pause_key(name), false)
+            .await
+    }
+
+    fn job_input(request: &Value) -> anyhow::Result<Value> {
+        Ok(serde_json::from_str(
+            request["input_data"].as_str().unwrap(),
+        )?)
+    }
+
+    async fn near_balance(&self, id: &AccountId) -> anyhow::Result<u128> {
+        Ok(self.worker.view_account(id).await?.balance.as_yoctonear())
+    }
+
+    async fn set_fail_store(&self, fail: bool) -> anyhow::Result<()> {
+        self.test_outlayer
+            .call("set_fail_store")
+            .args_json(json!({ "fail": fail }))
+            .transact()
+            .await?
+            .into_result()?;
+        Ok(())
+    }
+}
+
+/// R2.6: a job that comes back `null`, a request OutLayer refuses, and a job that times out
+/// each leave the claim pending (`no_verdict`) in its place, with nothing moved. Only the
+/// claim's Whitehat may retry it, with the proofs it was filed with; a retry reuses the
+/// claim's sealed exploit without storing it again and keeps its original submission time.
+#[tokio::test]
+async fn r2_6_a_failed_or_timed_out_job_leaves_the_claim_pending_and_retryable(
+) -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    s.top_up(&s.whitehat, NearToken::from_near(2)).await?;
+
+    // A `null` job and a refused request.
+    s.script(json!({ "output": null })).await?;
+    let nulled: u64 = s
+        .submit_claim(&s.whitehat, "vault")
+        .await?
+        .into_result()?
+        .json()?;
+    s.script(json!({ "fail": true })).await?;
+    let refused: u64 = s
+        .submit_claim(&s.whitehat, "vault")
+        .await?
+        .into_result()?
+        .json()?;
+    // A job nobody answers: its yield times out and OutLayer hands back `null`.
+    let jobs = s.requests().await?.len();
+    let pending = s.file(&s.whitehat, &s.claim_args("vault")).await?;
+    s.wait_for_requests(jobs + 1).await?;
+    s.worker.fast_forward(250).await?;
+    let timed_out: u64 = pending.await?.into_result()?.json()?;
+    s.wait_for_claim_state(timed_out, "no_verdict").await?;
+
+    for id in [nulled, refused, timed_out] {
+        let claim = s.claim(id).await?;
+        assert_eq!(claim["state"], "no_verdict", "{claim}");
+        assert_eq!(claim["verdict"], Value::Null);
+    }
+    assert_eq!(s.bounty("vault").await?["state"], "live");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+    assert!(s.sign_requests().await?.is_empty());
+
+    // Only the claim's Whitehat retries it, and only with the proofs it was filed with.
+    s.top_up(&s.other, NearToken::from_near(1)).await?;
+    let r = s.retry_now(&s.other, nulled, PROOFS).await?;
+    assert!(
+        failure_text(&r).contains("only the claim's Whitehat"),
+        "{r:?}"
+    );
+    let r = s.retry_now(&s.whitehat, nulled, "[]").await?;
+    assert!(failure_text(&r).contains("proofs"), "{r:?}");
+
+    for (id, verdict) in [(nulled, ZERO), (refused, INVALID), (timed_out, ZERO)] {
+        let before = s.claim(id).await?;
+        let balance = s.claim_balance(s.whitehat.id()).await?;
+        s.script(json!({ "output": verdict })).await?;
+        s.retry_now(&s.whitehat, id, PROOFS).await?.into_result()?;
+        let after = s.claim(id).await?;
+        assert_eq!(after["state"], "judged", "{after}");
+        assert_eq!(after["verdict"], serde_json::from_str::<Value>(verdict)?);
+        assert_eq!(after["submitted_at_ns"], before["submitted_at_ns"]);
+
+        let job = s.requests().await?.pop().unwrap();
+        let input = Sandbox::job_input(&job)?;
+        assert_eq!(
+            input["judge_claim"]["submitted_at_ns"], before["submitted_at_ns"],
+            "the retry keeps the original submission time"
+        );
+        assert_eq!(input["judge_claim"]["proofs_json"], PROOFS);
+        let secrets_ref: Value = serde_json::from_str(job["secrets_ref"].as_str().unwrap())?;
+        assert_eq!(secrets_ref["profile"], before["secret_profile"]);
+        // The retry's job is drawn from the claim balance, not the contract's.
+        assert!(s.claim_balance(s.whitehat.id()).await? < balance);
+    }
+    let rows: Vec<(String, u32)> = s.test_outlayer.view("secret_rows").await?.json()?;
+    assert!(
+        rows.iter().all(|(_, stores)| *stores == 1),
+        "never stored again: {rows:?}"
+    );
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+    Ok(())
+}
+
+/// R3.5: the same sealed exploit is judged to a verdict at most once. Filed again, by its
+/// Whitehat or anyone else, it is refused before any job; a judged claim can't be retried;
+/// a claim waiting for its retry is retried, not filed again. A sealed exploit whose secret
+/// couldn't be stored was never judged, so it may be filed again.
+#[tokio::test]
+async fn r3_5_the_same_sealed_exploit_is_judged_at_most_once() -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    s.top_up(&s.whitehat, NearToken::from_near(2)).await?;
+    s.top_up(&s.other, NearToken::from_near(1)).await?;
+
+    let judged_args = s.claim_args("vault");
+    s.script(json!({ "output": ZERO })).await?;
+    let judged: u64 = s
+        .file_now(&s.whitehat, &judged_args)
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(s.claim(judged).await?["state"], "judged");
+
+    let waiting_args = s.claim_args("vault");
+    s.script(json!({ "output": null })).await?;
+    let waiting: u64 = s
+        .file_now(&s.whitehat, &waiting_args)
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(s.claim(waiting).await?["state"], "no_verdict");
+
+    let jobs = s.requests().await?.len();
+    let rows: Vec<(String, u32)> = s.test_outlayer.view("secret_rows").await?.json()?;
+    for args in [&judged_args, &waiting_args] {
+        for who in [&s.whitehat, &s.other] {
+            let r = s.file_now(who, args).await?;
+            assert!(failure_text(&r).contains("already been filed"), "{r:?}");
+        }
+    }
+    let r = s.retry_now(&s.whitehat, judged, PROOFS).await?;
+    assert!(
+        failure_text(&r).contains("only a claim left with no verdict can be retried"),
+        "{r:?}"
+    );
+    assert_eq!(s.requests().await?.len(), jobs, "no job was requested");
+    let after: Vec<(String, u32)> = s.test_outlayer.view("secret_rows").await?.json()?;
+    assert_eq!(after, rows, "no exploit was stored");
+    assert_eq!(
+        s.claim(judged).await?["verdict"],
+        serde_json::from_str::<Value>(ZERO)?
+    );
+
+    // Never stored, so never judged: it may be filed again.
+    let unstored_args = s.claim_args("vault");
+    s.set_fail_store(true).await?;
+    let unstored: u64 = s
+        .file_now(&s.whitehat, &unstored_args)
+        .await?
+        .into_result()?
+        .json()?;
+    s.wait_for_claim_state(unstored, "store_failed").await?;
+    s.set_fail_store(false).await?;
+    s.script(json!({ "output": ZERO })).await?;
+    let again: u64 = s
+        .file_now(&s.whitehat, &unstored_args)
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(s.claim(again).await?["state"], "judged");
+    Ok(())
+}
+
+/// R3.6: two PAYS claims on one bounty; the later one's verdict arrives first. Its pauses are
+/// signed at once, but it isn't paid while the earlier claim is still being judged; the
+/// earlier claim's PAYS then wins: it is paid the whole bounty, once, and the later is
+/// refused. In the usual order, the later PAYS is refused too.
+#[tokio::test]
+async fn r3_6_the_earlier_of_two_pays_claims_is_paid_whichever_verdict_arrives_first(
+) -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    s.top_up(&s.other, NearToken::from_near(1)).await?;
+
+    let jobs = s.requests().await?.len();
+    let earlier_tx = s.file(&s.whitehat, &s.claim_args("vault")).await?;
+    s.wait_for_requests(jobs + 1).await?;
+    let later_tx = s.file(&s.other, &s.claim_args("vault")).await?;
+    let requests = s.wait_for_requests(jobs + 2).await?;
+    let (earlier_job, later_job) = (&requests[jobs], &requests[jobs + 1]);
+    assert_eq!(earlier_job["payer_account_id"], json!(s.whitehat.id()));
+    assert_eq!(later_job["payer_account_id"], json!(s.other.id()));
+
+    // The later claim's PAYS arrives first: the bounty closes and its pauses are signed...
+    let signs = s.sign_requests().await?.len();
+    s.resolve(later_job["id"].as_u64().unwrap(), Some(PAYS))
+        .await?;
+    s.sign_pauses_from("vault", signs).await?;
+    let later: u64 = later_tx.await?.into_result()?.json()?;
+    let bounty = s.wait_for_bounty_state("vault", "paying").await?;
+    assert_eq!(bounty["signed_pauses"].as_array().unwrap().len(), 1);
+    // ...but it isn't paid while the earlier claim is still being judged.
+    assert_eq!(bounty["paying_out"], false, "{bounty}");
+    assert_eq!(s.usdc_balance(s.other.id()).await?, 0);
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+    let r = s.retry_payout(&s.protocol, "vault").await?.await?;
+    assert!(failure_text(&r).contains("earlier claim"), "{r:?}");
+    let r = s.submit_claim(&s.other, "vault").await?;
+    assert!(failure_text(&r).contains("closed"), "{r:?}");
+
+    // The earlier claim's PAYS: it is the one paid.
+    s.resolve(earlier_job["id"].as_u64().unwrap(), Some(PAYS))
+        .await?;
+    let earlier: u64 = earlier_tx.await?.into_result()?.json()?;
+    assert!(earlier < later);
+    let bounty = s.wait_for_bounty_state("vault", "paid").await?;
+    assert_eq!(bounty["winning_claim"], earlier);
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    assert_eq!(s.usdc_balance(s.other.id()).await?, 0);
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    assert_eq!(
+        s.claim(later).await?["verdict"],
+        serde_json::from_str::<Value>(PAYS)?
+    );
+    let r = s.retry_payout(&s.protocol, "vault").await?.await?;
+    assert!(failure_text(&r).contains("no payout waiting"), "{r:?}");
+
+    // The usual order: the earlier verdict first; the later PAYS is refused.
+    s.post_covering("vault-2", 0xab, 30 * DAY_NS).await?;
+    let jobs = s.requests().await?.len();
+    let earlier_tx = s.file(&s.whitehat, &s.claim_args("vault-2")).await?;
+    s.wait_for_requests(jobs + 1).await?;
+    let later_tx = s.file(&s.other, &s.claim_args("vault-2")).await?;
+    let requests = s.wait_for_requests(jobs + 2).await?;
+    let signs = s.sign_requests().await?.len();
+    s.resolve(requests[jobs]["id"].as_u64().unwrap(), Some(PAYS))
+        .await?;
+    s.sign_pauses_from("vault-2", signs).await?;
+    let earlier: u64 = earlier_tx.await?.into_result()?.json()?;
+    s.wait_for_bounty_state("vault-2", "paid").await?;
+    s.resolve(requests[jobs + 1]["id"].as_u64().unwrap(), Some(PAYS))
+        .await?;
+    later_tx.await?.into_result()?;
+    let bounty = s.bounty("vault-2").await?;
+    assert_eq!(bounty["state"], "paid");
+    assert_eq!(bounty["winning_claim"], earlier);
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, 2 * BOUNTY_AMOUNT);
+    assert_eq!(s.usdc_balance(s.other.id()).await?, 0);
+    Ok(())
+}
+
+/// R2.6, R3.6: a claim waiting for its retry keeps its place. A later PAYS is signed but
+/// not paid while it waits: retried to PAYS, the earlier claim is paid and the later
+/// refused; retried to ZERO, the later is paid. A claim's place is held for
+/// `claim_place_hold_ns` from its submission, so a claim never retried can't hold a later
+/// winner's payout forever: after that, anyone's `retry_payout` pays the later claim.
+#[tokio::test]
+async fn r2_6_r3_6_a_claim_waiting_for_its_retry_keeps_its_place() -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    s.top_up(&s.whitehat, NearToken::from_near(2)).await?;
+    s.top_up(&s.other, NearToken::from_near(2)).await?;
+    s.post_covering("vault-2", 0xab, 30 * DAY_NS).await?;
+    s.post_covering("vault-3", 0xac, 30 * DAY_NS).await?;
+
+    // Earlier claim: no verdict. Later claim (another Whitehat): PAYS, pauses signed.
+    let mut waiting = Vec::new();
+    for name in ["vault", "vault-2", "vault-3"] {
+        s.script(json!({ "output": null })).await?;
+        let earlier: u64 = s
+            .file_now(&s.whitehat, &s.claim_args(name))
+            .await?
+            .into_result()?
+            .json()?;
+        let signs = s.sign_requests().await?.len();
+        s.script(json!({ "output": PAYS })).await?;
+        let later_tx = s.file(&s.other, &s.claim_args(name)).await?;
+        s.sign_pauses_from(name, signs).await?;
+        let later: u64 = later_tx.await?.into_result()?.json()?;
+        let bounty = s.wait_for_bounty_state(name, "paying").await?;
+        assert_eq!(bounty["paying_out"], false, "{bounty}");
+        assert_eq!(bounty["winning_claim"], later);
+        let r = s.retry_payout(&s.protocol, name).await?.await?;
+        assert!(failure_text(&r).contains("earlier claim"), "{r:?}");
+        waiting.push((name, earlier, later));
+    }
+    assert_eq!(s.usdc_balance(s.other.id()).await?, 0);
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 3 * BOUNTY_AMOUNT);
+
+    // Retried to PAYS: the earlier claim is paid, the later refused.
+    let (name, earlier, _) = waiting[0];
+    s.script(json!({ "output": PAYS })).await?;
+    s.retry_now(&s.whitehat, earlier, PROOFS)
+        .await?
+        .into_result()?;
+    let bounty = s.wait_for_bounty_state(name, "paid").await?;
+    assert_eq!(bounty["winning_claim"], earlier);
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    assert_eq!(s.usdc_balance(s.other.id()).await?, 0);
+
+    // Retried to ZERO: the later claim is paid.
+    let (name, earlier, later) = waiting[1];
+    s.script(json!({ "output": ZERO })).await?;
+    s.retry_now(&s.whitehat, earlier, PROOFS)
+        .await?
+        .into_result()?;
+    let bounty = s.wait_for_bounty_state(name, "paid").await?;
+    assert_eq!(bounty["winning_claim"], later);
+    assert_eq!(s.usdc_balance(s.other.id()).await?, BOUNTY_AMOUNT);
+
+    // Never retried: once its place has lapsed, the later claim is paid on anyone's retry,
+    // and the lapsed claim can no longer be retried.
+    let (name, earlier, later) = waiting[2];
+    let hold: u64 = s.fees().await?["claim_place_hold_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    let submitted: u64 = s.claim(earlier).await?["submitted_at_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    for _ in 0..50 {
+        if now_ns(&s).await? > submitted + hold {
+            break;
+        }
+        s.worker.fast_forward(2_000).await?;
+    }
+    assert!(
+        now_ns(&s).await? > submitted + hold,
+        "the sandbox clock didn't move"
+    );
+    s.retry_payout(&s.protocol, name)
+        .await?
+        .await?
+        .into_result()?;
+    let bounty = s.wait_for_bounty_state(name, "paid").await?;
+    assert_eq!(bounty["winning_claim"], later);
+    assert_eq!(s.usdc_balance(s.other.id()).await?, 2 * BOUNTY_AMOUNT);
+    let r = s.retry_now(&s.whitehat, earlier, PROOFS).await?;
+    assert!(failure_text(&r).contains("can no longer win"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    Ok(())
+}
+
+/// R3.7: a claim submitted after the bounty's end date is refused before any job. A claim
+/// submitted before it keeps its submission time, so its retry is still judged after it.
+#[tokio::test]
+async fn r3_7_claims_after_the_end_date_are_refused() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    s.top_up(&s.whitehat, NearToken::from_near(2)).await?;
+    s.post_covering("ending", 0xaa, 60_000_000_000).await?; // ends in a minute
+    let end: u64 = s.bounty("ending").await?["rules"]["end_date_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    s.script(json!({ "output": null })).await?;
+    let before_end: u64 = s
+        .submit_claim(&s.whitehat, "ending")
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(s.claim(before_end).await?["state"], "no_verdict");
+
+    for _ in 0..50 {
+        if now_ns(&s).await? > end {
+            break;
+        }
+        s.worker.fast_forward(50).await?;
+    }
+    assert!(now_ns(&s).await? > end, "the sandbox clock didn't move");
+    let jobs = s.requests().await?.len();
+    let r = s.submit_claim(&s.whitehat, "ending").await?;
+    assert!(failure_text(&r).contains("ended"), "{r:?}");
+    assert_eq!(s.requests().await?.len(), jobs, "no job was requested");
+
+    s.script(json!({ "output": ZERO })).await?;
+    s.retry_now(&s.whitehat, before_end, PROOFS)
+        .await?
+        .into_result()?;
+    assert_eq!(s.claim(before_end).await?["state"], "judged");
+    Ok(())
+}
+
+/// R3.13: after a ZERO and an INVALID verdict the bounty stays open, and the same
+/// Whitehat's next claim is judged and, on PAYS, paid.
+#[tokio::test]
+async fn r3_13_after_zero_or_invalid_the_same_whitehat_may_claim_again() -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+    for verdict in [ZERO, INVALID] {
+        s.script(json!({ "output": verdict })).await?;
+        let id: u64 = s
+            .submit_claim(&s.whitehat, "vault")
+            .await?
+            .into_result()?
+            .json()?;
+        assert_eq!(
+            s.claim(id).await?["verdict"],
+            serde_json::from_str::<Value>(verdict)?
+        );
+        assert_eq!(s.bounty("vault").await?["state"], "live");
+    }
+    let id = s.pay_claim("vault").await?;
+    assert_eq!(s.bounty("vault").await?["winning_claim"], id);
+    assert_eq!(s.claim(id).await?["whitehat"], json!(s.whitehat.id()));
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    Ok(())
+}
+
+/// R11.3: a Whitehat tops up their claim balance and withdraws part of it, then the rest,
+/// to their own account. A withdrawal needs one yoctoNEAR attached (a full-access key, not
+/// a claim key), can't exceed the balance, and draws only on the caller's own balance.
+#[tokio::test]
+async fn r11_3_a_whitehat_tops_up_and_withdraws_their_claim_balance() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let milli = |n: u128| NearToken::from_millinear(n).as_yoctonear();
+    s.top_up(&s.whitehat, NearToken::from_millinear(2_000))
+        .await?;
+    let first = s.claim_balance(s.whitehat.id()).await?;
+    // The balance entry's own storage is taken from the first deposit (R11.4).
+    assert!(first < milli(2_000) && first > milli(1_990), "{first}");
+    s.top_up(&s.whitehat, NearToken::from_millinear(500))
+        .await?;
+    assert_eq!(s.claim_balance(s.whitehat.id()).await?, first + milli(500));
+
+    let withdraw = |by: &Account, amount: Option<u128>, deposit: u128| {
+        by.call(s.contract.id(), "withdraw_claim_balance")
+            .args_json(json!({ "amount": amount.map(|a| a.to_string()) }))
+            .deposit(NearToken::from_yoctonear(deposit))
+            .gas(tgas(30))
+            .transact()
+    };
+    let r = withdraw(&s.whitehat, Some(milli(100)), 0).await?;
+    assert!(failure_text(&r).contains("yoctoNEAR"), "{r:?}");
+    let r = withdraw(&s.whitehat, Some(first + milli(501)), 1).await?;
+    assert!(
+        failure_text(&r).contains("more than the claim balance"),
+        "{r:?}"
+    );
+    let r = withdraw(&s.other, Some(1), 1).await?;
+    assert!(
+        failure_text(&r).contains("more than the claim balance"),
+        "{r:?}"
+    );
+
+    let gas_slack = milli(10); // the call's gas, some refunded only later
+    let account = s.near_balance(s.whitehat.id()).await?;
+    withdraw(&s.whitehat, Some(milli(1_000)), 1)
+        .await?
+        .into_result()?;
+    let left = first + milli(500) - milli(1_000);
+    assert_eq!(s.claim_balance(s.whitehat.id()).await?, left);
+    let gained = s.near_balance(s.whitehat.id()).await? - account;
+    assert!(gained > milli(1_000) - gas_slack, "{gained}");
+
+    let account = s.near_balance(s.whitehat.id()).await?;
+    withdraw(&s.whitehat, None, 1).await?.into_result()?;
+    assert_eq!(s.claim_balance(s.whitehat.id()).await?, 0);
+    let gained = s.near_balance(s.whitehat.id()).await? - account;
+    assert!(gained > left - gas_slack, "{gained}");
+    let r = withdraw(&s.whitehat, None, 1).await?;
+    assert!(failure_text(&r).contains("nothing to withdraw"), "{r:?}");
     Ok(())
 }
 

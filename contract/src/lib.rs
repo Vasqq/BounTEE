@@ -148,6 +148,7 @@ enum Key {
     ClaimBalances,
     PauseVerifications,
     CoveredBy,
+    SealedExploits,
 }
 
 /// Where a bounty is in its life.
@@ -191,8 +192,9 @@ pub struct Bounty {
     /// retry can send a second transfer beside it.
     pub paying_out: bool,
     /// Claims on this bounty with no verdict yet (storing, judging, or waiting for a retry),
-    /// as (claim ID, submission time). Each holds its place for
-    /// [`claims::CLAIM_PLACE_HOLD_NS`] from its submission (R2.6, R10.2).
+    /// as (claim ID, submission time). Each holds its place against a later PAYS, and
+    /// against the bounty's withdrawal, for [`claims::CLAIM_PLACE_HOLD_NS`] from its
+    /// submission (R2.6, R3.6, R10.2); one being judged blocks the withdrawal at any age.
     pub open_claims: Vec<(u64, u64)>,
 }
 
@@ -209,6 +211,9 @@ pub struct BountyView {
     pub signing_pauses: bool,
     /// Whether a payout transfer is under way; a `paying` bounty that isn't waits for a retry.
     pub paying_out: bool,
+    /// While an earlier claim still holds its place, the latest time it can hold the winning
+    /// claim's payout (R3.6); after it, anyone's `retry_payout` pays.
+    pub payout_waits_until_ns: Option<near_sdk::json_types::U64>,
 }
 
 /// Where a claim is in its life.
@@ -263,6 +268,9 @@ pub struct Contract {
     /// The bounty that last covered each contract; it still covers it while its posting
     /// check is pending or it is live (R12.3).
     covered_by: LookupMap<CoveredContract, BountyId>,
+    /// The claim each sealed exploit (by sha256 of its ciphertext) was filed as, so the
+    /// same one is never judged twice (R3.5).
+    sealed_exploits: LookupMap<B256, u64>,
 }
 
 #[near]
@@ -300,6 +308,7 @@ impl Contract {
             claim_balances: LookupMap::new(Key::ClaimBalances),
             pause_verifications: LookupMap::new(Key::PauseVerifications),
             covered_by: LookupMap::new(Key::CoveredBy),
+            sealed_exploits: LookupMap::new(Key::SealedExploits),
         }
     }
 
@@ -348,6 +357,10 @@ impl Contract {
             signed_pauses: b.signed_pauses.clone(),
             signing_pauses: b.signing_in_flight(),
             paying_out: b.paying_out,
+            payout_waits_until_ns: b
+                .winning_claim
+                .and_then(|w| b.payout_held_until(w, env::block_timestamp()))
+                .map(near_sdk::json_types::U64),
         })
     }
 
