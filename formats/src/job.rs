@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::claim::{AccountProof, BlockRef};
 use crate::primitives::{AccountId, Bytes, EvmAddress, SafeU64, Uint, U64};
+use crate::posting::PostingCheck;
 use crate::rules::{BountyId, Rules};
 
 /// The exploit the judge replays: the transactions a Foundry script broadcasts, in order.
@@ -97,11 +98,12 @@ pub struct JudgeClaim {
     pub submitted_at_ns: U64,
 }
 
-/// A job for the judge, its whole stdin: `{"replay": {...}}` (local runs) or
-/// `{"judge_claim": {...}}` (the enclave). The posting check joins this enum in #17.
+/// A job for the judge, its whole stdin: `{"replay": {...}}` (local runs), or
+/// `{"judge_claim": {...}}` and `{"posting_check": {...}}` (the enclave).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Job {
     Replay(Replay),
     JudgeClaim(JudgeClaim),
+    PostingCheck(PostingCheck),
 }

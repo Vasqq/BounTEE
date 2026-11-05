@@ -63,7 +63,7 @@ pub struct Rules {
 }
 
 /// A covered contract: an EVM chain ID and an address on it.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(
     feature = "near",

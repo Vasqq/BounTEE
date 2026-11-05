@@ -14,7 +14,7 @@ name = "bountee-judge"
 path = "src/main.rs"
 
 [dependencies]
-bountee-formats = { workspace = true }
+bountee-formats = { workspace = true, features = ["pause-role"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Pure-Rust EVM: the C-backed precompile crates don't build for WASI (spike #2).
@@ -41,4 +41,4 @@ test-stand-in-rpcs = []
 [dev-dependencies]
 proptest = "1"
 alloy-rlp = { version = "0.3", default-features = false, features = ["std"] }
-bountee-formats = { workspace = true }
+bountee-formats = { workspace = true, features = ["pause-role"] }

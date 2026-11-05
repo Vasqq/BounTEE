@@ -13,7 +13,7 @@
 //! the account's only key. Nothing in the contract adds a key, deploys code or changes the
 //! configuration afterwards.
 
-use bountee_formats::{BlockRef, BountyId, Bytes, Rules, Seed, Verdict, B256};
+use bountee_formats::{BlockRef, BountyId, Bytes, CoveredContract, Rules, Seed, Verdict, B256};
 use near_sdk::json_types::U128;
 use near_sdk::store::LookupMap;
 use near_sdk::{
@@ -127,6 +127,7 @@ enum Key {
     Claims,
     PostingFees,
     ClaimBalances,
+    CoveredBy,
 }
 
 /// Where a bounty is in its life.
@@ -230,6 +231,9 @@ pub struct Contract {
     posting_fees: LookupMap<AccountId, NearToken>,
     /// NEAR each Whitehat has prepaid toward claims (ADR-0007).
     claim_balances: LookupMap<AccountId, NearToken>,
+    /// The bounty that last covered each contract; it still covers it while its posting
+    /// check is pending or it is live (R12.3).
+    covered_by: LookupMap<CoveredContract, BountyId>,
 }
 
 #[near]
@@ -265,6 +269,7 @@ impl Contract {
             next_claim_id: 0,
             posting_fees: LookupMap::new(Key::PostingFees),
             claim_balances: LookupMap::new(Key::ClaimBalances),
+            covered_by: LookupMap::new(Key::CoveredBy),
         }
     }
 
@@ -288,6 +293,13 @@ impl Contract {
             "pause_gas_limit": pauses::PAUSE_GAS_LIMIT,
             "pause_max_fee_per_gas": U128(pauses::PAUSE_MAX_FEE_PER_GAS),
             "pause_max_priority_fee_per_gas": U128(pauses::PAUSE_MAX_PRIORITY_FEE_PER_GAS),
+            // What the posting check asks each pause-role address to hold per pause on a
+            // chain: gas limit at fee limit, plus an OP-stack chain's L1 data fee (R7.6).
+            "pause_l1_data_fee_allowance": U128(bountee_formats::PAUSE_L1_DATA_FEE_ALLOWANCE),
+            "pause_gas_per_pause": U128(
+                pauses::PAUSE_GAS_LIMIT as u128 * pauses::PAUSE_MAX_FEE_PER_GAS
+                    + bountee_formats::PAUSE_L1_DATA_FEE_ALLOWANCE
+            ),
         })
     }
 
