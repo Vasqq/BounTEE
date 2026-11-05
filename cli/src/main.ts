@@ -3,8 +3,7 @@
 // (ticket #11), `broadcast` (ticket #13), `claim` (sealing and filing, #15; script path,
 // verdict, payout and pauses, #16; live progress and receipt, #26), `list`, `show` and
 // `status` (#26), `post` (#17), `open-exploit` (#22). The rest (verify, balance, key,
-// withdraw) land in the
-// CLI tickets. Every command takes `--json` for machine-readable output (R14.5): the result
+// withdraw) land in the CLI tickets. Every command takes `--json` for machine-readable output (R14.5): the result
 // as one JSON document on stdout, an error as `{"error": …}` on stderr, and a claim's live
 // stages as one JSON line each on stderr.
 import { readFileSync } from "node:fs";
