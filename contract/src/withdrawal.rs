@@ -20,7 +20,9 @@ impl Contract {
     /// Withdraw the whole amount of the caller's own bounty after its end date. Refused
     /// before the end date (R10.1), once a PAYS verdict has closed the bounty, and while
     /// any claim on it is unresolved (R10.2). Attach the gas `fees()` names as
-    /// `min_withdraw_bounty_gas`.
+    /// `min_withdraw_bounty_gas`. The transfer's NEAR comes from the bounty's posting fee;
+    /// once that can't cover it, attach the shortfall, which joins the posting fee (R11.4).
+    #[payable]
     pub fn withdraw_bounty(&mut self, id: BountyId) -> Promise {
         // The bounty's ID names the account that posted it (R9.2).
         let protocol = env::predecessor_account_id();
@@ -72,14 +74,14 @@ impl Contract {
             .expect("checked at posting");
 
         let bounty = self.bounties.get_mut(&id).expect("read above");
-        bounty.state = BountyState::Withdrawn;
         let one_yocto = NearToken::from_yoctonear(1);
         // The Protocol may have left USDC since posting; its registration and the
         // transfer's yoctoNEAR come from the posting fee, as the payout's would.
-        bounty.fee_reserve = bounty
-            .fee_reserve
-            .saturating_sub(fees::USDC_REGISTRATION)
-            .saturating_sub(one_yocto);
+        bounty.draw_fee_or_refuse(
+            fees::USDC_REGISTRATION.saturating_add(one_yocto),
+            "the withdrawal",
+        );
+        bounty.state = BountyState::Withdrawn;
         let usdc = self.config.usdc.clone();
         ext_ft::ext(usdc.clone())
             .with_attached_deposit(fees::USDC_REGISTRATION)

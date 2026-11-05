@@ -11,7 +11,7 @@
 //! - [`release`]: after the payout, the winning exploit is released to the Protocol's
 //!   exploit key by a job the contract requests (R6).
 //! - [`publication`]: once the disclosure delay has passed since the payout, anyone can have
-//!   the winning exploit published with the claim's header and proofs (D7, D7.1).
+//!   the winning exploit published beside the claim's header and proofs' sha256 (D7, D7.1).
 //! - [`verification`]: anyone can have a chain's landed pause verified by NEAR's MPC network;
 //!   off the money path.
 //! - [`outlayer`]: the exact OutLayer requests (secret, access rule, job).
@@ -28,6 +28,7 @@ use near_sdk::{
 };
 
 mod claims;
+mod exploit_job;
 mod outlayer;
 mod pauses;
 mod payout;
@@ -65,6 +66,11 @@ pub mod fees {
 
     /// NEAR's storage price: 10^19 yoctoNEAR per byte.
     pub const STORAGE_PRICE_PER_BYTE: u128 = 10_000_000_000_000_000_000;
+
+    /// What `bytes` of storage cost.
+    pub const fn storage_cost(bytes: u64) -> NearToken {
+        NearToken::from_yoctonear(bytes as u128 * STORAGE_PRICE_PER_BYTE)
+    }
     /// Attached to every OutLayer job; covers the job's resource limits (0.00701 NEAR on
     /// testnet, Nov 4). OutLayer refunds what the job doesn't use to its payer.
     pub const JOB_DEPOSIT: NearToken = NearToken::from_millinear(20);
@@ -219,6 +225,46 @@ pub struct Bounty {
     pub paid_at_ns: Option<u64>,
 }
 
+impl Bounty {
+    /// Take `cost` from what is left of this bounty's posting fee, or, if that can't cover it,
+    /// take nothing and return the shortfall. Every cost a bounty runs up after its posting is
+    /// drawn here, so the contract's own balance pays none of it (R11.4).
+    pub(crate) fn draw_fee(&mut self, cost: NearToken) -> Result<(), NearToken> {
+        if let Some(short) = self.fee_short_of(cost) {
+            return Err(short);
+        }
+        self.fee_reserve = self.fee_reserve.saturating_sub(cost);
+        Ok(())
+    }
+
+    /// How much the posting fee left is short of `cost`, if it is.
+    pub(crate) fn fee_short_of(&self, cost: NearToken) -> Option<NearToken> {
+        (self.fee_reserve < cost).then(|| cost.saturating_sub(self.fee_reserve))
+    }
+
+    /// The NEAR attached to this call joins the bounty's posting fee.
+    pub(crate) fn add_attached_to_fee(&mut self) {
+        self.fee_reserve = self.fee_reserve.saturating_add(env::attached_deposit());
+    }
+
+    /// For a call anyone may pay toward: the NEAR attached joins the posting fee, then `cost`
+    /// is drawn, or the call is refused naming what to attach for `what`.
+    pub(crate) fn draw_fee_or_refuse(&mut self, cost: NearToken, what: &str) {
+        self.add_attached_to_fee();
+        if let Err(short) = self.draw_fee(cost) {
+            refuse_shortfall(what, short);
+        }
+    }
+}
+
+/// Refuse a call because the posting fee left can't pay for `what`.
+pub(crate) fn refuse_shortfall(what: &str, short: NearToken) -> ! {
+    env::panic_str(&format!(
+        "the posting fee left can't pay for {what}: attach {} yoctoNEAR",
+        short.as_yoctonear()
+    ))
+}
+
 /// A bounty as its view returns it: every rule exactly as posted (R1.2).
 #[near(serializers = [json])]
 pub struct BountyView {
@@ -267,6 +313,11 @@ pub struct ClaimRecord {
     pub proofs_sha256: B256,
     /// NEAR block time the contract recorded at submission (R2.8).
     pub submitted_at_ns: near_sdk::json_types::U64,
+    /// The NEAR block the submission ran in. The `submit_claim` transaction carrying the
+    /// claim's proofs is in a chunk of that block or one just before it, so anyone can fetch
+    /// them from NEAR RPC (an archival one for old blocks) and check them against
+    /// `proofs_sha256` (D7.1).
+    pub submitted_at_block: near_sdk::json_types::U64,
     /// The OutLayer secret profile holding this claim's sealed exploit; stored once, read by
     /// the claim's job and, for a winning claim, its release job.
     pub secret_profile: String,
@@ -291,12 +342,12 @@ pub struct Contract {
     /// check is pending or it is live (R12.3).
     covered_by: LookupMap<CoveredContract, BountyId>,
     /// Each paid bounty's release of its winning exploit (#22).
-    releases: LookupMap<BountyId, release::ReleaseRecord>,
+    releases: LookupMap<BountyId, exploit_job::JobRecord>,
     /// The claim each sealed exploit (by sha256 of its ciphertext) was filed as, so the
     /// same one is never judged twice (R3.5).
     sealed_exploits: LookupMap<B256, u64>,
     /// Each paid bounty's publication of its winning exploit, once asked for (#23).
-    publications: LookupMap<BountyId, publication::PublicationRecord>,
+    publications: LookupMap<BountyId, exploit_job::JobRecord>,
 }
 
 #[near]
@@ -359,10 +410,9 @@ impl Contract {
             "min_retry_payout_gas": gas::payout(),
             "min_withdraw_bounty_gas": gas::payout(),
             "min_release_gas": gas::release(),
-            "release_hold": release::release_hold(),
+            "release_hold": exploit_job::hold(),
             "min_publish_gas": gas::release(),
-            "publish_hold": publication::publish_hold(0),
-            "publish_hold_per_proof_byte": U128(fees::STORAGE_PRICE_PER_BYTE),
+            "publish_hold": exploit_job::hold(),
             "claim_place_hold_ns": near_sdk::json_types::U64(claims::CLAIM_PLACE_HOLD_NS),
             "pause_gas_limit": pauses::PAUSE_GAS_LIMIT,
             "pause_max_fee_per_gas": U128(pauses::PAUSE_MAX_FEE_PER_GAS),
@@ -427,9 +477,7 @@ impl Contract {
         let before = env::storage_usage();
         Self::credit(map, who, amount);
         map.flush();
-        let entry = NearToken::from_yoctonear(
-            env::storage_usage().saturating_sub(before) as u128 * fees::STORAGE_PRICE_PER_BYTE,
-        );
+        let entry = fees::storage_cost(env::storage_usage().saturating_sub(before));
         require!(
             amount > entry,
             "the deposit doesn't cover the storage of its balance"
@@ -465,6 +513,11 @@ pub(crate) fn emit(event: &str, data: near_sdk::serde_json::Value) {
             "data": [data],
         })
     ));
+}
+
+/// sha256 of `bytes`, as `0x` and 64 lowercase hex digits.
+pub(crate) fn sha256_hex(bytes: &[u8]) -> B256 {
+    B256::parse(&pauses::hex(&env::sha256_array(bytes))).expect("32 bytes")
 }
 
 pub(crate) fn to_formats_account(id: &AccountId) -> bountee_formats::AccountId {

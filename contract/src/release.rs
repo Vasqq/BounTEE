@@ -11,32 +11,15 @@
 //!
 //! The job's deposit and the release's storage come from the bounty's posting fee (R11.4);
 //! anyone may add to it by attaching NEAR. A release that fails keeps nothing and can be
-//! asked again.
+//! asked again. The request, its hold and its callback are shared with the publication
+//! (`exploit_job`).
 
-use bountee_formats::{BountyId, ReleaseOutput};
-use near_sdk::serde_json::{self, json};
-use near_sdk::{env, near, require, NearToken, Promise, PromiseResult};
+use bountee_formats::BountyId;
+use near_sdk::serde_json::json;
+use near_sdk::{env, near, require, Promise};
 
-use crate::{emit, fees, gas, outlayer, BountyState, Contract, ContractExt};
-
-/// The most bytes a release's ciphertext may take (as base64); its storage is held from the
-/// posting fee while the job runs. A demo exploit's release is about 400 bytes.
-pub const MAX_RELEASE_BYTES: u64 = 16 * 1024;
-/// Storage a release record takes beyond its ciphertext.
-const RELEASE_RECORD_BYTES: u64 = 200;
-/// A release request older than this many blocks is treated as over (OutLayer's own
-/// timeout is about 200 blocks), so a lost callback never blocks a new one.
-pub const RELEASE_STALE_BLOCKS: u64 = 300;
-
-/// A bounty's release: requested, then released.
-#[near(serializers = [borsh])]
-pub struct ReleaseRecord {
-    pub claim_id: u64,
-    /// The block height the job under way was requested at.
-    pub requested_at: Option<u64>,
-    /// The release job's output: the winning exploit, encrypted to the exploit key.
-    pub released: Option<String>,
-}
+use crate::exploit_job::ExploitJob;
+use crate::{BountyState, Contract, ContractExt};
 
 /// Where a release is.
 #[near(serializers = [json])]
@@ -63,23 +46,6 @@ pub fn is_exploit_key(key: &str) -> bool {
         .is_some_and(|bytes| bytes.len() == 32)
 }
 
-impl ReleaseRecord {
-    fn in_flight(&self) -> bool {
-        self.requested_at
-            .is_some_and(|h| env::block_height() < h.saturating_add(RELEASE_STALE_BLOCKS))
-    }
-}
-
-fn storage_cost(bytes: u64) -> NearToken {
-    NearToken::from_yoctonear(bytes as u128 * fees::STORAGE_PRICE_PER_BYTE)
-}
-
-/// What a release request holds from the posting fee: the job's deposit and the most the
-/// release's storage can cost. The unused part goes back.
-pub fn release_hold() -> NearToken {
-    fees::JOB_DEPOSIT.saturating_add(storage_cost(MAX_RELEASE_BYTES + RELEASE_RECORD_BYTES))
-}
-
 #[near]
 impl Contract {
     /// Request the release of a paid bounty's winning exploit to the Protocol's exploit key
@@ -91,7 +57,7 @@ impl Contract {
     pub fn release_exploit(&mut self, id: BountyId) -> Promise {
         let bounty = self
             .bounties
-            .get_mut(&id)
+            .get(&id)
             .unwrap_or_else(|| env::panic_str("no such bounty"));
         require!(
             bounty.state == BountyState::Paid,
@@ -100,126 +66,15 @@ impl Contract {
         let claim_id = bounty
             .winning_claim
             .unwrap_or_else(|| env::panic_str("this bounty has no winning claim"));
-        if let Some(record) = self.releases.get(&id) {
-            require!(
-                record.released.is_none(),
-                "this exploit is already released"
-            );
-            require!(!record.in_flight(), "a release is already under way");
-        }
-        require!(
-            Self::gas_left(gas::TAIL) >= gas::release(),
-            "attach more gas: see min_release_gas in fees()"
-        );
-        bounty.fee_reserve = bounty.fee_reserve.saturating_add(env::attached_deposit());
-        let hold = release_hold();
-        require!(
-            bounty.fee_reserve >= hold,
-            &format!(
-                "the posting fee left can't pay for a release: attach {} yoctoNEAR",
-                hold.saturating_sub(bounty.fee_reserve).as_yoctonear()
-            )
-        );
-        bounty.fee_reserve = bounty.fee_reserve.saturating_sub(hold);
-        let rules = bounty.rules.clone();
-        let claim = self
-            .claims
-            .get(&claim_id)
-            .expect("the winning claim")
-            .clone();
+        let claim = self.claims.get(&claim_id).expect("the winning claim");
         let input = json!({ "release": {
             "bounty": id,
             "claim_id": claim_id,
             "whitehat": crate::to_formats_account(&claim.whitehat),
-            "exploit_public_key": rules.exploit_public_key,
+            "exploit_public_key": bounty.rules.exploit_public_key,
         } })
         .to_string();
-        let requested_at = env::block_height();
-        self.releases.insert(
-            id.clone(),
-            ReleaseRecord {
-                claim_id,
-                requested_at: Some(requested_at),
-                released: None,
-            },
-        );
-        emit(
-            "release_requested",
-            json!({ "bounty": id, "claim_id": claim_id }),
-        );
-        let protocol: near_sdk::AccountId = id
-            .protocol
-            .as_str()
-            .parse()
-            .expect("a bounty's protocol is a NEAR account");
-        outlayer::request_job(
-            &self.config,
-            &input,
-            Some(&claim.secret_profile),
-            &protocol,
-            fees::JOB_DEPOSIT,
-            || Self::gas_left(gas::ON_RELEASED.saturating_add(gas::TAIL)),
-        )
-        .then(
-            Self::ext(env::current_account_id())
-                .with_static_gas(gas::ON_RELEASED)
-                .with_unused_gas_weight(0)
-                .on_exploit_released(id, requested_at, hold),
-        )
-    }
-
-    /// The release job's result: its output is kept only if it is a release. A failed,
-    /// refused or malformed job keeps nothing and leaves the release to be asked again.
-    /// Whatever of `hold` isn't spent goes back to the bounty's posting fee. A callback for
-    /// a request that is no longer the one in flight (it went stale and was asked again)
-    /// changes nothing but that refund.
-    #[private]
-    pub fn on_exploit_released(&mut self, id: BountyId, requested_at: u64, hold: NearToken) {
-        #[allow(deprecated)]
-        let (output, job_spent) = match env::promise_result(0) {
-            PromiseResult::Successful(bytes) => (
-                serde_json::from_slice::<Option<ReleaseOutput>>(&bytes)
-                    .ok()
-                    .flatten()
-                    .filter(|o| o.released.as_str().len() as u64 <= MAX_RELEASE_BYTES),
-                fees::JOB_DEPOSIT,
-            ),
-            // OutLayer refused the request; its deposit came back here.
-            PromiseResult::Failed => (None, NearToken::from_yoctonear(0)),
-        };
-        if self
-            .releases
-            .get(&id)
-            .is_none_or(|r| r.requested_at != Some(requested_at))
-        {
-            self.refund_hold(&id, hold.saturating_sub(job_spent));
-            return;
-        }
-        let mut record = self.releases.remove(&id).expect("checked above");
-        let mut storage = NearToken::from_yoctonear(0);
-        match output {
-            Some(output) => {
-                let released = output.released.as_str().to_owned();
-                // At least what the record takes; the hold allowed for this much.
-                storage = storage_cost(released.len() as u64 + RELEASE_RECORD_BYTES);
-                record.requested_at = None;
-                record.released = Some(released);
-                let claim_id = record.claim_id;
-                self.releases.insert(id.clone(), record);
-                emit(
-                    "exploit_released",
-                    json!({ "bounty": id, "claim_id": claim_id }),
-                );
-            }
-            None => {
-                // Nothing kept: the record goes, so the release can be asked again.
-                emit(
-                    "release_failed",
-                    json!({ "bounty": id, "claim_id": record.claim_id }),
-                );
-            }
-        }
-        self.refund_hold(&id, hold.saturating_sub(job_spent).saturating_sub(storage));
+        self.request_exploit_job(ExploitJob::Release, id, claim_id, input)
     }
 
     /// A bounty's release, once requested: the winning exploit encrypted to the Protocol's
@@ -227,21 +82,12 @@ impl Contract {
     pub fn released_exploit(&self, id: BountyId) -> Option<ReleaseView> {
         self.releases.get(&id).map(|r| ReleaseView {
             claim_id: r.claim_id,
-            state: if r.released.is_some() {
+            state: if r.output.is_some() {
                 ReleaseState::Released
             } else {
                 ReleaseState::Requested
             },
-            released: r.released.clone(),
+            released: r.output.clone(),
         })
-    }
-}
-
-impl Contract {
-    /// Give the unspent part of a release's hold back to the bounty's posting fee.
-    fn refund_hold(&mut self, id: &BountyId, back: NearToken) {
-        if let Some(bounty) = self.bounties.get_mut(id) {
-            bounty.fee_reserve = bounty.fee_reserve.saturating_add(back);
-        }
     }
 }

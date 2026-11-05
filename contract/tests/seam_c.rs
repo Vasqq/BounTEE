@@ -1718,6 +1718,55 @@ async fn a_failed_payout_transfer_is_retried_to_the_same_winner_exactly_once() -
     Ok(())
 }
 
+/// R11.4 (code review of #12): a payout retry draws the winner's USDC registration and the
+/// transfer's yoctoNEAR from the bounty's posting fee. Retried again and again against a
+/// token that refuses, the posting fee runs out; then a retry is refused unless its caller
+/// attaches the shortfall, so the contract's own balance pays for none of them.
+#[tokio::test]
+async fn r11_4_repeated_payout_retries_never_take_the_contracts_own_balance(
+) -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let free_at_start = s.free_balance().await?;
+    s.post("vault", &valid_rules(&s).await?).await?.into_result()?;
+    s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
+    s.refuse_transfers(true).await?;
+    s.judge_pays("vault").await?;
+    s.wait_for_bounty_state("vault", "paying").await?;
+    s.wait_until_not_paying_out("vault").await?;
+
+    // The posting fee (0.5 NEAR) covers a few dozen 0.0125 NEAR retries at most.
+    let mut refused = None;
+    for n in 0..60 {
+        let r = s.retry_payout(&s.other, "vault").await?.await?;
+        if r.is_failure() {
+            refused = Some(failure_text(&r));
+            break;
+        }
+        s.wait_until_not_paying_out("vault").await?;
+        let free = s.free_balance().await?;
+        assert!(free >= free_at_start, "retry {n}: {free} < {free_at_start}");
+    }
+    let refused = refused.expect("the retries never ran out of the posting fee");
+    assert!(refused.contains("can't pay for the payout: attach"), "{refused}");
+    assert_eq!(s.bounty("vault").await?["state"], "paying");
+
+    // A caller who attaches the shortfall pays for the retry, and the winner is paid.
+    s.refuse_transfers(false).await?;
+    s.other
+        .call(s.contract.id(), "retry_payout")
+        .args_json(json!({ "id": { "protocol": s.protocol.id(), "name": "vault" } }))
+        .deposit(NearToken::from_millinear(20))
+        .gas(tgas(100))
+        .transact()
+        .await?
+        .into_result()?;
+    s.wait_for_bounty_state("vault", "paid").await?;
+    assert_eq!(s.usdc_balance(s.whitehat.id()).await?, BOUNTY_AMOUNT);
+    let free = s.free_balance().await?;
+    assert!(free >= free_at_start, "{free} < {free_at_start}");
+    Ok(())
+}
+
 // ---- pause verification (ticket #21) ----
 //
 // Seam C with the MPC stand-in's `verify_foreign_transaction`. The expected payload hash is
@@ -1873,15 +1922,17 @@ async fn a_landed_pause_is_verified_from_the_hash_of_the_stored_signed_pause() -
     assert_eq!(v.keys().copied().collect::<Vec<_>>(), vec![84532, 421614]);
     assert!(v.values().all(|c| c["verified"] == false), "{v:?}");
 
-    // Anyone asks; a hash in the arguments is not the contract's to take.
+    // Anyone asks (paying for both pauses' attempt); a hash in the arguments is not the
+    // contract's to take.
     let junk = "11".repeat(32);
+    let fee = s.fee("verify_pause_fee_per_pause").await?;
     let call = s
         .verify_pause(
             &s.other,
             "vault",
             84532,
             json!({ "tx_hash": junk }),
-            NearToken::from_yoctonear(0),
+            fee.saturating_mul(2),
         )
         .await?;
     let requests = s.wait_for_verify_requests(2).await?;
@@ -1970,7 +2021,7 @@ async fn a_failed_or_missing_transaction_is_never_recorded_as_verified() -> anyh
 
     // Nobody answers: both requests time out. A second request meanwhile is refused.
     let call = s
-        .verify_pause(&s.other, "vault", 84532, json!({}), none)
+        .verify_pause(&s.whitehat, "vault", 84532, json!({}), none)
         .await?;
     s.wait_for_verify_requests(2).await?;
     let r = s
@@ -1987,7 +2038,7 @@ async fn a_failed_or_missing_transaction_is_never_recorded_as_verified() -> anyh
 
     // One answer is about another payload, the other is garbage.
     let call = s
-        .verify_pause(&s.other, "vault", 84532, json!({}), none)
+        .verify_pause(&s.whitehat, "vault", 84532, json!({}), none)
         .await?;
     s.wait_for_verify_requests(4).await?;
     let other_tx = "22".repeat(32);
@@ -2001,7 +2052,7 @@ async fn a_failed_or_missing_transaction_is_never_recorded_as_verified() -> anyh
 
     // One of the two is verified, the other times out: the chain is not verified.
     let call = s
-        .verify_pause(&s.other, "vault", 84532, json!({}), none)
+        .verify_pause(&s.whitehat, "vault", 84532, json!({}), none)
         .await?;
     let requests = s.wait_for_verify_requests(6).await?;
     let req: Value = serde_json::from_str(requests[4]["request"].as_str().unwrap())?;
@@ -2062,7 +2113,7 @@ async fn three_attempts_per_chain_are_prepaid_and_later_ones_pay_their_own_cost(
             3 - n + 1
         );
         let call = s
-            .verify_pause(&s.other, "vault", 421614, json!({}), none)
+            .verify_pause(&s.whitehat, "vault", 421614, json!({}), none)
             .await?;
         s.wait_for_verify_requests(n as usize).await?;
         s.worker.fast_forward(250).await?;
@@ -2077,13 +2128,13 @@ async fn three_attempts_per_chain_are_prepaid_and_later_ones_pay_their_own_cost(
 
     // A fourth with no deposit, or less than its cost, is refused.
     let r = s
-        .verify_pause(&s.other, "vault", 421614, json!({}), none)
+        .verify_pause(&s.whitehat, "vault", 421614, json!({}), none)
         .await?
         .await?;
     assert!(failure_text(&r).contains("prepaid attempts are used"), "{r:?}");
     let short = NearToken::from_yoctonear(fee.as_yoctonear() - 1);
     let r = s
-        .verify_pause(&s.other, "vault", 421614, json!({}), short)
+        .verify_pause(&s.whitehat, "vault", 421614, json!({}), short)
         .await?
         .await?;
     assert!(failure_text(&r).contains("prepaid attempts are used"), "{r:?}");
@@ -2110,6 +2161,58 @@ async fn three_attempts_per_chain_are_prepaid_and_later_ones_pay_their_own_cost(
         after < before + extra.as_yoctonear() / 2,
         "the excess went back to the caller"
     );
+    Ok(())
+}
+
+/// R7.10, R11.4 (code review of #21): a chain's three prepaid attempts are for the winning
+/// Whitehat and the posting Protocol only. Anyone else's request is refused unless it
+/// attaches its own cost, and paid that way it uses none of them, so nobody can burn a
+/// chain's prepaid attempts before its pause lands at the cost of gas alone.
+#[tokio::test]
+async fn r7_10_only_the_winner_or_the_protocol_use_the_prepaid_verification_attempts(
+) -> anyhow::Result<()> {
+    let none = NearToken::from_yoctonear(0);
+    let s = paid_two_chain_bounty().await?;
+    let fee = s.fee("verify_pause_fee_per_pause").await?;
+
+    // Someone else with nothing attached: refused, nothing requested, nothing used.
+    let r = s
+        .verify_pause(&s.other, "vault", 421614, json!({}), none)
+        .await?
+        .await?;
+    assert!(
+        failure_text(&r).contains("attach verify_pause_fee_per_pause"),
+        "{r:?}"
+    );
+    assert!(s.verify_requests().await?.is_empty());
+    let v = s.verifications("vault").await?[&421614].clone();
+    assert_eq!((v["attempts"].clone(), v["prepaid_attempts_left"].clone()), (json!(0), json!(3)));
+
+    // Paying for their own attempts, they use none of the prepaid ones.
+    for n in 1..=3usize {
+        let call = s
+            .verify_pause(&s.other, "vault", 421614, json!({}), fee)
+            .await?;
+        s.wait_for_verify_requests(n).await?;
+        s.worker.fast_forward(250).await?;
+        call.await?.into_result()?;
+        s.wait_until_not_verifying("vault", 421614).await?;
+    }
+    let v = s.verifications("vault").await?[&421614].clone();
+    assert_eq!((v["attempts"].clone(), v["prepaid_attempts_left"].clone()), (json!(3), json!(3)));
+
+    // The winning Whitehat and the posting Protocol use them with nothing attached.
+    for (n, by) in [(4usize, &s.whitehat), (5, &s.protocol)] {
+        let call = s
+            .verify_pause(by, "vault", 421614, json!({}), none)
+            .await?;
+        s.wait_for_verify_requests(n).await?;
+        s.worker.fast_forward(250).await?;
+        call.await?.into_result()?;
+        s.wait_until_not_verifying("vault", 421614).await?;
+    }
+    let v = s.verifications("vault").await?[&421614].clone();
+    assert_eq!((v["attempts"].clone(), v["prepaid_attempts_left"].clone()), (json!(5), json!(1)));
     Ok(())
 }
 
@@ -2595,8 +2698,8 @@ async fn r6_2_a_posting_with_an_exploit_key_no_release_can_use_is_refused() -> a
 // Seam C here catches D7 (publication is refused before the payout and before the disclosure
 // delay has passed since it, and anyone may trigger it after; one at a time; the job is the
 // contract's own, with the winning claim's secret, R5.6), D7.1 at the contract (what is kept
-// is the claim's block, header and the very proofs it was filed with, beside the judge's
-// output) and R11.4 (the contract's own balance pays none of it). The sandbox clock stands in
+// is the claim's block, header, proofs sha256 and submission block, beside the judge's
+// output; it takes only the very proofs the claim was filed with) and R11.4 (the contract's own balance pays none of it). The sandbox clock stands in
 // for a day passing (`fast_forward`). It misses the real judge's output (seam J) and the
 // real OutLayer and a real day (no live run).
 
@@ -2665,20 +2768,6 @@ impl Sandbox {
         anyhow::bail!("publication job {n} was never requested")
     }
 
-    /// Move this node's clock (about 100 s a block) just past `ns`, in steps sized for that,
-    /// so a target hours away isn't overshot.
-    async fn pass_time_on_day_node_to(&self, ns: u64) -> anyhow::Result<()> {
-        for _ in 0..400 {
-            let now = now_ns(self).await?;
-            if now > ns {
-                return Ok(());
-            }
-            let blocks = (ns - now) / 100_000_000_000 + 2;
-            self.worker.fast_forward(blocks.min(2_000)).await?;
-        }
-        anyhow::bail!("the sandbox clock didn't reach {ns}")
-    }
-
     /// A live bounty `name` whose disclosure delay is one day, the least the rules allow.
     async fn post_one_day_delay(&self, name: &str) -> anyhow::Result<Value> {
         let mut rules = valid_rules(self).await?;
@@ -2692,7 +2781,8 @@ impl Sandbox {
 /// until the disclosure delay (one day here) has passed since it; then anyone may trigger it
 /// with the claim's proofs, and only those the claim was filed with. The contract requests
 /// the job itself, with the winning claim's secret, one at a time, and keeps the claim's
-/// block, header and proofs beside the judge's output, paid from the posting fee.
+/// block, header, proofs sha256 and submission block beside the judge's output, paid from
+/// the posting fee.
 #[tokio::test]
 async fn d7_publication_is_refused_before_the_delay_and_open_to_anyone_after() -> anyhow::Result<()>
 {
@@ -2722,12 +2812,12 @@ async fn d7_publication_is_refused_before_the_delay_and_open_to_anyone_after() -
     assert!(s.publish_requests().await?.is_empty());
 
     // Just before the day is up, still refused.
-    s.pass_time_on_day_node_to(from - 2 * 3_600_000_000_000).await?;
+    s.pass_time_to(from - 2 * 3_600_000_000_000).await?;
     let r = s.publish(&s.other, "vault", PROOFS).await?.await?;
     assert!(failure_text(&r).contains("disclosure delay"), "{r:?}");
 
     // After it, anyone may trigger it, but only with the proofs the claim was filed with.
-    s.pass_time_on_day_node_to(from).await?;
+    s.pass_time_to(from).await?;
     assert_eq!(s.published("vault").await?["state"], "publishable");
     let r = s
         .publish(&s.other, "vault", r#"[{"address":"0x00000000000000000000000000000000000000ab"}]"#)
@@ -2763,7 +2853,8 @@ async fn d7_publication_is_refused_before_the_delay_and_open_to_anyone_after() -
     let r = s.publish(&s.protocol, "vault", PROOFS).await?.await?;
     assert!(failure_text(&r).contains("under way"), "{r:?}");
 
-    // What is kept: the judge's output with the claim's block, header and proofs (D7.1).
+    // What is kept: the judge's output with the claim's block, header, proofs sha256 and
+    // submission block, where its transaction carries the proofs (D7.1).
     s.resolve(job["id"].as_u64().unwrap(), Some(PUBLISHED)).await?;
     pending.await?.into_result()?;
     let published = s.wait_for_publication_state("vault", "published").await?;
@@ -2771,7 +2862,8 @@ async fn d7_publication_is_refused_before_the_delay_and_open_to_anyone_after() -
     assert_eq!(published["claim_id"], id);
     assert_eq!(published["block"], args["block"]);
     assert_eq!(published["header"], args["header"]);
-    assert_eq!(published["proofs"], PROOFS);
+    assert_eq!(published["proofs_sha256"], claim["proofs_sha256"]);
+    assert_eq!(published["submitted_at_block"], claim["submitted_at_block"]);
     assert_eq!(
         published["published"],
         "q1YqSi0uKcrMS1WyMjQwMDA1NDA0MjCwMjM2MDQ0Mlaq5QIA"
@@ -2782,6 +2874,72 @@ async fn d7_publication_is_refused_before_the_delay_and_open_to_anyone_after() -
     assert_eq!(s.publish_requests().await?.len(), 1);
 
     // R11.4: the posting fee paid for the job and the publication's storage.
+    let free_at_end = s.free_balance().await?;
+    assert!(
+        free_at_end >= free_at_start,
+        "{free_at_end} < {free_at_start}"
+    );
+    Ok(())
+}
+
+/// R11.4, D7, D7.1 (code review of #23): the posting fee covers the publication job of a
+/// claim with live-sized proofs (about 120 KB) with nothing attached, since the publication
+/// keeps no copy of the proofs: it keeps their sha256 and the block the claim was submitted
+/// in, whose `submit_claim` transaction carries them for anyone to fetch. The contract still
+/// takes only the claim's own proofs, and its own balance pays nothing.
+#[tokio::test]
+async fn r11_4_d7_1_a_live_sized_publication_is_paid_from_the_posting_fee() -> anyhow::Result<()>
+{
+    use sha2::Digest;
+    let s = Sandbox::start_with_days().await?;
+    let free_at_start = s.free_balance().await?;
+    s.post_one_day_delay("vault").await?;
+    s.top_up(&s.whitehat, NearToken::from_near(3)).await?;
+
+    let proof = json!({ "address": "0x00000000000000000000000000000000000000aa",
+        "account_proof": vec![format!("0x{}", "ab".repeat(532)); 110] });
+    let proofs = Value::Array(vec![proof]).to_string();
+    assert!(proofs.len() > 110_000, "{}", proofs.len());
+    let mut args = s.claim_args("vault");
+    args["proofs"] = Value::String(proofs.clone());
+    let before = s.sign_requests().await?.len();
+    let height_before = s.worker.view_block().await?.height();
+    s.script(json!({ "output": PAYS })).await?;
+    let claim = s.file(&s.whitehat, &args).await?;
+    let requests = s.wait_for_sign_requests(before + 1).await?;
+    s.answer_from(&requests, before, &s.pause_key("vault"), false)
+        .await?;
+    let id: u64 = claim.await?.into_result()?.json()?;
+    let height_after = s.worker.view_block().await?.height();
+    s.wait_for_bounty_state("vault", "paid").await?;
+
+    // The claim records the block its submission ran in.
+    let at: u64 = s.claim(id).await?["submitted_at_block"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    assert!(height_before < at && at <= height_after, "{height_before} < {at} <= {height_after}");
+
+    let from: u64 = s.published("vault").await?["publishable_from_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    s.pass_time_to(from).await?;
+    let r = s.publish(&s.other, "vault", PROOFS).await?.await?;
+    assert!(failure_text(&r).contains("proofs"), "{r:?}");
+    s.script(json!({ "output": PUBLISHED })).await?;
+    s.publish(&s.other, "vault", &proofs)
+        .await?
+        .await?
+        .into_result()?;
+    let published = s.published("vault").await?;
+    assert_eq!(published["state"], "published", "{published}");
+    assert_eq!(
+        published["proofs_sha256"],
+        format!("0x{}", hex::encode(sha2::Sha256::digest(proofs.as_bytes())))
+    );
+    assert_eq!(published["submitted_at_block"], at.to_string());
+    assert!(published.get("proofs").is_none(), "no copy of the proofs is kept");
     let free_at_end = s.free_balance().await?;
     assert!(
         free_at_end >= free_at_start,
@@ -2802,7 +2960,7 @@ async fn d7_a_failed_publication_keeps_nothing_and_can_be_asked_again() -> anyho
         .as_str()
         .unwrap()
         .parse()?;
-    s.pass_time_on_day_node_to(from).await?;
+    s.pass_time_to(from).await?;
     for answer in [
         json!({ "output": null }),
         json!({ "output": PAYS }),
@@ -3392,20 +3550,25 @@ impl Sandbox {
         self.pass_time_to(end).await
     }
 
-    /// Fast-forward until a block's time is past `ns`, in steps sized from how much time
-    /// the last step moved, so a long wait takes few steps.
+    /// Fast-forward until a block's time is just past `ns`, on any node (an ordinary one
+    /// moves its clock about a second a block, a day node about 100 s). Each step is capped
+    /// at the time left over the last measured time per block, so a long wait takes few
+    /// steps and no step overshoots by more than a block.
     async fn pass_time_to(&self, ns: u64) -> anyhow::Result<()> {
-        let mut step = 20;
-        loop {
+        let mut per_block: Option<u64> = None;
+        for _ in 0..1_000 {
             let before = now_ns(self).await?;
             if before > ns {
                 return Ok(());
             }
+            let step = per_block.map_or(1, |p| ((ns - before) / p).clamp(1, 5_000));
             self.worker.fast_forward(step).await?;
-            let moved = now_ns(self).await?.saturating_sub(before).max(1);
-            let per_block = moved / step;
-            step = ((ns - before).saturating_sub(moved) / per_block.max(1) + 5).clamp(5, 5_000);
+            // Rounded up, and blocks produced meanwhile count too: it errs high, so the next
+            // step errs short.
+            let moved = now_ns(self).await?.saturating_sub(before);
+            per_block = Some(moved.div_ceil(step).max(1));
         }
+        anyhow::bail!("the sandbox clock didn't reach {ns}")
     }
 }
 
@@ -3634,6 +3797,69 @@ async fn r10_2_a_retried_claim_blocks_the_withdrawal_while_it_is_judged() -> any
         .await?;
     let jobs = s.wait_for_requests(3).await?;
     assert_eq!(s.claim(id).await?["state"], "judging");
+    let r = s.withdraw_bounty(&s.protocol, "vault").await?;
+    assert!(failure_text(&r).contains("unresolved"), "{r:?}");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);
+
+    s.resolve(jobs[2]["id"].as_u64().unwrap(), Some(ZERO)).await?;
+    retry.await?.into_result()?;
+    s.withdraw_bounty(&s.protocol, "vault")
+        .await?
+        .into_result()?;
+    assert_eq!(s.bounty("vault").await?["state"], "withdrawn");
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    Ok(())
+}
+
+/// R10.2 (code review of #19): a claim retried after its place lapsed is open again while its
+/// job runs, and stays open when another claim's submission and verdict drop the lapsed
+/// places: after the end date the withdrawal is refused until the retried claim is judged.
+#[tokio::test]
+async fn r10_2_a_retried_lapsed_claim_still_blocks_the_withdrawal_after_another_claim(
+) -> anyhow::Result<()> {
+    // A day node: an hour passes in a few dozen blocks, well inside a job's 200-block yield.
+    let s = Sandbox::start_with_days().await?;
+    // Ends half an hour after the first claim's place lapses, so a second claim fits before.
+    let mut r = rules(&s, PLACE_HOLD_NS + 1_800_000_000_000, now_ns(&s).await?);
+    r["covered_contracts"][0]["address"] = json!(VAULT_W);
+    s.post("vault", &r).await?.into_result()?;
+    s.top_up(&s.whitehat, NearToken::from_near(2)).await?;
+    s.top_up(&s.other, NearToken::from_near(1)).await?;
+    s.script(json!({ "output": null })).await?;
+    let id: u64 = s
+        .submit_claim(&s.whitehat, "vault")
+        .await?
+        .into_result()?
+        .json()?;
+    let submitted: u64 = s.claim(id).await?["submitted_at_ns"]
+        .as_str()
+        .unwrap()
+        .parse()?;
+    s.pass_time_to(submitted + PLACE_HOLD_NS).await?;
+
+    // No answer scripted: the retry's job stays running.
+    let retry = s
+        .whitehat
+        .call(s.contract.id(), "retry_claim")
+        .args_json(json!({ "claim_id": id, "proofs": PROOFS }))
+        .gas(tgas(300))
+        .transact_async()
+        .await?;
+    let jobs = s.wait_for_requests(3).await?;
+    assert_eq!(s.claim(id).await?["state"], "judging");
+
+    // Another Whitehat's claim, judged ZERO at once: its submission and its verdict each drop
+    // the places that have lapsed.
+    s.script(json!({ "output": ZERO })).await?;
+    let second: u64 = s
+        .submit_claim(&s.other, "vault")
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(s.claim(second).await?["state"], "judged");
+    assert_eq!(s.claim(id).await?["state"], "judging");
+
+    s.pass_end_date("vault").await?;
     let r = s.withdraw_bounty(&s.protocol, "vault").await?;
     assert!(failure_text(&r).contains("unresolved"), "{r:?}");
     assert_eq!(s.usdc_balance(s.contract.id()).await?, BOUNTY_AMOUNT);

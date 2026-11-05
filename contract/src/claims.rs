@@ -19,16 +19,17 @@
 //!   holds its place for [`CLAIM_PLACE_HOLD_NS`] from its submission; after that a later
 //!   winner is paid and the lapsed claim can't win.
 
-use bountee_formats::{BlockRef, BountyId, Bytes, Outcome, Rules, Verdict, B256};
+use bountee_formats::{BlockRef, BountyId, Bytes, Outcome, Rules, Verdict};
 use near_sdk::json_types::U64;
 use near_sdk::serde_json::{self, json};
+use near_sdk::store::LookupMap;
 use near_sdk::{
     env, near, require, AccountId, Gas, NearToken, Promise, PromiseOrValue, PromiseResult,
 };
 
 use crate::{
-    emit, fees, gas, outlayer, to_formats_account, Bounty, BountyState, ClaimRecord, ClaimState,
-    Contract, ContractExt,
+    emit, fees, gas, outlayer, sha256_hex, to_formats_account, Bounty, BountyState, ClaimRecord,
+    ClaimState, Contract, ContractExt,
 };
 
 /// How long a claim with no verdict holds its place against a later PAYS, from its
@@ -37,10 +38,6 @@ pub const CLAIM_PLACE_HOLD_NS: u64 = 3_600_000_000_000;
 
 /// For the withdrawal's callback.
 const ON_CLAIM_BALANCE_WITHDRAWN: Gas = Gas::from_tgas(5);
-
-fn storage_cost(bytes: u64) -> NearToken {
-    NearToken::from_yoctonear(bytes as u128 * fees::STORAGE_PRICE_PER_BYTE)
-}
 
 /// The claim's job input (see `outlayer`).
 fn judge_input(
@@ -66,7 +63,7 @@ fn judge_input(
 
 /// The job deposit for `input`: the fixed deposit plus OutLayer's hold on large input.
 fn job_deposit(input: &str) -> NearToken {
-    fees::JOB_DEPOSIT.saturating_add(storage_cost(
+    fees::JOB_DEPOSIT.saturating_add(fees::storage_cost(
         (input.len() as u64).saturating_sub(fees::JOB_INPUT_FREE_BYTES),
     ))
 }
@@ -203,6 +200,7 @@ impl Contract {
                 header,
                 proofs_sha256: sha256_hex(proofs.as_bytes()),
                 submitted_at_ns: U64(now),
+                submitted_at_block: U64(env::block_height()),
                 secret_profile: secret_profile.clone(),
                 state: ClaimState::Storing,
                 verdict: None,
@@ -210,16 +208,17 @@ impl Contract {
         );
         self.sealed_exploits.insert(sealed_hash, claim_id);
         let record = self.bounties.get_mut(&bounty).expect("checked above");
-        record.prune_lapsed(now);
+        record.prune_lapsed(now, &self.claims);
         record.open_claims.push((claim_id, now));
         self.claims.flush();
         self.sealed_exploits.flush();
         self.bounties.flush();
-        let record_cost = storage_cost(env::storage_usage().saturating_sub(storage_before));
+        let record_cost = fees::storage_cost(env::storage_usage().saturating_sub(storage_before));
 
         let job_deposit = job_deposit(&input);
-        let secret_deposit =
-            storage_cost(sealed_exploit.as_str().len() as u64 + fees::SECRET_ROW_OVERHEAD_BYTES);
+        let secret_deposit = fees::storage_cost(
+            sealed_exploit.as_str().len() as u64 + fees::SECRET_ROW_OVERHEAD_BYTES,
+        );
         let cost = job_deposit
             .saturating_add(secret_deposit)
             .saturating_add(record_cost);
@@ -304,7 +303,7 @@ impl Contract {
             record.open_claims.push((claim_id, submitted));
         }
         self.bounties.flush();
-        let entry_cost = storage_cost(env::storage_usage().saturating_sub(storage_before));
+        let entry_cost = fees::storage_cost(env::storage_usage().saturating_sub(storage_before));
         self.draw_claim_balance(&claim.whitehat, job_deposit.saturating_add(entry_cost));
         self.claims.get_mut(&claim_id).expect("read above").state = ClaimState::Judging;
         emit(
@@ -395,7 +394,7 @@ impl Contract {
         let now = env::block_timestamp();
         let could_win = bounty.claim_can_still_win(claim_id, submitted, now);
         bounty.close_claim(claim_id);
-        bounty.prune_lapsed(now);
+        bounty.prune_lapsed(now, &self.claims);
         // ZERO and INVALID move nothing and request no signature (R3.3); a later winner
         // this claim held back may now be paid (R3.6).
         if verdict.outcome() != Outcome::Pays {
@@ -429,8 +428,16 @@ impl Contract {
             return PromiseOrValue::Value(());
         }
         match self.start_pause_signing(&bounty_id) {
-            Some(p) => p.into(),
-            None => PromiseOrValue::Value(()),
+            Ok(p) => p.into(),
+            Err(crate::pauses::NotSigning::Short(short)) => {
+                // Waits for a `sign_pauses` that attaches the shortfall (R11.4).
+                emit(
+                    "pause_signing_waiting",
+                    json!({ "bounty": bounty_id, "claim_id": claim_id, "posting_fee_short": short }),
+                );
+                PromiseOrValue::Value(())
+            }
+            Err(crate::pauses::NotSigning::NoPauses) => PromiseOrValue::Value(()),
         }
     }
 }
@@ -515,19 +522,15 @@ impl Bounty {
         self.open_claims.retain(|(id, _)| *id != claim_id);
     }
 
-    /// Drop the claims whose place has lapsed; they can't hold a payout any more.
-    fn prune_lapsed(&mut self, now: u64) {
-        self.open_claims
-            .retain(|(_, submitted)| now < submitted.saturating_add(CLAIM_PLACE_HOLD_NS));
+    /// Drop the claims whose place has lapsed; they can't hold a payout any more. A claim
+    /// whose secret is being stored or whose job is running stays, at any age: until its
+    /// verdict it blocks the bounty's withdrawal (R10.2), though a lapsed one holds no payout.
+    fn prune_lapsed(&mut self, now: u64, claims: &LookupMap<u64, ClaimRecord>) {
+        self.open_claims.retain(|(id, submitted)| {
+            now < submitted.saturating_add(CLAIM_PLACE_HOLD_NS)
+                || claims
+                    .get(id)
+                    .is_some_and(|c| matches!(c.state, ClaimState::Storing | ClaimState::Judging))
+        });
     }
-}
-
-fn sha256_hex(bytes: &[u8]) -> B256 {
-    let hash = env::sha256_array(bytes);
-    let mut hex = String::with_capacity(66);
-    hex.push_str("0x");
-    for b in hash {
-        hex.push_str(&format!("{b:02x}"));
-    }
-    B256::parse(&hex).expect("64 lowercase hex digits")
 }

@@ -107,9 +107,7 @@ impl Contract {
         );
         let reserve = fees::POSTING_FEE
             .saturating_sub(fees::JOB_DEPOSIT)
-            .saturating_sub(NearToken::from_yoctonear(
-                used as u128 * fees::STORAGE_PRICE_PER_BYTE,
-            ));
+            .saturating_sub(fees::storage_cost(used));
         let bounty = self.bounties.get_mut(&id).expect("just inserted");
         bounty.fee_reserve = reserve;
         let input = json!({ "posting_check": { "bounty": id, "rules": bounty.rules } }).to_string();
