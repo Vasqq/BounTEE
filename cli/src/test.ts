@@ -7,17 +7,22 @@
 // 3. Prove every account and slot the replay reads, from the same public RPC (proofs.ts).
 // 4. Run the compiled judge under wasmtime and save its exact input (the `{"replay": …}`
 //    job), so `claim` submits what `test` judged and anyone can re-run it.
+//
+// `bountee test --job <job.json>` replays a saved job instead (ticket #9; D19, R2.9): its
+// recorded header and proofs, under the compiled judge, with no RPC, keys or funds. The demo
+// bounty's exploit and cheat ship as such jobs in demo/fixtures/, so `test` on the demo runs
+// offline.
 import { spawn, spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { parseRules, toJson, type Exploit, type Rules, type Verdict } from "@bountee/formats";
+import { parseReplay, parseRules, toJson, type Exploit, type Rules, type Verdict } from "@bountee/formats";
 import { proofRpcs } from "./chains.ts";
 import { NEAR_RPC } from "./near.ts";
-import { collectReplay, exploitFromBroadcast, rpc } from "./proofs.ts";
+import { collectReplay, exploitFromBroadcast, rpc, runJudge } from "./proofs.ts";
 
 /** How far behind the head the claim's block is: a few seconds, since a public RPC can fail on the very latest. */
 const BLOCKS_BEHIND = 3;
@@ -88,7 +93,7 @@ function freePort(): Promise<number> {
   });
 }
 
-function judgeWasm(o: TestOptions): string {
+function judgeWasm(o: { judge?: string }): string {
   if (o.judge) return resolve(o.judge);
   const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
   const wasm = `${repo}target/${target}/release/bountee-judge.wasm`;
@@ -162,7 +167,15 @@ async function scriptToExploit(o: TestOptions, rules: Rules, forkUrl: string, bl
     );
     const saved = /Transactions saved to: (.+-latest\.json)/.exec(stdout)?.[1]?.trim();
     if (!saved || !existsSync(saved)) throw new Error(`the script broadcast no transactions:\n${stdout}`);
-    const exploit: Exploit = exploitFromBroadcast(JSON.parse(readFileSync(saved, "utf8")));
+    const broadcast: Exploit = exploitFromBroadcast(JSON.parse(readFileSync(saved, "utf8")));
+    // Each transaction gets the claim block's whole gas limit, not forge's estimate: forge
+    // estimates from the gas a transaction used, which for a deep reentrancy (each call keeps
+    // 1/64 back) is far below the limit it needs, so the replay would run out of gas and a
+    // real exploit score ZERO (#10's finding). The replay's gas price is 0, so gas costs the
+    // Whitehat nothing, and the judge only refuses a transaction above the block's limit.
+    const { gasLimit } = await rpc<{ gasLimit: string }>(forkUrl, "eth_getBlockByNumber", [`0x${block.toString(16)}`, false]);
+    const gas = Number(BigInt(gasLimit));
+    const exploit: Exploit = { transactions: broadcast.transactions.map((t) => ({ ...t, gas })) };
     return { exploit, attacker: attacker.address };
   } finally {
     anvil.kill();
@@ -207,6 +220,52 @@ export async function testCommand(o: TestOptions): Promise<TestResult> {
     }
   }
   throw new Error(`couldn't prove the replay's reads:\n${errors.join("\n")}`);
+}
+
+// ---- A saved job, offline ---------------------------------------------------------------------
+
+export interface ReplayResult {
+  verdict: Verdict;
+  block: { number: number; hash: string };
+  job: string;
+  /** The compiled judge that gave the verdict, and whether it is the very build the bounty pins (the one the enclave runs). */
+  judge: { wasm: string; sha256: string; bounty_build: string; same_as_bounty: boolean };
+  transactions: number;
+  proofs: number;
+  diagnostics: string[];
+}
+
+/** Replay a saved job (one `test` saved, or a demo's committed job) from its own header and proofs, with no network (D19, R2.9). */
+export function replayJob(o: { job: string; judge?: string }): ReplayResult {
+  const replay = parseReplay(JSON.parse(readFileSync(o.job, "utf8")).replay);
+  const wasm = judgeWasm(o);
+  const sha256 = createHash("sha256").update(readFileSync(wasm)).digest("hex");
+  const { verdict, stderr } = runJudge(wasm, replay);
+  const diagnostics = stderr.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (!verdict) throw new Error(`the judge gave no verdict:\n${diagnostics.join("\n")}`);
+  const bounty_build = replay.rules.judge_build_hash;
+  return {
+    verdict,
+    block: replay.block,
+    job: resolve(o.job),
+    judge: { wasm, sha256, bounty_build, same_as_bounty: `0x${sha256}` === bounty_build },
+    transactions: replay.exploit.transactions.length,
+    proofs: replay.proofs.length,
+    diagnostics,
+  };
+}
+
+export function formatReplayResult(r: ReplayResult): string {
+  return [
+    `verdict: ${r.verdict.outcome} (${r.verdict.reason})`,
+    `block:   ${r.block.number} ${r.block.hash} (recorded header and proofs, no RPC)`,
+    `exploit: ${r.transactions} transaction(s), ${r.proofs} proven account(s), from ${r.job}`,
+    `judge:   ${r.judge.wasm} (sha256 ${r.judge.sha256})`,
+    r.judge.same_as_bounty
+      ? "         the bounty's pinned build: the program the enclave runs"
+      : `         not the bounty's pinned build ${r.judge.bounty_build} (that build differs only in the contract it answers to; pass it with --judge to run the enclave's exact program)`,
+    ...r.diagnostics.map((d) => `judge:   ${d}`),
+  ].join("\n");
 }
 
 export function formatTestResult(r: TestResult): string {

@@ -5,7 +5,8 @@
 // - the claim balance: top it up with what this claim will draw, if it's short;
 // - after: wait for the enclave's verdict, and on PAYS make sure the pauses are signed (asking
 //   `sign_pauses` if the verdict's callback ran out of gas for them), the bounty is paid,
-//   and every signed pause is broadcast (R7.3).
+//   and every signed pause is broadcast, then each chain's pause verified on NEAR once the
+//   chain reports it safe (R7.3).
 import { readFileSync } from "node:fs";
 import { actions } from "near-api-js";
 import { parseReplay, RECENCY_LIMIT_SECS, type Replay, type Verdict } from "@bountee/formats";
@@ -13,6 +14,7 @@ import { broadcastCommand, type BroadcastResult } from "./broadcast.ts";
 import { rpc } from "./proofs.ts";
 import { proofRpcs } from "./chains.ts";
 import { testCommand, type TestOptions, type TestResult } from "./test.ts";
+import { verifyPauses, type VerifyResult } from "./verify-pause.ts";
 import { Near, events, formatNear, milliNear, tgas } from "./near.ts";
 
 /** Time a claim needs from here to `submit_claim` recording its submission time. */
@@ -90,6 +92,8 @@ export interface Settlement {
   sign_pauses_tx?: string;
   paid?: boolean;
   broadcast?: BroadcastResult;
+  /** Each chain's pause verification on NEAR, after the broadcast. */
+  verification?: VerifyResult;
   events: string[];
 }
 
@@ -98,7 +102,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Wait for the claim's verdict; on PAYS see it paid and its pauses broadcast. */
 export async function settle(
   near: Near,
-  o: { contract: string; bounty: { protocol: string; name: string }; claimId: number; txHash: string; whitehat: string; broadcast: boolean; rpcs?: Record<number, string>; timeoutSecs?: number },
+  o: { contract: string; bounty: { protocol: string; name: string }; claimId: number; txHash: string; whitehat: string; broadcast: boolean; verify?: boolean; verifyWaitSecs?: number; rpcs?: Record<number, string>; timeoutSecs?: number },
 ): Promise<Settlement> {
   const deadline = Date.now() + (o.timeoutSecs ?? 300) * 1000;
   const status = await near.txStatus(o.txHash, o.whitehat, o.timeoutSecs ?? 300);
@@ -156,6 +160,17 @@ export async function settle(
       rpcs: o.rpcs,
       waitSecs: 120,
     });
+    // Off the money path (R7.11): the claim is paid whatever this finds.
+    if (o.verify) {
+      out.verification = await verifyPauses({
+        near,
+        contract: o.contract,
+        bounty: o.bounty,
+        signer: o.whitehat,
+        rpcs: o.rpcs,
+        waitSecs: o.verifyWaitSecs,
+      });
+    }
   }
   return out;
 }
@@ -164,6 +179,7 @@ export function formatSettlement(s: Settlement): string {
   const lines = [`claim ${s.claim_id}: ${s.state}${s.verdict ? ` ${s.verdict.outcome} (${s.verdict.reason})` : ""}`, `bounty: ${s.bounty_state}`];
   if (s.sign_pauses_tx) lines.push(`pauses signed by retry: ${s.sign_pauses_tx}`);
   for (const p of s.broadcast?.pauses ?? []) lines.push(`pause on ${p.chain_id} ${p.contract}: ${p.sent} ${p.tx_hash}${p.receipt ? ` (${p.receipt.status})` : ""}`);
+  for (const c of s.verification?.chains ?? []) lines.push(`pause on ${c.chain_id}: ${c.verified ? "verified on NEAR" : `not verified (${c.error ?? "unknown"})`}`);
   return lines.join("\n");
 }
 

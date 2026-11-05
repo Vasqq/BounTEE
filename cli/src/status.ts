@@ -128,10 +128,12 @@ async function pauseReceipt(url: string | undefined, hash: string) {
   }
 }
 
-/** Whether the contract records a verified pause for this transaction (R7.10, ticket #21). */
-function isVerified(bounty: any, hash: string): boolean {
-  const recorded: unknown[] = bounty?.verified_pauses ?? [];
-  return recorded.some((v: any) => (typeof v === "string" ? v : v?.tx_hash)?.toLowerCase() === hash.toLowerCase());
+/**
+ * Whether the contract records a verified pause for this transaction (R7.10): its
+ * `pause_verifications` view lists, per chain, the hashes of the pauses the MPC network verified.
+ */
+function isVerified(verifications: { verified_pauses?: string[] }[], hash: string): boolean {
+  return verifications.some((c) => (c.verified_pauses ?? []).some((h) => h.toLowerCase() === hash.toLowerCase()));
 }
 
 async function findPayout(o: StatusOptions, cache: Cache, claim: any) {
@@ -229,6 +231,9 @@ export async function claimStatus(o: StatusOptions, cache: Cache = new Map()): P
   const paid = bounty.state === "paid";
   if (paid) stages.push({ stage: "paid", claim_id: id, amount: bounty.rules.bounty_amount, whitehat: claim.whitehat });
 
+  const verifications = await o.near
+    .view<{ verified_pauses?: string[] }[]>(o.contract, "pause_verifications", { id: claim.bounty })
+    .catch(() => []);
   const pauses: PauseRecord[] = await Promise.all(
     signed.map(async (p) => ({
       chain_id: p.chain_id,
@@ -236,7 +241,7 @@ export async function claimStatus(o: StatusOptions, cache: Cache = new Map()): P
       tx_hash: p.tx_hash,
       link: explorerTx(p.chain_id, p.tx_hash),
       landed: await pauseReceipt(o.rpcs?.[p.chain_id] ?? defaultRpc(p.chain_id), p.tx_hash),
-      verified: isVerified(bounty, p.tx_hash),
+      verified: isVerified(verifications, p.tx_hash),
     })),
   );
   for (const p of pauses) {
