@@ -2,8 +2,8 @@
 // BounTEE's command-line tool. Commands so far: `--version`, `help`, `init` (#16), `test`
 // (ticket #11), `broadcast` (ticket #13), `claim` (sealing and filing, #15; script path,
 // verdict, payout and pauses, #16; live progress and receipt, #26), `list`, `show` and
-// `status` (#26), `post` (#17), `verify-pause` (#21), `open-exploit` (#22). The rest (verify,
-// balance, key, withdraw) land in the CLI tickets. Every command takes `--json` for
+// `status` (#26), `post` (#17), `verify-pause` (#21), `open-exploit` (#22), `key` (#25). The
+// rest (verify, balance, withdraw) land in the CLI tickets. Every command takes `--json` for
 // machine-readable output (R14.5): the result
 // as one JSON document on stdout, an error as `{"error": …}` on stderr, and a claim's live
 // stages as one JSON line each on stderr.
@@ -12,6 +12,7 @@ import { formatBounty, formatList, listBounties, parseBountyId, showBounty } fro
 import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadcast.ts";
 import { claim, formatClaimResult } from "./claim.ts";
 import { initCommand } from "./init.ts";
+import { formatKeyAdd, formatKeyRevoke, keyAdd, keyRevoke } from "./keys.ts";
 import { Near, NEAR_RPC, parseNetwork } from "./near.ts";
 import { exploitPublicKey, formatOpenExploit, openExploit } from "./open-exploit.ts";
 import { claimStatus, formatStage, formatStatus, loadClaimTxs, watchClaim } from "./status.ts";
@@ -42,6 +43,7 @@ const USAGES: Record<string, string> = {
   post: "bountee post <protocol>/<name> --rules <rules.json> --contract <account> [--network testnet|mainnet] [--near-rpc <url>] [--chain-rpc <chain id>=<url>[,...]] [--no-preflight] [--json]",
   "open-exploit": `bountee open-exploit <protocol>/<name> (--wallet <Ethereum key file> | --key-file <saved exploit key>) [--public-key] [--as <account>] [--out <file>] ${NEAR_FLAGS} [--json]`,
   broadcast: "bountee broadcast <protocol>/<name> [--contract <account>] [--near-rpc <url>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]",
+  key: "bountee key add --contract <account> --as <account> [--allowance <NEAR>] [--out-dir <dir>] [--network testnet|mainnet] [--near-rpc <url>] [--json]  |  bountee key revoke [<public key>] --as <account> [--out-dir <dir>] [--network testnet|mainnet] [--near-rpc <url>] [--json]",
   "verify-pause": `bountee verify-pause <protocol>/<name> --as <account> ${NEAR_FLAGS} [--chain <chain id>] [--rpc <chain id>=<url>[,...]] [--wait <secs>] [--json]`,
 };
 const usage = (command: string) => `usage: ${USAGES[command]}`;
@@ -202,6 +204,20 @@ try {
       const r = await openExploit(o);
       print(r, formatOpenExploit(r));
     }
+  } else if (command === "key") {
+    const { positional, flags } = parse(rest.slice(1));
+    const network = parseNetwork(flags.network);
+    const near = new Near(network, flags["near-rpc"] ?? NEAR_RPC[network]);
+    if (positional[0] === "add") {
+      const contract = flags.contract ?? process.env.BOUNTEE_CONTRACT;
+      if (!contract || !flags.as) fail(`key add needs --contract and --as\n${usage(command)}`, 2);
+      const r = await keyAdd({ near, contract, account: flags.as, allowance: flags.allowance, outDir: flags["out-dir"] });
+      print(r, formatKeyAdd(r));
+    } else if (positional[0] === "revoke") {
+      if (!flags.as) fail(`key revoke needs --as\n${usage(command)}`, 2);
+      const r = await keyRevoke({ near, account: flags.as, publicKey: positional[1], outDir: flags["out-dir"] });
+      print(r, formatKeyRevoke(r));
+    } else fail(`key takes add or revoke\n${usage(command)}`, 2);
   } else if (command === "claim") {
     const r = await claim(rest.slice(1), showStage);
     print(r, formatClaimResult(r));

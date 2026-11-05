@@ -2,7 +2,8 @@
 //
 // - before: run `test`'s collection for the Foundry script, or reuse a saved job, and re-run
 //   it if its block is too old to still be recent when the claim lands (R2.8's 300 s);
-// - the claim balance: top it up with what this claim will draw, if it's short;
+// - the claim balance: top it up with what this claim will draw, if it's short (a claim key
+//   can't: then it says so and stops before filing);
 // - after: wait for the enclave's verdict, and on PAYS make sure the pauses are signed (asking
 //   `sign_pauses` if the verdict's callback ran out of gas for them), the bounty is paid,
 //   and every signed pause is broadcast, then each chain's pause verified on NEAR once the
@@ -78,6 +79,13 @@ export async function ensureClaimBalance(near: Near, contract: string, whitehat:
   const have = BigInt(await near.view<string>(contract, "claim_balance", { account_id: whitehat }));
   if (have >= cost) return 0n;
   const add = cost - have;
+  // A claim key (#25) can't attach a deposit: the Whitehat tops up from their own key.
+  if (await near.signsWithFunctionCallKey(whitehat)) {
+    throw new Error(
+      `${whitehat}'s claim balance holds ${formatNear(have)} NEAR and this claim draws about ${formatNear(cost)}: a claim key can't top it up. ` +
+        `Ask the Whitehat to add ${formatNear(add)} NEAR or more (top_up_claim_balance on ${contract}, signed with their own key).`,
+    );
+  }
   await near.account(whitehat).callFunction({ contractId: contract, methodName: "top_up_claim_balance", args: {}, deposit: add, gas: tgas(30) });
   return add;
 }
