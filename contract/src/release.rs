@@ -38,13 +38,29 @@ pub struct ReleaseRecord {
     pub released: Option<String>,
 }
 
+/// Where a release is.
+#[near(serializers = [json])]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseState {
+    /// The job is under way.
+    Requested,
+    /// Its output is kept, for the Protocol to open.
+    Released,
+}
+
 /// A release as its view returns it.
 #[near(serializers = [json])]
 pub struct ReleaseView {
     pub claim_id: u64,
-    /// `requested` while the job runs, `released` once its output is kept.
-    pub state: String,
+    pub state: ReleaseState,
     pub released: Option<String>,
+}
+
+/// Whether `key` is an exploit key a release can encrypt to: `x25519:` and 32 bytes.
+pub fn is_exploit_key(key: &str) -> bool {
+    key.strip_prefix("x25519:")
+        .and_then(|data| near_sdk::bs58::decode(data).into_vec().ok())
+        .is_some_and(|bytes| bytes.len() == 32)
 }
 
 impl ReleaseRecord {
@@ -118,11 +134,12 @@ impl Contract {
             "exploit_public_key": rules.exploit_public_key,
         } })
         .to_string();
+        let requested_at = env::block_height();
         self.releases.insert(
             id.clone(),
             ReleaseRecord {
                 claim_id,
-                requested_at: Some(env::block_height()),
+                requested_at: Some(requested_at),
                 released: None,
             },
         );
@@ -147,15 +164,17 @@ impl Contract {
             Self::ext(env::current_account_id())
                 .with_static_gas(gas::ON_RELEASED)
                 .with_unused_gas_weight(0)
-                .on_exploit_released(id, hold),
+                .on_exploit_released(id, requested_at, hold),
         )
     }
 
     /// The release job's result: its output is kept only if it is a release. A failed,
     /// refused or malformed job keeps nothing and leaves the release to be asked again.
-    /// Whatever of `hold` isn't spent goes back to the bounty's posting fee.
+    /// Whatever of `hold` isn't spent goes back to the bounty's posting fee. A callback for
+    /// a request that is no longer the one in flight (it went stale and was asked again)
+    /// changes nothing but that refund.
     #[private]
-    pub fn on_exploit_released(&mut self, id: BountyId, hold: NearToken) {
+    pub fn on_exploit_released(&mut self, id: BountyId, requested_at: u64, hold: NearToken) {
         #[allow(deprecated)]
         let (output, job_spent) = match env::promise_result(0) {
             PromiseResult::Successful(bytes) => (
@@ -168,9 +187,15 @@ impl Contract {
             // OutLayer refused the request; its deposit came back here.
             PromiseResult::Failed => (None, NearToken::from_yoctonear(0)),
         };
-        let Some(mut record) = self.releases.remove(&id) else {
+        if self
+            .releases
+            .get(&id)
+            .is_none_or(|r| r.requested_at != Some(requested_at))
+        {
+            self.refund_hold(&id, hold.saturating_sub(job_spent));
             return;
-        };
+        }
+        let mut record = self.releases.remove(&id).expect("checked above");
         let mut storage = NearToken::from_yoctonear(0);
         match output {
             Some(output) => {
@@ -188,17 +213,13 @@ impl Contract {
             }
             None => {
                 // Nothing kept: the record goes, so the release can be asked again.
-                self.releases.flush();
                 emit(
                     "release_failed",
                     json!({ "bounty": id, "claim_id": record.claim_id }),
                 );
             }
         }
-        if let Some(bounty) = self.bounties.get_mut(&id) {
-            let back = hold.saturating_sub(job_spent).saturating_sub(storage);
-            bounty.fee_reserve = bounty.fee_reserve.saturating_add(back);
-        }
+        self.refund_hold(&id, hold.saturating_sub(job_spent).saturating_sub(storage));
     }
 
     /// A bounty's release, once requested: the winning exploit encrypted to the Protocol's
@@ -207,12 +228,20 @@ impl Contract {
         self.releases.get(&id).map(|r| ReleaseView {
             claim_id: r.claim_id,
             state: if r.released.is_some() {
-                "released"
+                ReleaseState::Released
             } else {
-                "requested"
-            }
-            .to_owned(),
+                ReleaseState::Requested
+            },
             released: r.released.clone(),
         })
+    }
+}
+
+impl Contract {
+    /// Give the unspent part of a release's hold back to the bounty's posting fee.
+    fn refund_hold(&mut self, id: &BountyId, back: NearToken) {
+        if let Some(bounty) = self.bounties.get_mut(id) {
+            bounty.fee_reserve = bounty.fee_reserve.saturating_add(back);
+        }
     }
 }

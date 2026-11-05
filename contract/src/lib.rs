@@ -228,7 +228,8 @@ pub struct ClaimRecord {
     pub proofs_sha256: B256,
     /// NEAR block time the contract recorded at submission (R2.8).
     pub submitted_at_ns: near_sdk::json_types::U64,
-    /// The OutLayer secret profile holding this claim's sealed exploit; used once.
+    /// The OutLayer secret profile holding this claim's sealed exploit; stored once, read by
+    /// the claim's job and, for a winning claim, its release job.
     pub secret_profile: String,
     pub state: ClaimState,
     pub verdict: Option<Verdict>,

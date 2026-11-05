@@ -282,7 +282,7 @@ fn rules(s: &Sandbox, end_in_ns: u64, now_ns: u64) -> Value {
         "minimum_theft": "1000000000000000000",
         "end_date_ns": (now_ns + end_in_ns).to_string(),
         "disclosure_delay_days": 30,
-        "exploit_public_key": "secp256k1:4NfTiv3UsGahebgTaHyD9vF8KYKMBnfd6kh94mK6xv8f",
+        "exploit_public_key": "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
         "judge_build_hash": JUDGE_BUILD_HASH,
     })
 }
@@ -1851,6 +1851,18 @@ impl Sandbox {
         )
     }
 
+    /// Wait until `n` release jobs have been requested, and return them.
+    async fn wait_for_release_requests(&self, n: usize) -> anyhow::Result<Vec<Value>> {
+        for _ in 0..150 {
+            let r = self.release_requests().await?;
+            if r.len() >= n {
+                return Ok(r);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        anyhow::bail!("release job {n} was never requested")
+    }
+
     /// The job requests whose input is a release.
     async fn release_requests(&self) -> anyhow::Result<Vec<Value>> {
         Ok(self
@@ -1912,20 +1924,12 @@ async fn r6_1_the_release_job_is_requested_only_after_the_payout_succeeds() -> a
         // A caller can't name the key: an extra argument changes nothing.
         .args_json(json!({
             "id": { "protocol": s.protocol.id(), "name": "vault" },
-            "exploit_public_key": "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
+            "exploit_public_key": "x25519:HQm4yqJujXDwAJ3AkKTGcCjVby2TZ7HaVs3SAaqBCyAB",
         }))
         .gas(tgas(150))
         .transact_async()
         .await?;
-    let mut release = None;
-    for _ in 0..150 {
-        release = s.release_requests().await?.pop();
-        if release.is_some() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    }
-    let release = release.expect("the release job is requested");
+    let release = s.wait_for_release_requests(1).await?.remove(0);
     assert_eq!(release["predecessor"], json!(s.contract.id()));
     let source: Value = serde_json::from_str(release["source"].as_str().unwrap())?;
     assert_eq!(source["WasmUrl"]["hash"], &JUDGE_BUILD_HASH[2..]);
@@ -2046,5 +2050,29 @@ async fn r5_6_a_failed_exploit_is_never_released() -> anyhow::Result<()> {
     );
     assert!(!losers.contains(&secrets_ref["profile"]));
     assert_eq!(s.released("vault").await?["claim_id"], winner);
+    Ok(())
+}
+
+/// R6.2, R12.4 (code review of #22): a posting whose exploit key isn't an X25519 key of 32
+/// bytes is refused, since no release could ever open for it; the USDC goes back.
+#[tokio::test]
+async fn r6_2_a_posting_with_an_exploit_key_no_release_can_use_is_refused() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let before = s.usdc_balance(s.protocol.id()).await?;
+    for (name, key) in [
+        (
+            "secp",
+            "secp256k1:4NfTiv3UsGahebgTaHyD9vF8KYKMBnfd6kh94mK6xv8f",
+        ),
+        ("ed", "ed25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA"),
+        ("short", "x25519:6W7B3sSYk1p2DZ7"),
+    ] {
+        let mut rules = valid_rules(&s).await?;
+        rules["exploit_public_key"] = json!(key);
+        let r = s.post(name, &rules).await?;
+        assert!(failure_text(&r).contains("X25519"), "{name}: {r:?}");
+        assert_eq!(s.bounty(name).await?, Value::Null, "{name}");
+    }
+    assert_eq!(s.usdc_balance(s.protocol.id()).await?, before);
     Ok(())
 }
