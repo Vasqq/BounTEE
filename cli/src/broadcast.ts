@@ -4,7 +4,8 @@
 //
 // A pause someone else already sent is reported as `known`, not as an error, so running it
 // twice is harmless. Verification on NEAR (R7.3's second half) is `verify-pause.ts`.
-import { defaultRpcs } from "./chains.ts";
+import { parseBountyId } from "./bounties.ts";
+import { defaultRpcs, waitForEvmReceipt, type EvmReceipt } from "./chains.ts";
 import { NEAR_RPC } from "./near.ts";
 import { rpc } from "./proofs.ts";
 
@@ -34,7 +35,7 @@ export interface PauseResult {
   sent: "sent" | "known" | "failed";
   error?: string;
   /** With `--wait`: whether the pause transaction succeeded, and its block. */
-  receipt?: { status: "success" | "reverted"; block: number } | null;
+  receipt?: EvmReceipt | null;
 }
 
 export interface BroadcastResult {
@@ -84,20 +85,8 @@ async function send(url: string, p: SignedPause): Promise<PauseResult> {
   }
 }
 
-async function waitForReceipt(url: string, hash: string, secs: number) {
-  const until = Date.now() + secs * 1000;
-  for (;;) {
-    const r = await rpc<{ status: string; blockNumber: string } | null>(url, "eth_getTransactionReceipt", [hash]).catch(() => null);
-    if (r) return { status: r.status === "0x1" ? ("success" as const) : ("reverted" as const), block: Number(r.blockNumber) };
-    if (Date.now() > until) return null;
-    await new Promise((ok) => setTimeout(ok, 1000));
-  }
-}
-
 export async function broadcastCommand(o: BroadcastOptions): Promise<BroadcastResult> {
-  const m = /^([a-z0-9._-]+)\/([a-z0-9-]+)$/.exec(o.bounty);
-  if (!m) throw new Error(`${o.bounty} is not a bounty id <protocol>/<name>`);
-  const [protocol, name] = [m[1]!, m[2]!];
+  const { protocol, name } = parseBountyId(o.bounty);
   const contract = o.contract ?? process.env.BOUNTEE_CONTRACT;
   if (!contract) throw new Error("broadcast needs the bounty contract's account: pass --contract or set BOUNTEE_CONTRACT");
   const nearRpc = o.nearRpc ?? NEAR_RPC.testnet;
@@ -121,7 +110,8 @@ export async function broadcastCommand(o: BroadcastOptions): Promise<BroadcastRe
       const results: PauseResult[] = [];
       for (const p of pauses) results.push(await send(url, p));
       if (o.waitSecs !== undefined) {
-        for (const r of results) if (r.sent !== "failed") r.receipt = await waitForReceipt(url, r.tx_hash, o.waitSecs);
+        const until = Date.now() + o.waitSecs * 1000;
+        for (const r of results) if (r.sent !== "failed") r.receipt = await waitForEvmReceipt(url, r.tx_hash, until, 1000);
       }
       return results;
     }),

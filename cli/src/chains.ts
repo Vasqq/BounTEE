@@ -1,5 +1,7 @@
 // The EVM chains BounTEE knows, and their ordinary public RPCs: the one place the tool and
-// its tests take an RPC from when none is given (`--rpc`).
+// its tests take an RPC from when none is given (`--rpc`), and the one reader of a transaction's
+// receipt there.
+import { rpc } from "./proofs.ts";
 
 export interface Chain {
   name: string;
@@ -59,4 +61,25 @@ export function proofRpcs(chainId: number): string[] {
 export function explorerTx(chainId: number, hash: string): string | undefined {
   const base = CHAINS[chainId]?.explorerTx;
   return base ? `${base}${hash}` : undefined;
+}
+
+/** A transaction's receipt on an EVM chain: whether it succeeded, and its block. */
+export interface EvmReceipt {
+  status: "success" | "reverted";
+  block: number;
+}
+
+/** The transaction's receipt now, or null if it hasn't landed (or the RPC didn't answer). */
+export async function evmReceipt(url: string, hash: string): Promise<EvmReceipt | null> {
+  const r = await rpc<{ status: string; blockNumber: string } | null>(url, "eth_getTransactionReceipt", [hash]).catch(() => null);
+  return r ? { status: r.status === "0x1" ? "success" : "reverted", block: Number(r.blockNumber) } : null;
+}
+
+/** The transaction's receipt once it lands, read every `intervalMs`; null if not landed by `untilMs`. */
+export async function waitForEvmReceipt(url: string, hash: string, untilMs: number, intervalMs: number): Promise<EvmReceipt | null> {
+  for (;;) {
+    const r = await evmReceipt(url, hash);
+    if (r || Date.now() > untilMs) return r;
+    await new Promise((ok) => setTimeout(ok, intervalMs));
+  }
 }

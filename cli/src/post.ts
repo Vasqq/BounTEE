@@ -24,8 +24,10 @@
 import { readFileSync } from "node:fs";
 import { actions } from "near-api-js";
 import { PAUSE_GAS_PER_PAUSE, parseRules, type BountyId, type PostingFailure, type Rules } from "@bountee/formats";
+import { parseBountyId } from "./bounties.ts";
 import { defaultRpc } from "./chains.ts";
 import { events, formatNear, Near, NEAR_RPC, type Network, tgas } from "./near.ts";
+import { rpc } from "./proofs.ts";
 
 /** NEAR's Ethereum-wallet relayer caps a transaction at 270 Tgas, so the web app attaches that; so does the tool. */
 const POSTING_GAS = tgas(270);
@@ -66,23 +68,6 @@ export interface PostResult {
   failures?: (PostingFailure & { contract: Rules["covered_contracts"][number] })[] | null;
 }
 
-export function parseBountyId(text: string): BountyId {
-  const slash = text.lastIndexOf("/");
-  if (slash < 1) throw new Error("the bounty is <protocol account>/<bounty name>");
-  return { protocol: text.slice(0, slash), name: text.slice(slash + 1) };
-}
-
-async function ethRpc<T>(url: string, method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const body = (await res.json()) as { result?: T; error?: { message: string } };
-  if (body.error || body.result === undefined) throw new Error(`${method} on ${url}: ${body.error?.message ?? res.status}`);
-  return body.result;
-}
-
 export async function post(o: PostOptions): Promise<PostResult> {
   const near = new Near(o.network, o.nearRpc ?? NEAR_RPC[o.network]);
   const id = parseBountyId(o.bounty);
@@ -107,7 +92,7 @@ export async function post(o: PostOptions): Promise<PostResult> {
     for (const [chain, n] of pauses) {
       const url = o.chainRpcs?.[chain] ?? defaultRpc(chain);
       if (!url) throw new Error(`no RPC known for chain ${chain}: give one with --chain-rpc ${chain}=<url>`);
-      const balance = BigInt(await ethRpc<string>(url, "eth_getBalance", [role.address, "latest"]));
+      const balance = BigInt(await rpc<string>(url, "eth_getBalance", [role.address, "latest"]));
       const needed = PAUSE_GAS_PER_PAUSE * BigInt(n);
       pauseGas.push({ chain_id: chain, pause_role: role.address, balance: balance.toString(), needed: needed.toString(), ok: balance >= needed });
     }

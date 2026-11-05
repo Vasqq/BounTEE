@@ -1,7 +1,7 @@
 // `bountee list` and `bountee show` (ticket #26): what a Whitehat reads before hunting, the
 // bounties a contract holds, and one bounty's rules, covered contracts and trusted parties.
 // Read-only: no keys, no funds.
-import type { BountyId, Rules } from "@bountee/formats";
+import { parseBountyId as bountyIdOf, type BountyId, type Rules } from "@bountee/formats";
 import { CHAINS } from "./chains.ts";
 import type { Near } from "./near.ts";
 
@@ -84,10 +84,20 @@ export interface BountyDetail {
   trusted_parties: TrustedParty[];
 }
 
+/**
+ * A bounty id as typed, `<protocol account>/<bounty name>`: the one parser every command uses.
+ * Its parts follow the formats' `BountyId` rules, which the bounty contract applies to a
+ * posting (the protocol a NEAR account ID, the name 1-64 chars of `a-z0-9-`, never `/`), so an
+ * id the contract could never hold is refused here, before any RPC.
+ */
 export function parseBountyId(text: string): BountyId {
-  const m = /^([a-z0-9._-]+)\/([a-z0-9-]+)$/.exec(text);
-  if (!m) throw new Error(`${text} is not a bounty id <protocol>/<name>`);
-  return { protocol: m[1]!, name: m[2]! };
+  const slash = text.indexOf("/");
+  try {
+    if (slash < 0) throw new Error("no slash");
+    return bountyIdOf({ protocol: text.slice(0, slash), name: text.slice(slash + 1) });
+  } catch {
+    throw new Error(`${text} is not a bounty id <protocol account>/<bounty name>`);
+  }
 }
 
 export async function showBounty(near: Near, contract: string, id: BountyId): Promise<BountyDetail> {

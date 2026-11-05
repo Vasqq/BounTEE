@@ -10,7 +10,7 @@
 // `verify_pause`. The contract takes the transaction hashes from the pauses it stored; the tool
 // never sends one. Once the prepaid attempts are used, it attaches the fee `fees()` names.
 import { actions } from "near-api-js";
-import { defaultRpcs } from "./chains.ts";
+import { defaultRpcs, waitForEvmReceipt } from "./chains.ts";
 import { Near, events, tgas } from "./near.ts";
 import { rpc } from "./proofs.ts";
 
@@ -69,16 +69,6 @@ async function chainView(near: Near, o: VerifyOptions, chain: number): Promise<V
   return v;
 }
 
-/** The pause's receipt once it exists, or null by the deadline. */
-async function receipt(url: string, hash: string, until: number) {
-  for (;;) {
-    const r = await rpc<{ status: string; blockNumber: string } | null>(url, "eth_getTransactionReceipt", [hash]).catch(() => null);
-    if (r) return { success: r.status === "0x1", block: Number(r.blockNumber) };
-    if (Date.now() > until) return null;
-    await sleep(3000);
-  }
-}
-
 async function safeHead(url: string): Promise<number> {
   const b = await rpc<{ number: string }>(url, "eth_getBlockByNumber", ["safe", false]);
   return Number(b.number);
@@ -101,9 +91,9 @@ async function verifyChain(o: VerifyOptions, chain: number, hashes: string[], ur
   const pending = hashes.filter((h) => !v.verified_pauses.includes(h));
   let landed = 0;
   for (const h of pending) {
-    const r = await receipt(url, h, until);
+    const r = await waitForEvmReceipt(url, h, until, 3000);
     if (!r) return { ...out, error: `pause ${h} has not landed` };
-    if (!r.success) return { ...out, error: `pause ${h} reverted in block ${r.block}: not asking (it can't verify)` };
+    if (r.status !== "success") return { ...out, error: `pause ${h} reverted in block ${r.block}: not asking (it can't verify)` };
     landed = Math.max(landed, r.block);
   }
   out.landed_block = landed;
