@@ -12,9 +12,14 @@ use near_sdk::serde_json::{self, json};
 use near_sdk::{env, near, require, NearToken, PromiseOrValue, PromiseResult};
 
 use crate::{
-    emit, fees, gas, outlayer, to_formats_account, BountyState, ClaimRecord, ClaimState, Contract,
-    ContractExt,
+    emit, fees, gas, outlayer, to_formats_account, Bounty, BountyState, ClaimRecord, ClaimState,
+    Contract, ContractExt,
 };
+
+/// How long a claim with no verdict holds its place, from its submission: one hour, time to
+/// retry a job that failed (R2.6). While it does, its bounty can't be withdrawn (R10.2); a
+/// claim no one retries can't hold the bounty forever.
+pub const CLAIM_PLACE_HOLD_NS: u64 = 3_600_000_000_000;
 
 fn storage_cost(bytes: u64) -> NearToken {
     NearToken::from_yoctonear(bytes as u128 * fees::STORAGE_PRICE_PER_BYTE)
@@ -59,6 +64,7 @@ impl Contract {
             BountyState::Signing | BountyState::Paying | BountyState::Paid => {
                 env::panic_str("this bounty is closed: it has been paid")
             }
+            BountyState::Withdrawn => env::panic_str("this bounty has ended: it was withdrawn"),
         }
         let now = env::block_timestamp();
         require!(
@@ -97,7 +103,11 @@ impl Contract {
                 verdict: None,
             },
         );
+        let record = self.bounties.get_mut(&bounty).expect("checked above");
+        record.prune_lapsed(now);
+        record.open_claims.push((claim_id, now));
         self.claims.flush();
+        self.bounties.flush();
         let record_cost = storage_cost(env::storage_usage().saturating_sub(storage_before));
 
         let input_hold =
@@ -157,6 +167,9 @@ impl Contract {
         if let PromiseResult::Failed = env::promise_result(0) {
             claim.state = ClaimState::StoreFailed;
             let who = claim.whitehat.clone();
+            if let Some(bounty) = self.bounties.get_mut(&claim.bounty) {
+                bounty.close_claim(claim_id);
+            }
             // A failed call's deposit came back to this contract.
             Self::credit(
                 &mut self.claim_balances,
@@ -229,6 +242,9 @@ impl Contract {
         claim.state = ClaimState::Judged;
         claim.verdict = Some(verdict);
         let bounty_id = claim.bounty.clone();
+        if let Some(bounty) = self.bounties.get_mut(&bounty_id) {
+            bounty.close_claim(claim_id);
+        }
         emit(
             "claim_judged",
             json!({ "claim_id": claim_id, "verdict": verdict }),
@@ -258,6 +274,19 @@ impl Contract {
             Some(p) => p.into(),
             None => PromiseOrValue::Value(()),
         }
+    }
+}
+
+impl Bounty {
+    /// The claim has a verdict, or never will: it holds no place.
+    fn close_claim(&mut self, claim_id: u64) {
+        self.open_claims.retain(|(id, _)| *id != claim_id);
+    }
+
+    /// Drop the claims whose place has lapsed.
+    fn prune_lapsed(&mut self, now: u64) {
+        self.open_claims
+            .retain(|(_, submitted)| now < submitted.saturating_add(CLAIM_PLACE_HOLD_NS));
     }
 }
 

@@ -7,6 +7,7 @@
 //! - [`pauses`]: a PAYS verdict closes the bounty; a pause for every covered contract is
 //!   signed by NEAR Chain Signatures, checked and stored, and only then is it paid.
 //! - [`payout`]: the whole bounty is paid to the Whitehat.
+//! - [`withdrawal`]: after the end date, an unclaimed bounty goes back to its Protocol.
 //! - [`verification`]: anyone can have a chain's landed pause verified by NEAR's MPC network;
 //!   off the money path.
 //! - [`outlayer`]: the exact OutLayer requests (secret, access rule, job).
@@ -28,6 +29,7 @@ mod pauses;
 mod payout;
 mod posting;
 mod verification;
+mod withdrawal;
 
 /// What the contract is pinned to at deployment and never changes (R1.3).
 #[near(serializers = [json, borsh])]
@@ -167,6 +169,9 @@ pub enum BountyState {
     Paying,
     /// The whole bounty was paid to the winning claim (R3.2).
     Paid,
+    /// Ended unclaimed: its Protocol withdrew the whole amount (R9.1). Takes no claims and
+    /// covers no contract.
+    Withdrawn,
 }
 
 #[near(serializers = [borsh])]
@@ -185,6 +190,10 @@ pub struct Bounty {
     /// Set while a payout's transfer is under way and cleared only by its callback, so no
     /// retry can send a second transfer beside it.
     pub paying_out: bool,
+    /// Claims on this bounty with no verdict yet (storing, judging, or waiting for a retry),
+    /// as (claim ID, submission time). Each holds its place for
+    /// [`claims::CLAIM_PLACE_HOLD_NS`] from its submission (R2.6, R10.2).
+    pub open_claims: Vec<(u64, u64)>,
 }
 
 /// A bounty as its view returns it: every rule exactly as posted (R1.2).
@@ -311,6 +320,8 @@ impl Contract {
             "min_sign_pauses_gas_per_contract": gas::SIGN_PAUSE,
             "min_sign_pauses_gas_base": gas::pause_signing(0),
             "min_retry_payout_gas": gas::payout(),
+            "min_withdraw_bounty_gas": gas::payout(),
+            "claim_place_hold_ns": near_sdk::json_types::U64(claims::CLAIM_PLACE_HOLD_NS),
             "pause_gas_limit": pauses::PAUSE_GAS_LIMIT,
             "pause_max_fee_per_gas": U128(pauses::PAUSE_MAX_FEE_PER_GAS),
             "pause_max_priority_fee_per_gas": U128(pauses::PAUSE_MAX_PRIORITY_FEE_PER_GAS),
