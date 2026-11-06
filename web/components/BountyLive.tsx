@@ -1,48 +1,29 @@
 "use client";
 // A bounty's public page, read live: the browser asks the app's server, which reads the
-// chains on each request (R15.6), and asks again every 15 s. Values swap in place; nothing
-// animates in (DESIGN.md, Motion).
-import { useCallback, useEffect, useRef, useState } from "react";
+// chains on each request (R15.6), every 15 s, or every 3 s while a sent pause waits to land.
+// Values swap in place; nothing animates in (DESIGN.md, Motion).
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { BountyId, BountyPage, ChainPause } from "@/lib/bounties.ts";
+import { bountyKey, useBounty } from "@/lib/live.ts";
 import { rulesInPlainEnglish, whatDoesntPay } from "@/lib/rules.ts";
 import { ChainMark } from "./ChainMark.tsx";
 import { StatusChip, TxChip } from "./Chips.tsx";
 import { CommandBlock } from "./CommandBlock.tsx";
 import { ReadFailed } from "./ReadFailed.tsx";
-import { VerifyTerminal } from "./Verify.tsx";
 import { SendPause } from "./SendPause.tsx";
-
-const POLL_MS = 15_000;
-const CHAIN_IDS: Record<string, number> = { Base: 8453, "Arbitrum One": 42161 };
-
-type Load = { status: "loading" } | { status: "missing" } | { status: "ok"; bounty: BountyPage; at: Date } | { status: "failed"; last: { bounty: BountyPage; at: Date } | null };
-
-export function useBounty(id: BountyId) {
-  const [load, setLoad] = useState<Load>({ status: "loading" });
-  const read = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/bounties/${encodeURIComponent(id.protocol)}/${encodeURIComponent(id.name)}`, { cache: "no-store" });
-      const body = (await res.json()) as { bounty?: BountyPage | null; error?: string };
-      if (!res.ok) throw new Error(body.error ?? String(res.status));
-      setLoad(body.bounty ? { status: "ok", bounty: body.bounty, at: new Date() } : { status: "missing" });
-    } catch {
-      setLoad((prev) => ({ status: "failed", last: prev.status === "ok" ? { bounty: prev.bounty, at: prev.at } : prev.status === "failed" ? prev.last : null }));
-    }
-  }, [id.protocol, id.name]);
-  useEffect(() => {
-    read();
-    const t = setInterval(read, POLL_MS);
-    return () => clearInterval(t);
-  }, [read]);
-  return { load, read };
-}
+import { VerifyTerminal } from "./Verify.tsx";
 
 const Bar = ({ w, h = 18 }: { w: number; h?: number }) => <span className="bar" style={{ width: w, height: h }} aria-hidden="true" />;
 
 export function BountyLive({ id }: { id: BountyId }) {
-  const { load, read } = useBounty(id);
+  // Chains whose pause this browser sent and that haven't landed yet: read fast until they do.
+  const [sent, setSent] = useState<number[]>([]);
+  const last = useQueryClient().getQueryData<BountyPage | null>(bountyKey(id));
+  const q = useBounty(id, sent.some((chain) => !last?.chains.find((c) => c.chainId === chain)?.landed));
+  const b = q.data ?? null;
   const title = `${id.protocol}/${id.name}`;
-  if (load.status === "missing") {
+  if (q.isSuccess && q.data === null) {
     return (
       <>
         <h1 className="page-title">{title}</h1>
@@ -50,17 +31,16 @@ export function BountyLive({ id }: { id: BountyId }) {
       </>
     );
   }
-  const b = load.status === "ok" ? load.bounty : load.status === "failed" ? load.last?.bounty ?? null : null;
-  const lastGood = load.status === "failed" && load.last ? load.last.at.toISOString().slice(11, 19) + " UTC" : null;
+  const lastGood = q.isError && q.dataUpdatedAt ? new Date(q.dataUpdatedAt).toISOString().slice(11, 19) + " UTC" : null;
   return (
     <>
       <div className="title-row">
         <h1 className="page-title">{title}</h1>
         {b ? <StatusChip state={b.state} /> : <Bar w={64} h={30} />}
       </div>
-      {load.status === "failed" && (
+      {q.isError && (
         <div className="block">
-          <ReadFailed what="Couldn't read the chains" lastGood={lastGood} onRetry={read} />
+          <ReadFailed what="Couldn't read the chains" lastGood={lastGood} onRetry={() => q.refetch()} />
         </div>
       )}
       <dl className="proof" aria-label="The bounty">
@@ -102,7 +82,7 @@ export function BountyLive({ id }: { id: BountyId }) {
             <h2 id="pauseH">Pause, per chain</h2>
             <div className="pauses">
               {b.chains.map((c) => (
-                <PauseRow key={c.chainId} c={c} refresh={read} />
+                <PauseRow key={c.chainId} c={c} sent={sent.includes(c.chainId)} onSent={() => setSent((s) => [...s, c.chainId])} />
               ))}
             </div>
           </section>
@@ -125,26 +105,13 @@ function Step({ n, label, done, children, waiting = "not yet" }: { n: number; la
   );
 }
 
-function PauseRow({ c, refresh }: { c: ChainPause; refresh: () => void }) {
+function PauseRow({ c, sent, onSent }: { c: ChainPause; sent: boolean; onSent: () => void }) {
   const signed = c.pauses.length > 0;
   const unlanded = c.pauses.filter((p) => !p.landed);
-  // Once sent, its receipt is read every 3 s until it lands (up to two minutes).
-  const [sent, setSent] = useState(false);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => () => void (timer.current && clearInterval(timer.current)), []);
-  useEffect(() => {
-    if (c.landed && timer.current) clearInterval(timer.current);
-  }, [c.landed]);
-  const onSent = () => {
-    setSent(true);
-    refresh();
-    let n = 0;
-    timer.current = setInterval(() => (++n > 40 && timer.current ? clearInterval(timer.current) : refresh()), 3000);
-  };
   return (
     <section className="panel-app pause-row" aria-label={`Pause on ${c.chain}`}>
       <div className="pause-head">
-        <ChainMark chainId={c.chainId ?? CHAIN_IDS[c.chain]} name={c.chain} />
+        <ChainMark chainId={c.chainId} name={c.chain} />
         <h3>{c.chain}</h3>
       </div>
       <ol className="steps">

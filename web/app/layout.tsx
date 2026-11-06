@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import "./globals.css";
 import "./app.css";
+import { Providers } from "./providers.tsx";
 
 export const metadata = {
   title: "BounTEE · Bounties that pay themselves",
@@ -21,7 +22,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <link href="https://api.fontshare.com/v2/css?f[]=switzer@400,500,600,700&display=swap" rel="stylesheet" />
         <script dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.add('js')" }} />
       </head>
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

@@ -1,36 +1,13 @@
 "use client";
 // The Verify check list (DESIGN.md, Terminal and Verify check list): R15.1's checks read live,
 // PASS, FAIL or WAIT, then a summary that counts failures first.
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import type { BountyId } from "@/lib/bounties.ts";
-import type { VerifyResult, VerifyRow } from "@/lib/verify.ts";
+import { useVerify } from "@/lib/live.ts";
+import type { VerifyRow } from "@/lib/verify.ts";
 import { ReadFailed } from "./ReadFailed.tsx";
 
 const MARK = { pass: "PASS", fail: "FAIL", wait: "WAIT" } as const;
-const POLL_MS = 30_000;
-
-export function useVerify(id: BountyId | null) {
-  const [result, setResult] = useState<VerifyResult | null>(null);
-  const [failed, setFailed] = useState(false);
-  const read = useCallback(async () => {
-    if (!id) return;
-    try {
-      const res = await fetch(`/api/bounties/${encodeURIComponent(id.protocol)}/${encodeURIComponent(id.name)}/verify`, { cache: "no-store" });
-      const body = (await res.json()) as { verify?: VerifyResult | null };
-      if (!res.ok) throw new Error(String(res.status));
-      setResult(body.verify ?? null);
-      setFailed(false);
-    } catch {
-      setFailed(true);
-    }
-  }, [id?.protocol, id?.name]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    read();
-    const t = setInterval(read, POLL_MS);
-    return () => clearInterval(t);
-  }, [read]);
-  return { result, failed, read };
-}
 
 function Summary({ rows }: { rows: VerifyRow[] }) {
   const n = (s: VerifyRow["status"]) => rows.filter((r) => r.status === s).length;
@@ -81,7 +58,8 @@ export function VerifyRun({ rows }: { rows: VerifyRow[] }) {
 
 /** A bounty page's Verify section: the command in the bar, the checks read live below it. */
 export function VerifyTerminal({ id }: { id: BountyId }) {
-  const { result, failed, read } = useVerify(id);
+  const q = useVerify(id);
+  const result = q.data ?? null;
   const command = `bountee verify ${id.protocol}/${id.name} --network mainnet`;
   const [label, setLabel] = useState("Copy");
   const copy = async () => {
@@ -105,7 +83,7 @@ export function VerifyTerminal({ id }: { id: BountyId }) {
         </div>
         <div className="term-body">
           <p className="note">reading {id.name} from the chains, with no keys and no funds</p>
-          {failed && !result ? <ReadFailed what="Couldn't run the checks" onRetry={read} /> : result ? <VerifyRun rows={result.rows} /> : <p className="note">reading…</p>}
+          {q.isError && !result ? <ReadFailed what="Couldn't run the checks" onRetry={() => q.refetch()} /> : result ? <VerifyRun rows={result.rows} /> : <p className="note">reading…</p>}
         </div>
       </div>
     </section>

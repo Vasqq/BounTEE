@@ -2,10 +2,10 @@
 // The landing page: the locked prototype's markup (landing C3), with the demo bounty's values
 // read live (lib/demo.ts) in place of the prototype's placeholders. The pictures, story panels,
 // dock and hero motion are the prototype's own script (runtime.js).
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import type { Demo } from "@/lib/demo.ts";
+import { useEffect, useMemo, type CSSProperties } from "react";
 import { listOf } from "@/lib/format.ts";
-import { useVerify, VerifyRun } from "../Verify.tsx";
+import { useDemo, useVerify } from "@/lib/live.ts";
+import { VerifyRun } from "../Verify.tsx";
 import { startLanding } from "./runtime.js";
 
 const DASH = "–";
@@ -13,31 +13,14 @@ const DASH = "–";
 const delay = (d: string) => ({ "--d": d }) as CSSProperties;
 
 export function Landing() {
-  const [demo, setDemo] = useState<Demo | null>(null);
+  const { data: demo = null } = useDemo();
   const demoId = useMemo(() => (demo ? { protocol: demo.story.protocol, name: demo.story.name } : null), [demo?.story.protocol, demo?.story.name]); // eslint-disable-line react-hooks/exhaustive-deps
-  const { result } = useVerify(demoId);
+  const { data: result } = useVerify(demoId);
+  // The prototype's script draws the story; it starts once and takes each new read in place.
   useEffect(() => {
     const page = startLanding();
-    let stop = false;
-    const read = async () => {
-      try {
-        const res = await fetch("/api/demo", { cache: "no-store" });
-        if (!res.ok) return;
-        const d = (await res.json()) as { demo: Demo | null };
-        if (stop || !d.demo) return;
-        setDemo(d.demo);
-        page.update(d.demo.story);
-      } catch {
-        // the story keeps what it last read; a later read fills it in
-      }
-    };
-    read();
-    const t = setInterval(read, 30_000);
-    return () => {
-      stop = true;
-      clearInterval(t);
-    };
-  }, []);
+    if (demo) page.update(demo.story);
+  }, [demo]);
   return (
     <>
       <a className="sr-only" href="#main">Skip to content</a>

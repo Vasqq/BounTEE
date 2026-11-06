@@ -73,6 +73,8 @@ export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?
         w.__walletCalls.push(method);
         if (method === "eth_requestAccounts" || method === "eth_accounts") return ["0x9f2c3e1a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e"];
         if (method === "personal_sign") return w.__personalSign(params![0]);
+        if (method === "eth_chainId") return "0x2105";
+        if (method === "wallet_requestPermissions" || method === "wallet_getPermissions") return [{ parentCapability: "eth_accounts" }];
         throw new Error(`stand-in MetaMask: ${method} isn't supported`);
       },
       on() {},
