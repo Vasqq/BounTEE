@@ -24,19 +24,22 @@ export interface BalanceResult {
   balance: string;
 }
 
-/** An amount of NEAR as typed (`1`, `0.25`) in yoctoNEAR. */
-export function parseNearAmount(text: string): bigint {
-  const m = /^(\d+)(?:\.(\d{0,24}))?$/.exec(text);
-  if (!m) throw new Error(`${text} is not an amount of NEAR, e.g. 1 or 0.25`);
-  const yocto = BigInt(m[1]!) * 10n ** 24n + BigInt((m[2] ?? "").padEnd(24, "0") || "0");
-  if (yocto === 0n) throw new Error("the amount must be more than 0 NEAR");
-  return yocto;
+/** An amount of a token as typed (`1`, `0.25`) in its smallest unit. */
+export function parseUnits(text: string, decimals: number, symbol: string): bigint {
+  const m = new RegExp(`^(\\d+)(?:\\.(\\d{0,${decimals}}))?$`).exec(text);
+  if (!m) throw new Error(`${text} is not an amount of ${symbol}, e.g. 1 or 0.25`);
+  const units = BigInt(m[1]!) * 10n ** BigInt(decimals) + BigInt((m[2] ?? "").padEnd(decimals, "0") || "0");
+  if (units === 0n) throw new Error(`the amount must be more than 0 ${symbol}`);
+  return units;
 }
+
+/** An amount of NEAR as typed (`1`, `0.25`) in yoctoNEAR. */
+export const parseNearAmount = (text: string): bigint => parseUnits(text, 24, "NEAR");
 
 const balanceOf = async (near: Near, contract: string, account: string) => BigInt(await near.view<string>(contract, "claim_balance", { account_id: account }));
 
 /** Any deposit needs a full-access key: NEAR refuses one signed with a function-call key. */
-async function needFullAccess(near: Near, account: string, what: string) {
+export async function needFullAccess(near: Near, account: string, what: string) {
   if (await near.signsWithFunctionCallKey(account)) {
     throw new Error(`the local key for ${account} is a claim key: it can't ${what}. Run this with the account's own key.`);
   }

@@ -1,5 +1,5 @@
 // Every public endpoint the command-line tool reads or writes by default, per NEAR network.
-// Each can be overridden by a flag (`--near-rpc`, `--tx-api`, `--outlayer-api`).
+// Each can be overridden by a flag (`--near-rpc`, `--tx-api`, `--outlayer-api`, `--intents-api`).
 
 /** NEAR RPC. FastNEAR: rpc.testnet.near.org now answers 429 "deprecated" (Nov 4). */
 export const NEAR_RPC = { testnet: "https://test.rpc.fastnear.com", mainnet: "https://free.rpc.fastnear.com" } as const;
@@ -16,6 +16,9 @@ export const ARCHIVAL_RPC = { testnet: "https://archival-rpc.testnet.fastnear.co
  * locate a contract's transactions; what they hold is read again from NEAR RPC.
  */
 export const TX_API = { testnet: "https://tx.test.fastnear.com", mainnet: "https://tx.main.fastnear.com" } as const;
+
+/** NEAR Intents' 1Click API (mainnet only: it has no testnet), for `withdraw` (ADR-0013). */
+export const INTENTS_API = "https://1click.chaindefuser.com";
 
 /** OutLayer's API: its keystore (sealing) and its attestations. */
 export const KEYSTORE_API = { testnet: "https://testnet-api.outlayer.ai", mainnet: "https://api.outlayer.ai" } as const;

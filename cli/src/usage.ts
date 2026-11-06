@@ -21,6 +21,7 @@ export const USAGES: Record<string, string> = {
   rerun: `bountee rerun <protocol>/<name> [--judge <wasm>] [--out <job.json>] [--proofs <saved job.json | proofs.json>] ${NEAR_FLAGS} [--json]`,
   "sign-pauses": `bountee sign-pauses <protocol>/<name> --as <account> ${NEAR_FLAGS} [--json]`,
   "retry-payout": `bountee retry-payout <protocol>/<name> --as <account> ${NEAR_FLAGS} [--json]`,
+  withdraw: `bountee withdraw <USDC> --to <chain>:<address> --as <account> [--network mainnet] [--near-rpc <url>] [--intents-api <url>] [--timeout <secs>] [--json]`,
   balance: `bountee balance [top-up <NEAR> | withdraw [<NEAR>]] --as <account> ${NEAR_FLAGS} [--json]`,
   build: "bountee build --contract <account> [--rev <commit>] [--only judge|contract] [--out-dir <dir>] [--json]",
   verify: `bountee verify <protocol>/<name> ${NEAR_FLAGS} [--rev <commit>] [--judge-wasm <wasm> --contract-wasm <wasm>] [--rpc <chain id>=<url>[,...]] [--tx <hash>[,...]] [--outlayer-api <url>] [--tx-api <url>] [--json]`,

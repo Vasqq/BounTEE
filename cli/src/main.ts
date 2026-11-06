@@ -20,6 +20,7 @@ import { formatKeyAdd, formatKeyRevoke, keyAdd, keyRevoke } from "./keys.ts";
 import { NEAR_RPC } from "./endpoints.ts";
 import { Near, parseNetwork } from "./near.ts";
 import { exploitPublicKey, formatOpenExploit, openExploit } from "./open-exploit.ts";
+import { formatWithdrawResult, withdraw } from "./withdraw.ts";
 import { claimStatus, formatStage, formatStatus, loadClaimTxs, watchClaim } from "./status.ts";
 import { formatRetryResult, retryPayout, signPauses } from "./payout.ts";
 import { formatPostResult, post } from "./post.ts";
@@ -259,6 +260,19 @@ try {
     const { near, contract } = nearFor(command, flags);
     const r = await balanceCommand({ near, contract, account: flags.as, action, amount });
     print(r, formatBalanceResult(r));
+  } else if (command === "withdraw") {
+    const { positional, flags } = params;
+    if (!positional[0] || !flags.to || !flags.as) fail(`withdraw needs an amount of USDC, --to and --as\n${usage(command)}`, 2);
+    const r = await withdraw({
+      near: nearConnection(flags),
+      account: flags.as,
+      amount: positional[0],
+      to: flags.to,
+      intentsApi: flags["intents-api"],
+      timeoutSecs: flags.timeout === undefined ? undefined : Number(flags.timeout),
+    });
+    print(r, formatWithdrawResult(r));
+    if (r.status !== "SUCCESS") process.exit(1);
   } else if (command === "build") {
     const { flags } = params;
     const pin = flags.contract ?? process.env.BOUNTEE_CONTRACT;
