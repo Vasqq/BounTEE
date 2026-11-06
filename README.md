@@ -33,10 +33,10 @@ You need Node 22.18 or later, pnpm, the Rust toolchain in `rust-toolchain.toml` 
 ```sh
 pnpm install
 cargo build --release -p bountee-judge --target wasm32-wasip2   # the judge the enclave runs
-alias bountee='node cli/src/main.ts'
+alias bountee='node cli/src/main.ts'   # in a script, use `pnpm bountee` instead
 ```
 
-Each step below is a command and what it prints. They replay recorded jobs (the exact judge input: a block header, its state proofs and the exploit, all committed in the repo) through the same compiled judge the enclave runs. They spend nothing and send nothing.
+Each step below is a command and what it prints. They replay recorded jobs (the exact judge input: a block header, its state proofs and the exploit, all committed in the repo) through the judge compiled from this repo. The enclave's build differs from yours only in the bounty contract it answers to, so `bountee test` notes that yours is "not the bounty's pinned build", and `--judge` runs any build. They spend nothing and send nothing.
 
 **1. A real exploit of the demo vault pays.** Fresh accounts walk away with the vault's USDC.
 
@@ -85,6 +85,23 @@ test result: ok
 ```
 
 **Check every step at once.** `node scripts/check-readme-steps.ts` runs each step in this README and checks that its output shows what is written here.
+
+## Run the tests
+
+`pnpm test` runs every suite. Each suite names the requirements it proves (see "How to read the tables" in [docs/requirements.md](docs/requirements.md)). The suites and their times in CI:
+
+| Suite | Command | Proves | Time |
+|---|---|---|---|
+| formats | `pnpm test:formats` | Rust and TypeScript read the same formats | under 1 min |
+| j | `pnpm test:j` | the judge's payout rule, scenario by scenario | about 3 min |
+| t | `pnpm test:t` | the command-line tool, against local stand-ins | about 3 min |
+| w | `pnpm test:w` | the web app | under 1 min |
+| e | `pnpm test:e` | the demo contracts | under 1 min |
+| c | `pnpm test:c` | the bounty contract, in NEAR's sandbox | about 40 min |
+
+Beyond "Try it" above, the full run needs [cargo-near](https://github.com/near/cargo-near), [Foundry](https://getfoundry.sh) and Playwright's Chromium (`pnpm --filter @bountee/web exec playwright install chromium`). The contract builds with its own Rust 1.86.0 (`contract/rust-toolchain.toml`), which rustup installs on first use. For a quick check, `pnpm test:j` and `pnpm test:t` need nothing beyond "Try it".
+
+The command-line tool reads three environment variables, all optional: `BOUNTEE_CONTRACT` (the bounty contract, in place of `--contract`), `BOUNTEE_CREDENTIALS_DIR` (where account keys are, in place of `~/.near-credentials/<network>`) and `BOUNTEE_WALLET_KEY_FILE` (the Protocol's EVM key file, for `open-exploit`).
 
 ## Check the mainnet demo: no keys, no funds
 
