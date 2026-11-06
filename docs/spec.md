@@ -236,7 +236,8 @@ Nobody holds a key to the bounty: not the Protocol, not the Whitehat, not us. Ju
   - Arbitrum Sepolia test-ETH access (likely a faucet login for Liam).
 - **Open: the judge journey.** Judges include AI agents (the Claude Code and Codex screen), which will behave like Whitehats' agents, so their path through BounTEE gets its own design pass later. Known so far: `test` offline and `verify` need no keys or funds, and no live winning claim is offered. There is no live bounty for judges to claim: the cheat claim is a mainnet transaction on the demo bounty and re-runs offline (ADR-0018).
 - **Unconfirmed, so not relied on:** whether 1Click can deliver native NEAR.
-- **Facts to verify before the README claims them:** that USDC's issuer can freeze sanctioned accounts on NEAR; the measured verdict-to-pause and verdict-to-verified times; every number and link.
+- **Checked Nov 6, mainnet:** Circle's USDC on NEAR (`17208628…36133a1`) can blocklist accounts: its code exports `blocklist`, `unblocklist` and `is_blocklisted`, and `is_blocklisted` answers `false` for `bounty.bountee.near`. So the README states that Circle can freeze a winner's USDC (R15.7).
+- **Facts to verify before the README claims them:** the measured verdict-to-pause and verdict-to-verified times; every number and link.
 - **Disclosures for the README:** Damn Vulnerable DeFi (MIT) adaptations, crediting the source and stating the modification; libraries; AI-written code; the Gauntlet's test runs (Oct 31–Nov 2).
 - **Tracks:** security and privacy; privacy stays only while sealing ships.
 - **Standing rules:** testnet transactions without asking; every push, mainnet action, publication and submission needs Liam's explicit yes; no secrets in the repo.
