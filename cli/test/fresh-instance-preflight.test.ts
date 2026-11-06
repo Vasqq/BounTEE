@@ -16,13 +16,12 @@
 //   before anything is read.
 //   Misses: the real mainnet balances and gas prices (read when #35 runs it), and every step
 //   after the preflight (each spends; rehearsed on testnet, #33).
-import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, test } from "vitest";
+import { RpcError, nearView, runScript, sendsAmong, standIns, type Logged } from "./testnet/stand-ins.ts";
 
 const script = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
 const CONTRACT = "bounty.bountee.near";
@@ -38,102 +37,69 @@ const YOCTO = 10n ** 24n;
 const ETH = 10n ** 18n;
 const POSTING_FEE = YOCTO / 2n;
 
-/** The scripted world: balances by holder, and every request either stand-in got. */
+/** The scripted world: balances by holder. */
 const world = {
   near: new Map<string, bigint>(),
   nearUsdc: new Map<string, bigint>(),
   eth: new Map<number, bigint>(),
   evmUsdc: new Map<string, bigint>(),
-  requests: [] as { where: string; method: string; detail?: string }[],
 };
-
-let server: Server;
-let base = "";
 
 const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
 
+let stands: Awaited<ReturnType<typeof standIns>>;
+let requests: Logged[] = [];
+
 beforeAll(async () => {
-  server = createServer((req, res) => {
-    let body = "";
-    req.on("data", (c) => (body += c));
-    req.on("end", () => {
-      const call = JSON.parse(body);
-      const reply = (result: unknown) => res.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result }));
-      const fail = () => res.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, error: { code: -32601, message: "not scripted" } }));
-      if (req.url === "/near") {
-        const p = call.params;
-        world.requests.push({ where: "near", method: call.method, detail: p?.method_name ?? p?.request_type });
-        if (call.method === "query" && p.request_type === "view_account") {
-          const amount = world.near.get(p.account_id);
-          return amount === undefined ? res.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, error: { message: "UNKNOWN_ACCOUNT" } })) : reply({ amount: amount.toString() });
-        }
-        if (call.method === "query" && p.request_type === "call_function") {
-          const args = JSON.parse(Buffer.from(p.args_base64, "base64").toString() || "{}");
-          const view =
-            p.account_id === CONTRACT && p.method_name === "fees"
-              ? { posting_fee: POSTING_FEE.toString() }
-              : p.account_id === NEAR_USDC && p.method_name === "ft_balance_of"
-                ? (world.nearUsdc.get(args.account_id) ?? 0n).toString()
-                : undefined;
-          return view === undefined ? fail() : reply({ result: [...Buffer.from(JSON.stringify(view))], logs: [] });
-        }
-        return fail();
+  stands = await standIns((where, method, p) => {
+    if (where === "near") {
+      if (method === "query" && p.request_type === "view_account") {
+        const amount = world.near.get(p.account_id);
+        return amount === undefined ? new RpcError("UNKNOWN_ACCOUNT") : { amount: amount.toString() };
       }
-      const chain = Number(req.url!.slice(1));
-      const calls = Array.isArray(call) ? call : [call];
-      const answers = calls.map((c) => {
-        world.requests.push({ where: `chain ${chain}`, method: c.method, detail: c.method === "eth_call" ? String(c.params[0].to).toLowerCase() : undefined });
-        const ok = (result: unknown) => ({ jsonrpc: "2.0", id: c.id, result });
-        if (c.method === "eth_chainId") return ok(`0x${chain.toString(16)}`);
-        if (c.method === "eth_blockNumber") return ok("0x10");
-        if (c.method === "eth_gasPrice") return ok("0x989680"); // 0.01 gwei
-        if (c.method === "eth_getTransactionCount") return ok("0x0"); // cast call's default sender
-        if (c.method === "eth_getBalance") return ok(`0x${(world.eth.get(chain) ?? 0n).toString(16)}`);
-        if (c.method === "eth_call") return ok(word(world.evmUsdc.get(String(c.params[0].to).toLowerCase()) ?? 0n));
-        return { jsonrpc: "2.0", id: c.id, error: { code: -32601, message: "not scripted" } };
-      });
-      res.end(JSON.stringify(Array.isArray(call) ? answers : answers[0]));
-    });
+      if (method === "query" && p.request_type === "call_function") {
+        const args = JSON.parse(Buffer.from(p.args_base64, "base64").toString() || "{}");
+        if (p.account_id === CONTRACT && p.method_name === "fees") return nearView({ posting_fee: POSTING_FEE.toString() });
+        if (p.account_id === NEAR_USDC && p.method_name === "ft_balance_of") return nearView((world.nearUsdc.get(args.account_id) ?? 0n).toString());
+      }
+      return undefined;
+    }
+    const chain = Number(where.slice("chain ".length));
+    if (method === "eth_chainId") return `0x${chain.toString(16)}`;
+    if (method === "eth_blockNumber") return "0x10";
+    if (method === "eth_gasPrice") return "0x989680"; // 0.01 gwei
+    if (method === "eth_getTransactionCount") return "0x0"; // cast call's default sender
+    if (method === "eth_getBalance") return `0x${(world.eth.get(chain) ?? 0n).toString(16)}`;
+    if (method === "eth_call") return word(world.evmUsdc.get(String(p[0].to).toLowerCase()) ?? 0n);
+    return undefined;
   });
-  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
-  base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });
 
-afterAll(() => server.close());
+afterAll(() => stands.close());
 
 async function preflight(extraEnv: Record<string, string> = {}): Promise<{ status: number | null; out: any; stderr: string }> {
   const dir = mkdtempSync(join(tmpdir(), "bountee-preflight-"));
   writeFileSync(join(dir, "deployment.json"), JSON.stringify({ network: "mainnet", contract: CONTRACT, usdc: NEAR_USDC }));
   writeFileSync(join(dir, "deployer.env"), `DEPLOYER_ADDRESS=${DEPLOYER}\nDEPLOYER_PRIVATE_KEY=${DEPLOYER_KEY}\n`);
-  world.requests = [];
-  // Run asynchronously: the stand-ins answer from this same process.
-  const child = spawn(process.execPath, [script], {
-    env: {
-      ...process.env,
-      HOME: dir,
-      NETWORK: "mainnet",
-      BOUNTEE_DAY3: join(dir, "deployment.json"),
-      DEPLOYER_ENV: join(dir, "deployer.env"),
-      PROTOCOL,
-      WHITEHAT,
-      NEAR_RPC: `${base}/near`,
-      CHAIN_RPCS: `8453=${base}/8453,42161=${base}/42161`,
-      PREFLIGHT_ONLY: "1",
-      ...extraEnv,
-    },
+  stands.requests.length = 0;
+  requests = stands.requests;
+  return runScript(script, {
+    HOME: dir,
+    NETWORK: "mainnet",
+    BOUNTEE_DAY3: join(dir, "deployment.json"),
+    DEPLOYER_ENV: join(dir, "deployer.env"),
+    PROTOCOL,
+    WHITEHAT,
+    NEAR_RPC: `${stands.base}/near`,
+    CHAIN_RPCS: `8453=${stands.base}/8453,42161=${stands.base}/42161`,
+    PREFLIGHT_ONLY: "1",
+    ...extraEnv,
   });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (c) => (stdout += c));
-  child.stderr.on("data", (c) => (stderr += c));
-  const status = await new Promise<number | null>((ok) => child.on("close", ok));
-  return { status, out: JSON.parse(stdout.trim().split("\n").pop() || "{}"), stderr };
 }
 
 /** No request could have spent: nothing signed went to NEAR or to a chain. */
 function expectNothingSent() {
-  const sends = world.requests.filter((r) => /send|broadcast_tx/i.test(r.method));
-  expect(sends).toEqual([]);
+  expect(sendsAmong(requests)).toEqual([]);
 }
 
 /** D21: with everything empty, the preflight names every balance and its top-up, exits 3, and sends nothing. */
@@ -156,7 +122,7 @@ test("D21: the mainnet preflight lists every balance the run needs and names eac
   ]);
   expect(r.out.top_up).toHaveLength(7);
   // Read on the mainnet chains and Circle's USDC, nowhere else.
-  const evmCalls = world.requests.filter((q) => q.method === "eth_call").map((q) => `${q.where} ${q.detail}`);
+  const evmCalls = requests.filter((q) => q.method === "eth_call").map((q) => `${q.where} ${q.detail}`);
   expect(evmCalls).toEqual([`chain 8453 ${BASE_USDC}`, `chain 42161 ${ARBITRUM_USDC}`]);
   expectNothingSent();
 });
@@ -194,6 +160,6 @@ test("R1.4: DISCLOSURE_DELAY_DAYS sets the delay; outside 1-90 days it is refuse
     expect(r.status, bad).not.toBe(0);
     expect(r.status, bad).not.toBe(3);
     expect(r.stderr, bad).toMatch(/DISCLOSURE_DELAY_DAYS/);
-    expect(world.requests, bad).toEqual([]);
+    expect(requests, bad).toEqual([]);
   }
 });
