@@ -48,7 +48,7 @@ import { PAUSE_GAS_PER_PAUSE, pauseRole } from "@bountee/formats";
 import { parseRpcFlags } from "../../src/broadcast.ts";
 import { CHAINS, defaultRpc } from "../../src/chains.ts";
 import { formatNear, milliNear } from "../../src/near.ts";
-import { MPC_ROOT, near, network as NETWORK, need, stopIfShort, type Need } from "./deploy.ts";
+import { MPC_ROOT, near, network as NETWORK, need, stopIfShort, wholeNumber, type Need } from "./deploy.ts";
 import { keystoreEnv, redact } from "./evm-key.ts";
 
 const home = homedir();
@@ -61,13 +61,6 @@ const CONTRACT: string = deployment.contract;
 const USDC: string = deployment.usdc;
 const PROTOCOL = process.env.PROTOCOL ?? (MAINNET ? undefined : "bountee-spike4.testnet");
 if (!PROTOCOL) throw new Error("set PROTOCOL: the NEAR account that posts the bounty");
-/** A whole-number setting from the environment, or its default; anything else stops the script. */
-function wholeNumber(name: string, fallback: number): number {
-  const text = process.env[name];
-  if (text === undefined || text === "") return fallback;
-  if (!/^\d+$/.test(text)) throw new Error(`${name} must be a whole number, not ${JSON.stringify(text)}`);
-  return Number(text);
-}
 const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 12);
 const NAME = process.env.BOUNTY_NAME ?? `demo-${stamp}`;
 // ADR-0018: on mainnet a 10 USDC bounty and a 1 USDC minimum theft.

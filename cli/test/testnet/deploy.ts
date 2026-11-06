@@ -89,6 +89,17 @@ export function contractConfig(o: { usdc: string; judgeHash: string; judgeUrl: s
 /** One balance a run needs, as the preflights report it. */
 export interface Need { who: string; chain: string; asset: string; have: string; need: string; ok: boolean; top_up?: string }
 
+/** A whole-number setting from the environment, or `fallback` when unset; anything else stops the script. */
+export function wholeNumber(name: string, fallback?: number): number {
+  const text = process.env[name];
+  if (text === undefined || text === "") {
+    if (fallback === undefined) throw new Error(`set ${name}`);
+    return fallback;
+  }
+  if (!/^\d+$/.test(text)) throw new Error(`${name} must be a whole number, not ${JSON.stringify(text)}`);
+  return Number(text);
+}
+
 /** `who`'s balance of `asset` on `chain` against what the run needs, each shown with `show`. */
 export function need(who: string, chain: string, asset: string, have: bigint, want: bigint, show: (x: bigint) => string): Need {
   return { who, chain, asset, have: show(have), need: show(want), ok: have >= want, ...(have < want ? { top_up: show(want - have) } : {}) };
