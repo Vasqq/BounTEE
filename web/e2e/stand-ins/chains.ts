@@ -8,7 +8,10 @@
 // (`query` call_function / view_state / view_account, `EXPERIMENTAL_tx_status`), FastNEAR's
 // `/v0/account` and `/v0/transactions`, and ordinary EVM JSON-RPC.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { hashOfRaw as txHash, type World } from "./world.ts";
+import { base58 } from "@scure/base";
+import { decodeFunctionData, encodeAbiParameters, keccak256, parseAbi, toHex } from "viem";
+import { pauseRole } from "@bountee/formats";
+import { CONTRACT, hashOfRaw as txHash, nearHash, type World } from "./world.ts";
 
 let world: World | null = null;
 /** Raw transactions sent to each EVM chain, in order, for a spec to read back. */
@@ -47,15 +50,20 @@ function view(w: World, method: string, args: any): unknown {
     case "claim":
       return w.claims.find((c) => c.id === args.claim_id)?.record ?? null;
     case "pause_role":
-      return w.pauseRoles[bountyKey(args.id)] ?? { path: bountyKey(args.id), address: "0x0000000000000000000000000000000000000000" };
+      // As the contract derives it (D25), unless the spec pinned one.
+      return w.pauseRoles[bountyKey(args.id)] ?? { path: bountyKey(args.id), address: pauseRole.address(pauseRole.MAINNET_ROOT_PUBLIC_KEY, w.contract, args.id) };
     case "pause_verifications":
       return w.verifications[bountyKey(args.id)] ?? [];
     case "published_exploit":
       return w.publications[bountyKey(args.id)] ?? null;
     case "released_exploit":
       return w.releases[bountyKey(args.id)] ?? null;
+    case "posting_fee_balance":
+      return w.posting?.feeBalances[args.account_id] ?? "0";
     case "ft_metadata":
       return { spec: "ft-1.0.0", name: "USDC", symbol: "USDC", decimals: 6 };
+    case "ft_balance_of":
+      return w.posting?.usdc[args.account_id] ?? "0";
     default:
       throw new Error(`MethodNotFound: ${method}`);
   }
@@ -86,7 +94,7 @@ function nearRpc(w: World, method: string, params: any): { result?: unknown; err
     if (params.request_type === "call_function") {
       const account = params.account_id;
       const args = JSON.parse(Buffer.from(params.args_base64 ?? "", "base64").toString("utf8") || "{}");
-      if (account !== w.contract && !(account === w.config.usdc && params.method_name === "ft_metadata")) {
+      if (account !== w.contract && !(account === w.config.usdc && ["ft_metadata", "ft_balance_of"].includes(params.method_name))) {
         return { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT" } } };
       }
       try {
@@ -100,6 +108,11 @@ function nearRpc(w: World, method: string, params: any): { result?: unknown; err
       if (params.account_id !== w.contract) return { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT" } } };
       const prefix = Buffer.from(params.prefix_base64 ?? "", "base64")[0] ?? 0;
       return { result: { values: state(w, prefix), block_height: 1, block_hash: "stand-in" } };
+    }
+    if (params.request_type === "view_access_key" && w.posting && params.public_key === `ed25519:${base58.encode(Buffer.from(w.posting.relayerKeyHex, "hex"))}`) {
+      return w.posting.onboarded.includes(params.account_id)
+        ? { result: { nonce: 0, permission: { FunctionCall: { allowance: null, receiver_id: params.account_id, method_names: ["rlp_execute"] } } } }
+        : { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCESS_KEY" }, message: "access key does not exist while viewing" } };
     }
     if (params.request_type === "view_access_key") {
       const claimKey = w.claimKeys?.[`${params.account_id}/${params.public_key}`];
@@ -141,8 +154,17 @@ function evmRpc(w: World, chainId: number, method: string, params: any[]): { res
       return { result: `0x${BigInt(chain.balances[String(params[0]).toLowerCase()] ?? "0").toString(16)}` };
     case "eth_getTransactionReceipt": {
       const r = chain.receipts[String(params[0]).toLowerCase()];
-      return { result: r ? { status: r.ok ? "0x1" : "0x0", blockNumber: `0x${r.block.toString(16)}`, to: r.to, transactionHash: params[0] } : null };
+      return { result: r ? receiptJson(String(params[0]), r) : null };
     }
+    case "eth_call":
+      return ethCall(w, chainId, params[0]);
+    case "eth_getCode":
+      // The covered contracts the spec set up have code; anything else is an empty account.
+      return { result: w.pausers?.[`${chainId}:${String(params[0]).toLowerCase()}`] ? "0x6080604052" : "0x" };
+    case "near_getPublicKey":
+      return { result: { public_key: w.posting?.relayerKeyHex } };
+    case "eth_blockNumber":
+      return { result: "0x1500000" };
     case "eth_sendRawTransaction": {
       const raw = String(params[0]);
       const hash = txHash(raw);
@@ -156,6 +178,107 @@ function evmRpc(w: World, chainId: number, method: string, params: any[]): { res
       return { error: { code: -32601, message: `the method ${method} does not exist` } };
   }
 }
+
+function receiptJson(hash: string, r: { ok: boolean; block: number; to: string; nearTransactionHash?: string }) {
+  return {
+    status: r.ok ? "0x1" : "0x0",
+    blockNumber: `0x${r.block.toString(16)}`,
+    blockHash: `0x${"b".repeat(64)}`,
+    transactionHash: hash,
+    transactionIndex: "0x0",
+    from: "0x0000000000000000000000000000000000000000",
+    to: r.to,
+    contractAddress: null,
+    cumulativeGasUsed: "0x5208",
+    gasUsed: "0x5208",
+    effectiveGasPrice: "0x1",
+    logs: [],
+    logsBloom: `0x${"0".repeat(512)}`,
+    type: "0x0",
+    ...(r.nearTransactionHash ? { nearTransactionHash: r.nearTransactionHash } : {}),
+  };
+}
+
+const PAUSE = "0x8456cb59";
+const ACCESS_CONTROL = parseAbi(["function grantRole(bytes32 role, address account)", "function hasRole(bytes32 role, address account) view returns (bool)"]);
+const PAUSER_ROLE = keccak256(toHex("PAUSER_ROLE"));
+const NEAR_ACCOUNT = parseAbi([
+  "function functionCall(string receiver_id, string method_name, bytes args, uint64 gas, uint32 yoctoNear) payable",
+  "function addKey(uint8 public_key_kind, bytes public_key, uint64 nonce, bool is_full_access, bool is_limited_allowance, uint128 allowance, string receiver_id, string[] method_names) external",
+]);
+const revert = { error: { code: 3, message: "execution reverted" } };
+
+/** `eth_call`: `pause()` succeeds only from a holder of the pause role; AccessControl contracts answer `hasRole`. */
+function ethCall(w: World, chainId: number, call: { from?: string; to: string; data: string }) {
+  const pausers = w.pausers?.[`${chainId}:${call.to.toLowerCase()}`];
+  if (call.data === PAUSE) return pausers?.includes((call.from ?? "").toLowerCase()) ? { result: "0x" } : revert;
+  if (pausers && call.data.startsWith("0x91d14854")) {
+    const { args } = decodeFunctionData({ abi: ACCESS_CONTROL, data: call.data as `0x${string}` });
+    return { result: encodeAbiParameters([{ type: "bool" }], [args[0] === PAUSER_ROLE && pausers.includes(String(args[1]).toLowerCase())]) };
+  }
+  return revert;
+}
+
+let sentCount = 0;
+
+/**
+ * A transaction the stand-in MetaMask sends: applied as the chain would. On Base and Arbitrum
+ * One, a grant of PAUSER_ROLE or a plain transfer; on NEAR's Ethereum-compatible chain, the
+ * relayer-key onboarding, the posting-fee prepayment and the USDC transfer-and-call that posts.
+ */
+function apply(w: World, tx: { chainId: number; from: string; to?: string; data?: string; value?: string }): string {
+  const hash = `0x${(++sentCount).toString(16).padStart(64, "0")}`;
+  const from = tx.from.toLowerCase();
+  const value = BigInt(tx.value ?? "0x0");
+  const chain = w.evm[tx.chainId]!;
+  let ok = true;
+  let nearTransactionHash: string | undefined;
+  if (tx.chainId === 397) {
+    nearTransactionHash = nearHash(`relayed${sentCount}`);
+    const call = decodeFunctionData({ abi: NEAR_ACCOUNT, data: tx.data as `0x${string}` });
+    const p = w.posting!;
+    if (call.functionName === "addKey") {
+      if (`0x${(call.args[1] as string).slice(2)}` === `0x${p.relayerKeyHex}`) p.onboarded.push(from);
+    } else {
+      const [receiver, method, argsHex, , yocto] = call.args as [string, string, `0x${string}`, bigint, number];
+      const deposit = value * 10n ** 6n + BigInt(yocto);
+      const args = JSON.parse(Buffer.from(argsHex.slice(2), "hex").toString("utf8"));
+      const held = BigInt(w.accounts[from]?.amount ?? "0");
+      if (!p.onboarded.includes(from) || held < deposit) ok = false;
+      else if (receiver === w.contract && method === "prepay_posting_fee") {
+        p.feeBalances[from] = String(BigInt(p.feeBalances[from] ?? "0") + deposit);
+        w.accounts[from]!.amount = String(held - deposit);
+      } else if (receiver === w.config.usdc && method === "ft_transfer_call" && args.receiver_id === w.contract) {
+        const msg = JSON.parse(args.msg);
+        const fee = BigInt(w.fees.posting_fee);
+        const id = { protocol: from, name: msg.name };
+        if (BigInt(p.usdc[from] ?? "0") < BigInt(args.amount) || BigInt(p.feeBalances[from] ?? "0") < fee || args.amount !== msg.rules.bounty_amount) ok = false;
+        else {
+          p.usdc[from] = String(BigInt(p.usdc[from]!) - BigInt(args.amount));
+          p.feeBalances[from] = String(BigInt(p.feeBalances[from]!) - fee);
+          w.bounties.push({ id, rules: msg.rules, state: "live", winning_claim: null, signed_pauses: [], signing_pauses: false, paying_out: false, payout_waits_until_ns: null, posting_fee_left: String(fee) });
+          const ev = (event: string, data: unknown) => `EVENT_JSON:${JSON.stringify({ standard: "bountee", version: "1.0.0", event, data: [data] })}`;
+          w.nearTxs.push({ hash: nearTransactionHash, signer: from, receipts: [{ executor: CONTRACT, logs: [ev("bounty_posted", { bounty: id, amount: args.amount }), ev("bounty_live", { bounty: id })], ok: true }] });
+        }
+      } else ok = false;
+    }
+  } else if (tx.data && tx.data !== "0x" && tx.to) {
+    const key = `${tx.chainId}:${tx.to.toLowerCase()}`;
+    const pausers = w.pausers?.[key];
+    if (pausers && tx.data.startsWith("0x2f2ff15d")) {
+      const { args } = decodeFunctionData({ abi: ACCESS_CONTROL, data: tx.data as `0x${string}` });
+      if (args[0] === PAUSER_ROLE) pausers.push(String(args[1]).toLowerCase());
+    } else ok = false;
+  } else if (tx.to) {
+    const to = tx.to.toLowerCase();
+    chain.balances[to] = String(BigInt(chain.balances[to] ?? "0") + value);
+  }
+  chain.receipts[hash] = { ok, block: 22_000_001, to: tx.to ?? "", ...(nearTransactionHash ? { nearTransactionHash } : {}) };
+  (sentTxs[tx.chainId] ??= []).push({ ...tx, hash });
+  return hash;
+}
+/** Every transaction the stand-in MetaMask sent, by chain. */
+let sentTxs: Record<number, unknown[]> = {};
 
 /** FastNEAR's explorer API, the two calls the app makes. */
 function txApi(w: World, path: string, req: any): unknown {
@@ -189,9 +312,24 @@ createServer(async (req, res) => {
     if (url.pathname === "/world" && req.method === "PUT") {
       world = await body(req);
       sent = {};
+      sentTxs = {};
       return json(res, 200, { ok: true });
     }
     if (url.pathname === "/sent") return json(res, 200, sent);
+    if (url.pathname === "/world" && req.method === "GET") return json(res, 200, world);
+    if (url.pathname === "/wallet-sent") return json(res, 200, sentTxs);
+    if (url.pathname === "/fund" && req.method === "POST") {
+      // NEAR arriving at an account from outside the app (D17).
+      if (!world) return json(res, 503, { error: "no world set" });
+      const { account, yocto } = await body(req);
+      const prev = BigInt(world.accounts[account]?.amount ?? "0");
+      world.accounts[account] = { amount: String(prev + BigInt(yocto)), code_hash: "11111111111111111111111111111111" };
+      return json(res, 200, { ok: true });
+    }
+    if (url.pathname === "/apply" && req.method === "POST") {
+      if (!world) return json(res, 503, { error: "no world set" });
+      return json(res, 200, { hash: apply(world, await body(req)) });
+    }
     if (url.pathname === "/health") return json(res, 200, { ok: true });
     if (!world) return json(res, 503, { error: "no world set" });
     const b = await body(req);

@@ -127,3 +127,49 @@
 .field input[type="file"] { padding: 12px 14px; font-size: var(--fs-sm); }
 .field input:focus-visible { outline: 2px solid var(--ok); outline-offset: 3px; }
 .term pre.term-body { font: inherit; color: var(--ink); }
+
+/* posting flow (DESIGN.md, Posting flow and Posting checklist) */
+.app.post { padding-bottom: calc(46px + 20px + 120px); }
+.post-grid { margin-top: 40px; display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+.post-step h2 { font-size: var(--fs-h3); display: flex; align-items: baseline; gap: 14px; }
+.post-step h2 .n { font: 500 var(--fs-ui)/1 var(--text); letter-spacing: 0; color: var(--ink-3); transform: translateY(-0.5em); }
+.post-step .step-lead { margin-top: 16px; color: var(--ink-2); max-width: 36em; text-wrap: pretty; }
+.post-step > .term-mini { margin-top: 20px; }
+.post-step > .send { margin-top: 32px; }
+.checklist { margin-top: 24px; display: grid; gap: 16px; }
+.check-item { background: var(--ground-2); border-radius: var(--r); padding: clamp(24px, 2.4vw, 32px); display: grid; gap: 14px; }
+.check-item h3 { font: 500 var(--fs-ui)/1.3 var(--text); letter-spacing: 0; display: flex; gap: 6px; overflow-wrap: anywhere; }
+.check-item .num { color: var(--ink-3); transition: color var(--t2) var(--ease); }
+.check-item .num.ok { color: var(--ok); }
+.check-item p { color: var(--ink-2); max-width: 36em; font-size: var(--fs-sm); }
+.check-item p.ink, .post-step p.ink { color: var(--ink); }
+.check-item .term-mini { margin-top: 0; }
+.check-item .wait { color: var(--ink-3); font-size: var(--fs-sm); }
+.check-item p[role="alert"], .post-step p[role="alert"] { color: var(--ink); }
+.form { margin-top: 28px; display: grid; gap: 16px; }
+.form .cols { gap: 16px; }
+.field small { font: 400 var(--fs-sm)/1.5 var(--text); color: var(--ink-3); }
+.field small.err { color: var(--ink); }
+.field select { appearance: none; background-image: none; }
+fieldset.covered { border: 0; display: grid; gap: 12px; }
+fieldset.covered legend { font: 500 var(--fs-sm)/1 var(--text); color: var(--ink-2); margin-bottom: 8px; }
+.covered-row { display: grid; grid-template-columns: 180px minmax(0, 1fr) auto; gap: 12px; align-items: end; }
+fieldset.covered .fine { font-size: var(--fs-sm); color: var(--ink-2); }
+fieldset.covered > .btn { justify-self: start; }
+.readback { margin-top: 24px; }
+.readback h3 { font-size: var(--fs-4); }
+.readback p { margin-top: 10px; }
+.risk { position: sticky; top: 92px; }
+.risk ul { margin-top: 8px; display: grid; }
+.risk li { padding: 12px 0; }
+.risk b { display: block; font: 450 20px/1.15 var(--display); letter-spacing: -0.02em; }
+.risk p { margin-top: 6px; font-size: var(--fs-sm); }
+.risk-inline { display: none; margin-top: 24px; }
+.dock .k { transition: color var(--t2) var(--ease); }
+.dock button.complete { color: var(--ink-2); }
+@media (max-width: 900px) {
+  .post-grid { grid-template-columns: 1fr; }
+  .risk-side { display: none; }
+  .risk-inline { display: block; position: static; }
+  .covered-row { grid-template-columns: 1fr; }
+}

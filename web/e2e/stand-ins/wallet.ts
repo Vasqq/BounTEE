@@ -7,7 +7,8 @@ import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKey
 import { deflateRawSync } from "node:zlib";
 import type { Page } from "@playwright/test";
 import { exploitKeyFromWallet, personalSign, publicKeyText } from "../../../cli/src/open-exploit.ts";
-import { CONTRACT, type BountyId } from "./world.ts";
+import { privateKeyToAccount } from "viem/accounts";
+import { CONTRACT, STAND_IN, type BountyId } from "./world.ts";
 
 /** Ethereum keys for tests only, derived from fixed labels so no key is written down; they never hold funds. */
 const testKey = (label: string) => createHash("sha256").update(`bountee web test key: ${label}`).digest();
@@ -52,33 +53,73 @@ function base58Decode(s: string): Uint8Array {
   return Buffer.from(hex, "hex");
 }
 
+/** The 0x address of a test key: the Protocol's NEAR account is this address, lowercased (NEP-518). */
+export const addressOf = (walletKey: Uint8Array) => privateKeyToAccount(`0x${Buffer.from(walletKey).toString("hex")}`).address;
+
 /**
- * A MetaMask in the page: `eth_requestAccounts` answers one account, and `personal_sign`
- * signs with `walletKey` (or, with `unstable`, gives a different signature each time, as a
- * wallet that randomises its signatures would). Every request is recorded.
+ * A MetaMask in the page, holding `walletKey`. It answers what wagmi asks of an injected
+ * wallet: accounts, the current chain and switching it, `personal_sign` (or, with `unstable`, a
+ * different signature each time, as a wallet that randomises its signatures would), and
+ * `eth_sendTransaction`, which the chain stand-in applies as the chain would. Every request's
+ * method is recorded.
  */
 export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?: boolean } = {}) {
   let n = 0;
+  const address = addressOf(walletKey);
   await page.exposeFunction("__personalSign", (hexMessage: string) => {
     const message = Buffer.from(hexMessage.replace(/^0x/, ""), "hex").toString("utf8");
     const sig = Buffer.from(personalSign(walletKey, o.unstable ? `${message}${n++}` : message));
     return `0x${sig.toString("hex")}`;
   });
-  await page.addInitScript(() => {
+  await page.exposeFunction("__sendTransaction", async (chainId: number, tx: Record<string, string>) => {
+    const r = await page.request.post(`${STAND_IN}/apply`, { data: { chainId, from: address, to: tx.to, data: tx.data, value: tx.value } });
+    return (await r.json()).hash as string;
+  });
+  await page.addInitScript((account: string) => {
     const w = window as any;
     w.__walletCalls = [];
+    let chainId = "0x2105";
+    const listeners: Record<string, ((x: unknown) => void)[]> = {};
     w.ethereum = {
       isMetaMask: true,
-      request: async ({ method, params }: { method: string; params?: unknown[] }) => {
+      request: async ({ method, params }: { method: string; params?: any[] }) => {
         w.__walletCalls.push(method);
-        if (method === "eth_requestAccounts" || method === "eth_accounts") return ["0x9f2c3e1a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e"];
-        if (method === "personal_sign") return w.__personalSign(params![0]);
-        if (method === "eth_chainId") return "0x2105";
-        if (method === "wallet_requestPermissions" || method === "wallet_getPermissions") return [{ parentCapability: "eth_accounts" }];
-        throw new Error(`stand-in MetaMask: ${method} isn't supported`);
+        switch (method) {
+          // As MetaMask: accounts only once this site has been allowed to see them.
+          case "eth_requestAccounts":
+            sessionStorage.setItem("__authorized", "1");
+            return [account];
+          case "eth_accounts":
+            return sessionStorage.getItem("__authorized") ? [account] : [];
+          case "eth_chainId":
+            return chainId;
+          case "wallet_requestPermissions":
+          case "wallet_getPermissions":
+            return [{ parentCapability: "eth_accounts" }];
+          case "wallet_switchEthereumChain":
+          case "wallet_addEthereumChain":
+            chainId = params![0].chainId;
+            (listeners.chainChanged ?? []).forEach((f) => f(chainId));
+            return null;
+          case "personal_sign":
+            return w.__personalSign(params![0]);
+          case "eth_sendTransaction":
+            return w.__sendTransaction(parseInt(chainId, 16), params![0]);
+          default:
+            throw Object.assign(new Error(`stand-in MetaMask: ${method} isn't supported`), { code: 4200 });
+        }
       },
-      on() {},
-      removeListener() {},
+      on(event: string, f: (x: unknown) => void) {
+        (listeners[event] ??= []).push(f);
+      },
+      removeListener(event: string, f: (x: unknown) => void) {
+        listeners[event] = (listeners[event] ?? []).filter((g) => g !== f);
+      },
     };
-  });
+  }, address);
+}
+
+/** Every transaction the stand-in MetaMask sent, by chain ID. */
+export async function walletSent(page: Page): Promise<Record<number, { to?: string; data?: string; value?: string; hash: string }[]>> {
+  return (await page.request.get(`${STAND_IN}/wallet-sent`)).json();
 }

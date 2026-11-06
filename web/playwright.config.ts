@@ -39,6 +39,11 @@ export default defineConfig({
         EVM_RPC_8453: `${chains}/evm/8453`,
         EVM_RPC_42161: `${chains}/evm/42161`,
         DEMO_BOUNTY: "0x9f2c3e1a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e/mainnet-demo",
+        NEAR_ETH_RPC: `${chains}/evm/397`,
+        // Read at build time by the browser's wallet client (lib/wagmi.ts).
+        NEXT_PUBLIC_NEAR_ETH_RPC: `${chains}/evm/397`,
+        NEXT_PUBLIC_EVM_RPC_8453: `${chains}/evm/8453`,
+        NEXT_PUBLIC_EVM_RPC_42161: `${chains}/evm/42161`,
       },
     },
   ],

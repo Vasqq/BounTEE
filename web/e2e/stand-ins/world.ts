@@ -42,6 +42,8 @@ export interface EvmReceipt {
   ok: boolean;
   block: number;
   to: string;
+  /** On NEAR's Ethereum-compatible chain: the NEAR transaction the relayer made of it. */
+  nearTransactionHash?: string;
 }
 
 export interface World {
@@ -57,6 +59,19 @@ export interface World {
   releases: Record<string, any>;
   /** Function-call keys, `<account>/<public key>` → the contract they may call (claim keys, R14.2). */
   claimKeys?: Record<string, string>;
+  /** The posting side (#31): what the Protocol's 0x… NEAR account holds and has set up. */
+  posting?: {
+    /** yoctoNEAR prepaid toward posting fees, by account. */
+    feeBalances: Record<string, string>;
+    /** USDC on NEAR, smallest units, by account. */
+    usdc: Record<string, string>;
+    /** Accounts whose NEP-518 relayer key is added. */
+    onboarded: string[];
+    /** NEAR's relayer key, hex, as its Ethereum RPC's `near_getPublicKey` answers. */
+    relayerKeyHex: string;
+  };
+  /** Covered contracts using OpenZeppelin AccessControl, `<chain>:<address>`, and who holds PAUSER_ROLE on each. */
+  pausers?: Record<string, string[]>;
   /** OutLayer's attestation records, by the transaction that holds the job's verdict. */
   attestations?: Record<string, unknown>;
   /** The contract's NEAR transactions, oldest first, as the explorer indexes them. */
@@ -75,6 +90,8 @@ export interface World {
 export const CONTRACT = "bounty.bountee.near";
 export const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 export const BASE = 8453;
+/** NEAR's Ethereum-compatible chain (NEP-518). */
+export const NEAR_EVM = 397;
 export const ARBITRUM = 42161;
 export const PAUSE_ROLE = "0x5a1c6a3e0c1f5b8e2d7f4a9b3c6d8e0f1a2b3c4d";
 export const VAULT_BASE = "0x8e01c52f1b2bbedd8b714b9ae168d022b52e74c1";
@@ -167,6 +184,7 @@ export function emptyWorld(): World {
     evm: {
       [BASE]: { balances: {}, receipts: {} },
       [ARBITRUM]: { balances: {}, receipts: {} },
+      [NEAR_EVM]: { balances: {}, receipts: {} },
     },
   };
 }
@@ -314,4 +332,24 @@ export function withClaimKey(w: World, claimId: number) {
   const tx = w.nearTxs.find((t) => t.hash === nearHash(`submit${claimId}`))!;
   tx.publicKey = "ed25519:ClaimKeyOfTheWhitehatsAgent";
   w.claimKeys = { ...w.claimKeys, [`${tx.signer}/${tx.publicKey}`]: CONTRACT };
+}
+
+/** A world ready for a Protocol at `account` to post: its NEAR, USDC, and contracts that use AccessControl. */
+export function postingWorld(account: string, o: { near?: string; usdc?: string; onboarded?: boolean } = {}): World {
+  const w = emptyWorld();
+  const id = account.toLowerCase();
+  if (o.near !== undefined) w.accounts[id] = { amount: o.near, code_hash: "11111111111111111111111111111111" };
+  w.posting = { feeBalances: {}, usdc: { [id]: o.usdc ?? "0" }, onboarded: o.onboarded ? [id] : [], relayerKeyHex: "32c5815495b5e6bd0099e93ed930c0024e641506ed7c8f97c527302f1eed1a06" };
+  w.pausers = { [`${BASE}:${VAULT_BASE}`]: [], [`${ARBITRUM}:${VAULT_ARB}`]: [] };
+  return w;
+}
+
+/** NEAR arrives at `account` from outside the app. */
+export async function fundNear(page: Page, account: string, yocto: string) {
+  await page.request.post(`${STAND_IN}/fund`, { data: { account: account.toLowerCase(), yocto } });
+}
+
+/** The chains' state now, as the stand-in holds it. */
+export async function currentWorld(page: Page): Promise<World> {
+  return (await page.request.get(`${STAND_IN}/world`)).json();
 }
