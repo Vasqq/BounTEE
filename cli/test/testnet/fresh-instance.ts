@@ -127,6 +127,11 @@ function foundry(tool: "forge" | "cast", args: string[], o: { signs?: boolean; c
   }
 }
 const cast = (...args: string[]) => foundry("cast", args);
+// The demo contracts' Solidity dependencies (forge-std) are fetched by Soldeer, not committed, so
+// a fresh checkout has none until this runs. The preflight sizes the vault's code and the deploy
+// compiles it, so both need them first; `soldeer install` does nothing once they're there.
+const demoDir = join(root, "demo");
+foundry("forge", ["soldeer", "install"], { cwd: demoDir });
 const eth = (wei: bigint) => `${(Number(wei) / 1e18).toFixed(6)} ETH`;
 
 // ---- 0. Preflight --------------------------------------------------------------------------------
@@ -162,7 +167,7 @@ const IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723
  */
 async function claimPlans(): Promise<ClaimPlan[]> {
   const call = (to: string, sig: string, ...args: string[]) => cast("call", to, sig, ...args, "--rpc-url", proofRpc).split(" ")[0]!.toLowerCase();
-  const runtime = (name: string) => foundry("forge", ["inspect", name, "deployedBytecode"], { cwd: join(root, "demo") });
+  const runtime = (name: string) => foundry("forge", ["inspect", name, "deployedBytecode"], { cwd: demoDir });
   const head = await rpc<{ miner: string }>(proofRpc, "eth_getBlockByNumber", ["latest", false]);
   const sender: Read = { name: "fresh sender", slots: 0 };
   const coinbase: Read = { name: "block's coinbase", address: head.miner, slots: 0 };
@@ -246,7 +251,7 @@ for (const chain of CHAIN_IDS) {
   const rpc = rpcOf(chain);
   const forge = foundry("forge", ["script", "script/Deploy.s.sol", "--rpc-url", rpc, "--broadcast", "--sender", DEPLOYER, "--slow"], {
     signs: true,
-    cwd: join(root, "demo"),
+    cwd: demoDir,
     env: { PAUSE_ROLE: role.address, ...(MAINNET ? { USDC: circleUsdc(chain), SEED_USDC: vaultSeed(chain).toString() } : {}) },
   });
   const deployed = JSON.parse(forge.slice(forge.indexOf("DEMO_DEPLOY_JSON:") + "DEMO_DEPLOY_JSON:".length).trim().split("\n")[0]!);
