@@ -20,10 +20,11 @@
 //! Which table (R2.8, R12.5 inspection, ticket #43): [`PINNED`] is the table of the build's
 //! own network, a `.near` bounty contract's mainnet one and any other's testnet one, so the
 //! attested build has no RPCs for the other network's chains and refuses them with no
-//! verdict. The test build (feature `test-stand-in-rpcs`, seam J only) swaps [`PINNED`] for
-//! the `BOUNTEE_TEST_RPCS` environment variable, still refusing the other network's chains;
-//! the attested build is made without features, so that code is not in it, and an
-//! environment variable is never something a claim or a Protocol sets.
+//! verdict. Both builds refuse them through the one [`on_the_other_network`] check, so seam J
+//! runs the attested build's refusal. The test build (feature `test-stand-in-rpcs`, seam J
+//! only) then swaps [`PINNED`] for the `BOUNTEE_TEST_RPCS` environment variable; the
+//! attested build is made without features, so that code is not in it, and an environment
+//! variable is never something a claim or a Protocol sets.
 
 use bountee_formats::{Reason, RECENCY_LIMIT_SECS};
 use revm::primitives::B256;
@@ -140,11 +141,19 @@ fn decide(claim: B256, answers: &[B256]) -> Result<Result<(), Reason>, Unconfirm
     Err(Unconfirmed::TooFewOrDisagreeing)
 }
 
+/// The network rule, shared by both builds so seam J runs the attested build's refusal:
+/// the other network's chains get no RPCs, hence no verdict.
+fn on_the_other_network(chain_id: u64) -> bool {
+    ELSEWHERE.iter().any(|(id, _)| *id == chain_id)
+}
+
 /// The RPC addresses for `chain_id`: the pinned table, the only source in the attested
 /// build.
 #[cfg(not(feature = "test-stand-in-rpcs"))]
 pub fn rpcs_for(chain_id: u64) -> Option<Vec<String>> {
-    let _ = ELSEWHERE;
+    if on_the_other_network(chain_id) {
+        return None;
+    }
     PINNED
         .iter()
         .find(|(id, _)| *id == chain_id)
@@ -157,8 +166,7 @@ pub fn rpcs_for(chain_id: u64) -> Option<Vec<String>> {
 #[cfg(feature = "test-stand-in-rpcs")]
 pub fn rpcs_for(chain_id: u64) -> Option<Vec<String>> {
     let _ = PINNED;
-    // The network rule holds here too: the other network's chains get no RPCs.
-    if ELSEWHERE.iter().any(|(id, _)| *id == chain_id) {
+    if on_the_other_network(chain_id) {
         return None;
     }
     let urls = std::env::var(format!("BOUNTEE_TEST_RPCS_{chain_id}"))

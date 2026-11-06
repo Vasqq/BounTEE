@@ -73,11 +73,11 @@ fn run_per_chain(
     per_chain: &[(u64, &[&TestRpc])],
     exploit: Option<&Value>,
 ) -> Output {
-    run_full(BOUNTY_CONTRACT, wasm, job, rpcs, per_chain, exploit)
+    run_for_contract(BOUNTY_CONTRACT, wasm, job, rpcs, per_chain, exploit)
 }
 
 /// [`run_per_chain`] for a build pinned to `contract`, in a job that contract requested.
-fn run_full(
+fn run_for_contract(
     contract: &str,
     wasm: &PathBuf,
     job: &Value,
@@ -479,7 +479,7 @@ fn claim_on(chain: u64) -> Value {
 fn judge_on(contract: &str, wasm: &PathBuf, chain: u64) -> (Output, usize, usize) {
     let own = rpcs([ours(), ours(), ours()]);
     let any = rpcs([ours(), ours(), ours()]);
-    let out = run_full(
+    let out = run_for_contract(
         contract,
         wasm,
         &claim_on(chain),
