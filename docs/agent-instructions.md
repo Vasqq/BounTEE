@@ -18,7 +18,7 @@ Your Whitehat gives you:
 - **the Whitehat's account**, which you claim as (`--as`);
 - **a credentials folder** holding only the claim key, which you pass as `BOUNTEE_CREDENTIALS_DIR`;
 - **the covered contracts' source**, as the Protocol publishes it (verified explorer source or a repository);
-- **`bountee`** on your `PATH`, plus Foundry (`forge`, `cast`, `anvil`).
+- **`bountee`** on your `PATH`, plus Foundry (`forge`, `cast`, `anvil`) and `wasmtime` (`bountee test` runs the judge under it).
 
 When you need a command's exact flags, `bountee help --json` lists every command and its usage. Pass `--json` to every command: the result is one JSON document on stdout, an error is `{"error": …}` on stderr, and a claim's live stages are one JSON line each on stderr.
 
@@ -71,13 +71,21 @@ The key can't top up the claim balance. If it is short, `bountee claim` stops be
 
 Do these once, with your own full-access key, before your agent starts:
 
-1. **An account.** On testnet, `bountee init --json` creates a faucet-funded account and saves its key in `~/.near-credentials/testnet/`.
-2. **The claim balance.** Top it up for every claim you are willing to pay for. Each claim draws about 1 NEAR, whatever the verdict. The claim key can't top up, so you do:
+1. **`bountee` on the agent's `PATH`.** It runs from a checkout of the BounTEE repository, on Node 22.18 or later; it isn't published as a package. In the checkout, run `pnpm install`, then build the judge once, so `bountee test` needn't build it with Rust on the agent's side: `cargo build --release -p bountee-judge --target wasm32-wasip2`. Then put a two-line wrapper in a directory on the agent's `PATH` (here `~/.local/bin`):
+
+   ```
+   printf '#!/bin/sh\nexec node "%s/cli/src/main.ts" "$@"\n' "$PWD" > ~/.local/bin/bountee
+   chmod +x ~/.local/bin/bountee
+   ```
+
+   `bountee --version` checks it, and `wasmtime --version` the judge's runtime.
+2. **An account.** On testnet, `bountee init --json` creates a faucet-funded account and saves its key in `~/.near-credentials/testnet/`.
+3. **The claim balance.** Top it up for every claim you are willing to pay for. Each claim draws about 1 NEAR, whatever the verdict. The claim key can't top up, so you do:
 
    ```
    bountee balance top-up 1.2 --contract <bounty contract> --as <your account> --json
    ```
 
    This balance is what a claim key can spend, junk claims included, so keep only what you are willing to lose. `bountee balance --contract <bounty contract> --as <your account> --json` shows what is left, and `bountee balance withdraw [<NEAR>] ...` takes it back (all of it if you name no amount); a claim key can do neither.
-3. **The claim key.** `bountee key add --contract <bounty contract> --as <your account> --out-dir <folder> --json` adds the key and writes it to `<folder>/<your account>.json`. It prints what the key can and can't do. Give your agent that folder, never `~/.near-credentials`.
-4. **Afterwards.** `bountee key revoke --as <your account> --out-dir <folder> --json` deletes the key from your account. Run any `next_steps` your agent reports with your own key: `bountee sign-pauses`, `bountee verify-pause` or `bountee retry-payout`, each with the bounty id, `--contract` and `--as <your account>`.
+4. **The claim key.** `bountee key add --contract <bounty contract> --as <your account> --out-dir <folder> --json` adds the key and writes it to `<folder>/<your account>.json`. It prints what the key can and can't do. Give your agent that folder, never `~/.near-credentials`.
+5. **Afterwards.** `bountee key revoke --as <your account> --out-dir <folder> --json` deletes the key from your account. Run any `next_steps` your agent reports with your own key: `bountee sign-pauses`, `bountee verify-pause` or `bountee retry-payout`, each with the bounty id, `--contract` and `--as <your account>`.
