@@ -38,7 +38,7 @@ alias bountee='node cli/src/main.ts'
 
 Each step below is a command and what it prints. They replay recorded jobs (the exact judge input: a block header, its state proofs and the exploit, all committed in the repo) through the same compiled judge the enclave runs. They spend nothing and send nothing.
 
-**1. A real exploit of the demo vault pays.** The vault has a missing access check, modelled on the DEPUSDT/LEVUSDC hack of June 2023.
+**1. A real exploit of the demo vault pays.** Fresh accounts walk away with the vault's USDC.
 
 ```console
 $ bountee test --job demo/fixtures/exploit.json
@@ -93,7 +93,7 @@ These need the network.
 **The bounty contract holds no keys.**
 
 ```console online pending
-$ curl -s https://rpc.mainnet.near.org -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"bounty.bountee.near"}}'
+$ curl -s https://free.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"bounty.bountee.near"}}'
 "keys":[]
 ```
 
@@ -150,7 +150,7 @@ So a depositor's own withdrawal, an owner rescue, a sweep to the treasury, a swa
 | **NEAR's MPC network** (Chain Signatures and foreign-chain verification) | Signing the bounty's pauses, and checking that they landed | Could sign other transactions from a bounty's pause address, but the pause role can only pause: it can't unpause or move funds. Could refuse to sign (a winning claim waits, unpaid), or record a pause as verified that didn't land (the payout never depends on it, and anyone can check the chain). |
 | **The RPCs pinned in the judge's build** (three per chain; at least two must answer and all answers must agree) | Confirming the claim's block hash, and reading each chain at posting | Two colluding RPCs could confirm a fake block, letting a claim be judged against invented state: a forged verdict. One RPC alone can only stall a claim. |
 | **NEAR** (its validators) | Running the bounty contract as written | The same trust as any NEAR contract. |
-| **Circle** (the USDC issuer) | USDC keeps its value and stays transferable | Could freeze the bounty's or the winner's USDC. |
+| **Circle** (the USDC issuer) | USDC keeps its value and stays transferable | Could blocklist the bounty contract or the winner on NEAR's USDC (its contract has `blocklist` and `is_blocklisted`), freezing their USDC. |
 | **BounTEE's builders** (us) | Nothing after deployment | The contract holds no keys, so we can't move funds, pause, or change a bounty's rules. We chose the judge and its pinned RPCs at deployment; both are open source here, and `verify` rebuilds them and compares the hashes that ran. |
 | **The Protocol** | Its own contracts | Can revoke the pause role, upgrade its contracts or fix the bug: a valid claim is still paid, and a fixed bug stops being claimable 5 minutes after the fix lands. Can't withdraw the bounty before its end date or while a claim is unresolved. A Protocol insider planting a bug and claiming it themselves is not something BounTEE can prevent, as on any bounty platform. |
 
@@ -165,7 +165,7 @@ Nobody needs to trust the Whitehat, the broadcaster of a signed pause (anyone ca
 
 - **A pause protects only the covered contracts.** Copies of the same code deployed elsewhere stay exposed.
 - **Publishing the exploit exposes those copies further.** Winning exploits are published after the disclosure delay the Protocol chose at posting (1–90 days).
-- **Payouts are open to anyone, with no identity check.** No allowlist, no KYC. Whether Circle can freeze a sanctioned account's USDC on NEAR is not yet verified, so we don't claim it. <!-- VERIFY: USDC issuer freeze on NEAR before claiming it (R15.7) -->
+- **Payouts are open to anyone, with no identity check.** No allowlist, no KYC. Circle, USDC's issuer, can blocklist an account on NEAR's USDC, which would freeze a sanctioned winner's payout.
 - **A Fake poster can still post a bounty on a copy of someone else's code.** Granting the pause role proves control of the covered contracts, not authorship of the code in them.
 - **A failed claim reveals its read set, never its exploit.** The claim's proofs go on NEAR, so anyone can see which fresh addresses and storage slots it touched.
 - **"Paused" means the pause transaction succeeded on that chain, as verified by NEAR's MPC network.** It is not a claim about what the contract's code does when paused.
@@ -199,3 +199,4 @@ Also out of scope: bugs where nobody profits (a freeze, denial of service, insol
 - The historical replay reproduces DeFiHackLabs' DEPUSDT/LEVUSDC exploit (Apache-2.0).
 - Built on revm, near-sdk, near-api-js, OpenZeppelin Contracts and Foundry.
 - Much of the code was written with AI coding agents, under review.
+- Before the build, six throwaway feasibility tests ran on testnets (Oct 31 to Nov 2): Chain Signatures gated by a contract's own rule, an OutLayer secret only one program build can read, an exploit replayed in the enclave, a keyless NEAR contract paying on a verified exploit, a pause on two test chains, and Confidential Intents. None of their code is in this repo; the build started fresh.
