@@ -47,7 +47,7 @@ import { actions } from "near-api-js";
 import { parseBlockRef, parseExploit, parseAccountProof, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
 import { parseBountyId } from "./bounties.ts";
 import { parseRpcFlags } from "./broadcast.ts";
-import { claimCost, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
+import { claimCost, claimInputBytes, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
 import { proofsMatchingClaim, type ProofsSource } from "./claim-proofs.ts";
 import { KEYSTORE_API, NEAR_RPC, type Network } from "./endpoints.ts";
 import { formatNear, Near, parseNetwork } from "./near.ts";
@@ -187,7 +187,7 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
 
   const proofsJson = JSON.stringify(proofs);
   const fees = await near.view(contract, "fees");
-  const cost = claimCost(fees, proofsJson.length + header.length + JSON.stringify(block).length + 4096, sealed.length);
+  const cost = claimCost(fees, claimInputBytes(proofsJson.length, header.length, JSON.stringify(block).length), sealed.length);
   const added = await ensureClaimBalance(near, contract, whitehat, cost);
   if (added > 0n) out.topped_up_near = formatNear(added);
 
@@ -233,7 +233,7 @@ async function retryClaim(args: string[], c: Context & { given?: BountyId }, onS
   const out: ClaimResult = { bounty_contract: c.contract, retried: true, claim_id: claimId, block: filed.block };
   const fees = await c.near.view(c.contract, "fees");
   // The new job's input is the claim's own; no secret is stored again.
-  const cost = claimCost(fees, proofs.length + filed.header.length + JSON.stringify(filed.block).length + 4096, 0);
+  const cost = claimCost(fees, claimInputBytes(proofs.length, filed.header.length, JSON.stringify(filed.block).length), 0);
   const added = await ensureClaimBalance(c.near, c.contract, c.whitehat, cost);
   if (added > 0n) out.topped_up_near = formatNear(added);
 

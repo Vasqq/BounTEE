@@ -43,7 +43,13 @@ export async function standIns(route: Route): Promise<{ base: string; requests: 
       const answer = (call: any) => {
         const p = call.params;
         const detail =
-          where === "near" ? (p?.method_name ?? p?.request_type) : call.method === "eth_call" ? String(p[0].to).toLowerCase() : undefined;
+          where === "near"
+            ? (p?.method_name ?? p?.request_type)
+            : call.method === "eth_call"
+              ? String(p[0].to).toLowerCase()
+              : call.method === "eth_getProof"
+                ? `${String(p[0]).toLowerCase()} ${p[1].length}`
+                : undefined;
         requests.push({ where, method: call.method, detail });
         const result = route(where, call.method, p);
         if (result === undefined) return { jsonrpc: "2.0", id: call.id, error: { code: -32601, message: "not scripted" } };

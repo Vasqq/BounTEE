@@ -46,7 +46,9 @@ import { fileURLToPath } from "node:url";
 import { base58 } from "@scure/base";
 import { PAUSE_GAS_PER_PAUSE, pauseRole } from "@bountee/formats";
 import { parseRpcFlags } from "../../src/broadcast.ts";
-import { CHAINS, defaultRpc } from "../../src/chains.ts";
+import { CHAINS, defaultRpc, proofRpcs } from "../../src/chains.ts";
+import { rpc } from "../../src/proofs.ts";
+import { budgetClaims, whitehatNeed, type ClaimBudget, type ClaimPlan, type Read } from "./claim-budget.ts";
 import { formatNear, milliNear } from "../../src/near.ts";
 import { MPC_ROOT, near, network as NETWORK, need, stopIfShort, wholeNumber, type Need } from "./deploy.ts";
 import { keystoreEnv, redact } from "./evm-key.ts";
@@ -144,6 +146,48 @@ const deployWei = (rpc: string) => {
 const WHITEHAT = process.env.WHITEHAT;
 const ftBalance = async (who: string) => BigInt(await near.view<string>(USDC, "ft_balance_of", { account_id: who }));
 
+// The proof chain's RPC for the claims' proofs: the one given, else one known to serve proofs.
+const proofRpc = chainRpcs[CHAIN] ?? proofRpcs(CHAIN)[0] ?? rpcOf(CHAIN);
+// The router demo/script/HonestUser.s.sol buys Circle's USDC through on mainnet (Uniswap V2).
+const UNISWAP_V2_ROUTER = "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24";
+// Circle's USDC is a proxy, and every call reads its implementation's code. FiatTokenProxy keeps
+// the implementation at ZeppelinOS's slot, keccak256("org.zeppelinos.proxy.implementation"), not
+// EIP-1967's.
+const IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
+
+/**
+ * The run's claims and what each replay reads (the accounts and slot counts the Day-3 run's jobs
+ * and #35's mainnet cheat proved): the cheat (demo/script/HonestUser.s.sol) first, then the
+ * winning exploit (Exploit.s.sol) for every other claim; a one-claim run files only the win.
+ */
+async function claimPlans(): Promise<ClaimPlan[]> {
+  const call = (to: string, sig: string, ...args: string[]) => cast("call", to, sig, ...args, "--rpc-url", proofRpc).split(" ")[0]!.toLowerCase();
+  const runtime = (name: string) => foundry("forge", ["inspect", name, "deployedBytecode"], { cwd: join(root, "demo") });
+  const head = await rpc<{ miner: string }>(proofRpc, "eth_getBlockByNumber", ["latest", false]);
+  const sender: Read = { name: "fresh sender", slots: 0 };
+  const coinbase: Read = { name: "block's coinbase", address: head.miner, slots: 0 };
+  const vault: Read = { name: "DemoVault", code: runtime("DemoVault"), slots: 0 };
+  let cheat: Read[];
+  let win: Read[];
+  if (MAINNET) {
+    const usdc = circleUsdc(CHAIN);
+    const impl = `0x${BigInt(cast("storage", usdc, IMPLEMENTATION_SLOT, "--rpc-url", proofRpc)).toString(16).padStart(40, "0")}`;
+    if (/^0x0+$/.test(impl)) throw new Error(`${usdc} names no implementation at ${IMPLEMENTATION_SLOT}`);
+    const weth = call(UNISWAP_V2_ROUTER, "WETH()(address)");
+    const pair = call(call(UNISWAP_V2_ROUTER, "factory()(address)"), "getPair(address,address)(address)", weth, usdc);
+    const token = [{ name: "USDC implementation", address: impl, slots: 0 }];
+    cheat = [sender, coinbase, vault, ...token, { name: "USDC", address: usdc, slots: 8 },
+      { name: "Uniswap V2 router", address: UNISWAP_V2_ROUTER, slots: 0 }, { name: "WETH/USDC pair", address: pair, slots: 6 }, { name: "WETH", address: weth, slots: 2 }];
+    win = [sender, coinbase, vault, ...token, { name: "USDC", address: usdc, slots: 4 }];
+  } else {
+    const mock = runtime("MockUSDC");
+    cheat = [sender, coinbase, vault, { name: "MockUSDC", code: mock, slots: 4 }];
+    win = [sender, coinbase, vault, { name: "MockUSDC", code: mock, slots: 2 }];
+  }
+  const wins = Array.from({ length: Math.max(0, CLAIMS - 1) }, () => ({ kind: "win", reads: win }));
+  return CLAIMS === 0 ? [] : CLAIMS === 1 ? [{ kind: "win", reads: win }] : [{ kind: "cheat", reads: cheat }, ...wins];
+}
+
 const needs: Need[] = [];
 const showUsdc = (x: bigint) => `${Number(x) / 1e6} USDC`;
 const showNear = (y: bigint) => `${formatNear(y)} NEAR`;
@@ -157,11 +201,20 @@ for (const chain of CHAIN_IDS) {
 }
 needs.push(need(PROTOCOL, nearChain, "NEAR", (await near.balance(PROTOCOL)) ?? 0n, BigInt(fees.posting_fee) + milliNear(100), showNear));
 needs.push(need(PROTOCOL, nearChain, `${MAINNET ? "" : "test "}USDC (${USDC})`, await ftBalance(PROTOCOL), BigInt(BOUNTY_AMOUNT), showUsdc));
+let claimBudgets: ClaimBudget[] = [];
 if (WHITEHAT) {
-  // Each live claim draws ~0.9 NEAR (its ~120 KB input is held while the job runs) plus gas.
-  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.balance(WHITEHAT)) ?? 0n, milliNear(1100 * CLAIMS), showNear));
+  // Each claim's draw, from the very proofs it will carry on this network's proof chain
+  // (claim-budget.ts); the Whitehat holds the largest draw plus what the others keep.
+  claimBudgets = await budgetClaims(proofRpc, fees, await claimPlans());
+  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.balance(WHITEHAT)) ?? 0n, whitehatNeed(claimBudgets), showNear));
 }
-stopIfShort(needs, { run: { claims: CLAIMS, disclosure_delay_days: DISCLOSURE_DELAY_DAYS } });
+stopIfShort(needs, {
+  run: {
+    claims: CLAIMS,
+    disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
+    ...(WHITEHAT ? { claim_budget: claimBudgets.map((c) => ({ kind: c.kind, input_bytes: c.input_bytes, draw: showNear(c.draw), refunded: showNear(c.refunded) })) } : {}),
+  },
+});
 
 // ---- 1. Pause-role address -------------------------------------------------------------------------
 
