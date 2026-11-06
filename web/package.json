@@ -1,7 +1,7 @@
 {
   "name": "@bountee/web",
   "version": "0.1.0",
-  "description": "BounTEE's web app (scaffold only; design is tickets #29-#32)",
+  "description": "BounTEE's web app",
   "private": true,
   "type": "module",
   "scripts": {
@@ -18,6 +18,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@noble/hashes": "^2.4.0",
     "@playwright/test": "^1.64.1",
     "@types/node": "^22",
     "@types/react": "^19",
