@@ -73,6 +73,13 @@ export function BountyLive({ id }: { id: BountyId }) {
         <dt>Claims judged</dt>
         <dd data-testid="claims-judged">{b ? b.claimsJudged : <Bar w={16} h={14} />}</dd>
       </dl>
+      {b?.state === "Paid" && (
+        <p className="block">
+          <a className="btn btn-line" href={`/bounties/${encodeURIComponent(id.protocol)}/${encodeURIComponent(id.name)}/exploit`}>
+            Open the winning exploit
+          </a>
+        </p>
+      )}
       {b && (
         <>
           <section className="block cols" aria-label="Rules">

@@ -120,3 +120,10 @@
 /* Verify: FAIL and its count (DESIGN.md, Verify check list: Extension) */
 .run .st.fail { color: var(--fail); }
 .sum b.fail { color: var(--fail); }
+
+/* forms (DESIGN.md, Forms): label above the field, 8px apart */
+.field { display: grid; gap: 8px; font: 500 var(--fs-sm)/1 var(--text); color: var(--ink-2); }
+.field input, .field select { height: 48px; padding: 0 14px; border: 0; border-radius: var(--r-sm); background: var(--surface); color: var(--ink); font: 400 18px/1.5 var(--text); }
+.field input[type="file"] { padding: 12px 14px; font-size: var(--fs-sm); }
+.field input:focus-visible { outline: 2px solid var(--ok); outline-offset: 3px; }
+.term pre.term-body { font: inherit; color: var(--ink); }
