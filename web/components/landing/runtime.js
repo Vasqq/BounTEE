@@ -16,6 +16,7 @@ const X = { near: 'https://nearblocks.io/', base: 'https://basescan.org/', arb: 
 // `live`, which `update` fills once the app's server has read them. Until then, and for
 // anything not on chain yet, a value is an en dash and a transaction is "tx pending".
 const DASH = '–';
+const CHAIN_EXPLORER = { Base: X.base, 'Arbitrum One': X.arb };
 const live = { protocol: null, name: null, amount: DASH, min: DASH, delay: null, pauses: null, chains: null, proofChain: null, steps: [], checked: false, claimKey: null, verdict: null, cheat: false, paidOnce: false, landed: null, verified: null, published: false };
 const BOUNTY = {
   actor: 'agent', who: 'Whitehat',
@@ -40,13 +41,14 @@ function stepsFor() {
         ? 'The Whitehat\'s AI agent, holding only a claim key, sealed the exploit it found so only the bounty contract\'s enclave job can read it, and filed the claim. The key can claim and nothing else.'
         : 'The Whitehat seals the exploit so only the bounty contract\'s enclave job can read it, and files the claim.',
       tx: tx(1, [t('NEAR', X.near)]) },
-    { d: `The Enclave replayed the exploit with revm against recent ${live.proofChain || DASH} state.` +
-        (live.verdict === 'PAYS' ? ` It took more than the ${live.min} minimum theft.` : '') +
+    { d: (live.verdict === 'PAYS'
+          ? `The Enclave replayed the exploit with revm against recent ${live.proofChain || DASH} state. It took more than the ${live.min} minimum theft.`
+          : `The Enclave replays the exploit with revm against recent ${live.proofChain || DASH} state, and pays only a theft of at least the ${live.min} minimum.`) +
         (live.cheat ? ' An earlier cheat claim, passed off as theft, scored zero and nothing moved.' : ''),
       chips: [...(live.verdict === 'PAYS' ? [['ok', 'Verdict PAYS']] : []), ...(live.cheat ? [['mute', 'Cheat claim: ZERO']] : [])], tx: tx(2, [t('NEAR', X.near)]) },
-    { d: 'NEAR\'s MPC network signed a pause for every covered contract. Only the bounty contract can ask it to, and only after a PAYS verdict.', tx: tx(3, [t('NEAR MPC', X.near)]) },
+    { d: `NEAR's MPC network ${ex[3] && ex[3].length ? 'signed' : 'signs'} a pause for every covered contract. Only the bounty contract can ask it to, and only after a PAYS verdict.`, tx: tx(3, [t('NEAR MPC', X.near)]) },
     { d: live.paidOnce ? `${live.amount} went to the Whitehat's account, once.` : `${live.amount} goes to the Whitehat's account, once.`, chips: live.paidOnce ? [['ok', live.amount]] : [], tx: tx(4, [t('NEAR', X.near)]) },
-    { d: `The signed pauses reach ${chainList()}. Anyone can send them; nobody can change them.` + (all(live.landed) ? ' Every covered vault now reads paused.' : ''), tx: tx(5, [t('Base', X.base), t('Arbitrum One', X.arb)]) },
+    { d: `The signed pauses reach ${chainList()}. Anyone can send them; nobody can change them.` + (all(live.landed) ? ' Every covered vault now reads paused.' : ''), tx: tx(5, (live.chains || []).map(c => t(c, CHAIN_EXPLORER[c] || X.near))) },
     { d: 'NEAR\'s MPC network confirms each pause in a block safe from reorganisation, and the bounty contract records it as a verified pause.', chips: live.verified ? [[all(live.verified) ? 'ok' : 'mute', `${live.verified[0]} of ${live.verified[1]} verified`]] : [], tx: tx(6, [t('NEAR', X.near)]) },
     { d: `After the ${days(live.delay)} disclosure delay the winning exploit is published, so anyone can re-run it. Until then only the Protocol can open it.`, tx: tx(7, []), pending: live.published ? null : `pending · after ${live.delay == null ? DASH : live.delay === 1 ? '1 day' : live.delay + ' days'}` }
   ];
@@ -628,7 +630,7 @@ dock.innerHTML = STEPS.map((n, i) => `<button type="button" data-go="${i}"><span
 
 // verify
 document.getElementById('cmd').innerHTML = `<span class="p" aria-hidden="true">$</span>${esc(cmdFor())}`;
-document.getElementById('termNote').textContent = `reading ${BOUNTY.name} from NEAR, Base and Arbitrum One`;
+document.getElementById('termNote').textContent = `reading ${BOUNTY.name} from NEAR, ${chainList()}`;
 
 // pictures
 const story = buildStory(document.getElementById('storyArt'), BOUNTY);

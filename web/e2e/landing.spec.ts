@@ -114,12 +114,14 @@ test("D4, R15.6: the story says an AI agent won with a claim key only when NEAR 
   await expect(panel(page, 4)).toContainText("went to the Whitehat's account, once.");
   await expect(page.locator("#panels")).not.toContainText("claim key");
   await expect(page.getByRole("definition").filter({ hasText: "claim key" })).toHaveCount(0);
+  await expect(page.locator("#a5")).not.toContainText("The demo bounty was won by one.");
 
   // The same win, filed with a claim key.
   await setWorld(page, finishedDemo());
   await page.reload();
   await expect(panel(page, 1)).toContainText("holding only a claim key");
   await expect(page.getByText("a Whitehat's AI agent, with a claim key")).toBeVisible();
+  await expect(page.locator("#a5")).toContainText("The demo bounty was won by one.");
 });
 
 test("R15.6: a ZERO claim on another bounty isn't this bounty's cheat claim", async ({ page }) => {
@@ -132,5 +134,16 @@ test("R15.6: a ZERO claim on another bounty isn't this bounty's cheat claim", as
   await page.goto("/");
   await expect(panel(page, 2)).toContainText("Verdict PAYS");
   await expect(panel(page, 2)).not.toContainText("Cheat claim");
+  await expect(panel(page, 2)).not.toContainText("cheat claim");
+});
+
+test("R15.6: a ZERO claim filed after the win isn't the earlier cheat claim", async ({ page }) => {
+  const w = emptyWorld();
+  post(w, DEMO);
+  win(w, DEMO, 1, { landed: [BASE, ARBITRUM] });
+  judge(w, DEMO, 2, "ZERO");
+  await setWorld(page, w);
+  await page.goto("/");
+  await expect(panel(page, 2)).toContainText("Verdict PAYS");
   await expect(panel(page, 2)).not.toContainText("cheat claim");
 });

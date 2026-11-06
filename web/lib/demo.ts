@@ -32,7 +32,7 @@ export interface Story {
   /** The winning claim was filed with a claim key (a function-call key limited to the bounty contract), as NEAR records it. */
   claimKey: boolean;
   verdict: string | null;
-  /** Another claim on this bounty was judged ZERO. */
+  /** A claim on this bounty filed before the winner was judged ZERO. */
   cheat: boolean;
   paidOnce: boolean;
   /** Chains whose pauses have all landed, of the chains covered. */
@@ -70,8 +70,8 @@ export async function readDemo(): Promise<Demo | null> {
   const [b, claims] = await Promise.all([view<{ winning_claim: number | null }>(c, c.contract, "bounty", { id }), claimsOf(c, id)]);
   const winner = b.winning_claim;
   const isWinner = (d: Record<string, unknown>) => winner !== null && Number(d.claim_id) === winner;
-  // A cheat claim: another of this bounty's claims, judged ZERO (ADR-0018).
-  const cheatClaim = claims.find((x) => x.id !== winner && x.state === "judged" && x.verdict?.outcome === "ZERO");
+  // A cheat claim: one of this bounty's claims filed before the winner (claim IDs count up), judged ZERO (ADR-0018).
+  const cheatClaim = winner === null ? undefined : claims.find((x) => x.id < winner && x.state === "judged" && x.verdict?.outcome === "ZERO");
   const [posted, live, sealed, judged, signed, paid, published] = await Promise.all([
     find("bounty_posted", mine),
     find("bounty_live", mine),
