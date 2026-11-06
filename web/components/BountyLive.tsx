@@ -4,7 +4,7 @@
 // Values swap in place; nothing animates in (DESIGN.md, Motion).
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { BountyId, BountyPage, ChainPause } from "@/lib/bounties.ts";
+import type { BountyId, ChainPause } from "@/lib/bounties.ts";
 import { bountyKey, useBounty } from "@/lib/live.ts";
 import { rulesInPlainEnglish, whatDoesntPay } from "@/lib/rules.ts";
 import { ChainMark } from "./ChainMark.tsx";
@@ -17,11 +17,18 @@ import { VerifyTerminal } from "./Verify.tsx";
 const Bar = ({ w, h = 18 }: { w: number; h?: number }) => <span className="bar" style={{ width: w, height: h }} aria-hidden="true" />;
 
 export function BountyLive({ id }: { id: BountyId }) {
-  // Chains whose pause this browser sent and that haven't landed yet: read fast until they do.
+  // Chains whose pause this browser sent.
   const [sent, setSent] = useState<number[]>([]);
-  const last = useQueryClient().getQueryData<BountyPage | null>(bountyKey(id));
-  const q = useBounty(id, sent.some((chain) => !last?.chains.find((c) => c.chainId === chain)?.landed));
+  const [fastUntil, setFastUntil] = useState(0);
+  const queryClient = useQueryClient();
+  const q = useBounty(id, fastUntil);
   const b = q.data ?? null;
+  // A sent pause is read at once, then every 3 s until it lands, for at most two minutes.
+  const onSent = (chain: number) => {
+    setSent((s) => [...s, chain]);
+    setFastUntil(Date.now() + 120_000);
+    queryClient.invalidateQueries({ queryKey: bountyKey(id) });
+  };
   const title = `${id.protocol}/${id.name}`;
   if (q.isSuccess && q.data === null) {
     return (
@@ -82,7 +89,7 @@ export function BountyLive({ id }: { id: BountyId }) {
             <h2 id="pauseH">Pause, per chain</h2>
             <div className="pauses">
               {b.chains.map((c) => (
-                <PauseRow key={c.chainId} c={c} sent={sent.includes(c.chainId)} onSent={() => setSent((s) => [...s, c.chainId])} />
+                <PauseRow key={c.chainId} c={c} sent={sent.includes(c.chainId)} onSent={() => onSent(c.chainId)} />
               ))}
             </div>
           </section>

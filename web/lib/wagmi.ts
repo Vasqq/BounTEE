@@ -3,7 +3,7 @@
 // only wallet (D13): the injected MetaMask connector, plus whatever the browser announces
 // through EIP-6963. Reading and verifying never touch it (DESIGN.md, Voice and copy): only the
 // pages that sign mount it (components/WalletProvider.tsx).
-import { cookieStorage, createConfig, createStorage, http } from "wagmi";
+import { createConfig, http } from "wagmi";
 import { arbitrum, base } from "wagmi/chains";
 import { injected } from "wagmi/connectors";
 
@@ -12,8 +12,8 @@ export const wagmiConfig = createConfig({
   connectors: [injected({ target: "metaMask" })],
   transports: { [base.id]: http(), [arbitrum.id]: http() },
   // Rendered on the server first: keep wallet state out of the first paint, restore it after.
+  // Its storage stays in the browser (localStorage), never in a cookie sent to the server.
   ssr: true,
-  storage: createStorage({ storage: cookieStorage }),
 });
 
 declare module "wagmi" {

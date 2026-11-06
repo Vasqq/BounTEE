@@ -17,12 +17,12 @@ async function get<T>(url: string): Promise<T> {
 
 export const bountyKey = (id: BountyId) => ["bounty", id.protocol, id.name] as const;
 
-/** A bounty's page, re-read every 15 s, or every 3 s while `fast` (a sent pause waiting to land). */
-export function useBounty(id: BountyId, fast = false) {
+/** A bounty's page, re-read every 15 s, or every 3 s until `fastUntil` (a sent pause waiting to land, for at most two minutes). */
+export function useBounty(id: BountyId, fastUntil = 0) {
   return useQuery({
     queryKey: bountyKey(id),
     queryFn: async () => (await get<{ bounty: BountyPage | null }>(path(id))).bounty,
-    refetchInterval: fast ? 3_000 : 15_000,
+    refetchInterval: () => (Date.now() < fastUntil ? 3_000 : 15_000),
   });
 }
 
