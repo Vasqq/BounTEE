@@ -1,9 +1,6 @@
-// Placeholder only. The landing page, bounty pages and posting flow are designed with Liam
-// in tickets #29-#32; nothing here is a design decision.
+// The landing page: the finished mainnet demo bounty, told as a story (D4). No wallet.
+import { Landing } from "@/components/landing/Landing.tsx";
+
 export default function Home() {
-  return (
-    <main>
-      <h1>BounTEE</h1>
-    </main>
-  );
+  return <Landing />;
 }

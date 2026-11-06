@@ -19,7 +19,8 @@ const TWEAK_DERIVATION_PREFIX = "near-mpc-recovery v0.1.0 epsilon derivation:";
 const { Point } = secp256k1;
 const N = Point.CURVE().n;
 
-const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+// Plain hex, so the derivation also runs in a browser (the web app checks pause-role addresses with it).
+const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 /** The Chain Signatures path for a bounty's pause signatures: `<protocol>/<name>`. */
 export const path = (bounty: BountyId): string => `${bounty.protocol}/${bounty.name}`;
