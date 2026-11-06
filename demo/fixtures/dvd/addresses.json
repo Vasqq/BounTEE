@@ -1,0 +1,19 @@
+{
+ "about": "Ticket #27: the Damn Vulnerable DeFi levels on the local anvil chain (31337) the jobs were made on, by demo/dvd/make-fixtures.ts.",
+ "block": 26,
+ "pauser": "0x0000000000000000000000000000000000005a05",
+ "unmodified": {
+  "DamnValuableToken": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "TrusterLenderPool": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+  "SideEntranceLenderPool": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+  "PuppetPool": "0xb7f8bc63bbcad18155201308c8f3540b07f84f5e",
+  "UniswapV1Exchange": "0x61c36a8d610163660e21a8b7359e1cac0c9133e1"
+ },
+ "adapted": {
+  "DamnValuableToken": "0x0dcd1bf9a1b36ce34237eeafef220932846bcd82",
+  "PausableTrusterLenderPool": "0x9a676e781a523b5d0c0e43731313a708cb607508",
+  "PausableSideEntranceLenderPool": "0x0b306bf915c4d645ff596e518faf3f9669b97016",
+  "PausablePuppetPool": "0xa85233c63b9ee964add6f2cffe00fd84eb32338f",
+  "UniswapV1Exchange": "0x5e3d0fde6f793b3115a9e7f5ebc195bbeed35d6c"
+ }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@bountee/formats",
+  "version": "0.1.0",
+  "description": "TypeScript twin of BounTEE's shared formats (formats/src): rules, claim, verdict and the D25 pause-role address",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@scure/base": "^2.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "fast-check": "^4.10.2",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

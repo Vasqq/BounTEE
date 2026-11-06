@@ -1,0 +1,8 @@
+# The bounty contract is pinned to rustc 1.86 with near-sdk 5.24.1 and cargo-near 0.20.3,
+# a combination known to build and deploy, so its build stays stable. Not a NEAR limit:
+# near-sdk 5.30 contracts built on newer compilers deploy too. Separate from the judge's
+# toolchain in ../rust-toolchain.toml; run cargo from this directory so rustup picks this file.
+[toolchain]
+channel = "1.86.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

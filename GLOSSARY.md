@@ -83,7 +83,7 @@ The Protocol's key for opening a winning exploit, derived from a MetaMask signat
 _Avoid_: Decryption key, private key
 
 **Verified pause**:
-A pause that NEAR's MPC network has confirmed landed on its chain, recorded by the bounty contract on NEAR.
+A pause that NEAR's MPC network has confirmed succeeded on its chain, in a block the chain reports safe from reorganisation, recorded by the bounty contract on NEAR.
 _Avoid_: Confirmed pause, finalized pause
 
 **Proof chain**:

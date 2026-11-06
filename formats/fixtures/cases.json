@@ -1,0 +1,146 @@
+{
+  "about": "Shared format cases. Both formats/tests/fixtures.rs and formats/ts/test/fixtures.test.ts check that every valid value parses and writes back unchanged, and every invalid value is refused.",
+  "valid": [
+    {
+      "kind": "rules",
+      "note": "demo vault on Base Sepolia, covered on Base Sepolia and Arbitrum Sepolia",
+      "value": {
+        "covered_contracts": [
+          { "chain_id": 84532, "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3" },
+          { "chain_id": 421614, "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3" }
+        ],
+        "proof_chain": 84532,
+        "recency_limit_secs": 300,
+        "listed_tokens": [
+          { "token": "0x036cbd53842c5426634e7929541ec2318f3dcf7e", "price": "1000000000000" },
+          { "token": "native", "price": "3000" }
+        ],
+        "seed": { "native": "1000000000000000000", "tokens": [] },
+        "bounty_amount": "1000000",
+        "minimum_theft": "100000000000000000",
+        "end_date_ns": "1794268800000000000",
+        "disclosure_delay_days": 30,
+        "exploit_public_key": "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
+        "judge_build_hash": "0x9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+      }
+    },
+    {
+      "kind": "rules",
+      "note": "extremes: u256 max price, u64 max end date, seed with a token",
+      "value": {
+        "covered_contracts": [
+          { "chain_id": 9007199254740991, "address": "0xffffffffffffffffffffffffffffffffffffffff" }
+        ],
+        "proof_chain": 1,
+        "recency_limit_secs": 0,
+        "listed_tokens": [
+          { "token": "native", "price": "115792089237316195423570985008687907853269984665640564039457584007913129639935" }
+        ],
+        "seed": { "native": "0", "tokens": [ { "token": "0x0000000000000000000000000000000000000001", "amount": "7" } ] },
+        "bounty_amount": "340282366920938463463374607431768211455",
+        "minimum_theft": "1",
+        "end_date_ns": "18446744073709551615",
+        "disclosure_delay_days": 65535,
+        "exploit_public_key": "secp256k1:2",
+        "judge_build_hash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "kind": "claim",
+      "note": "one contract account with a storage slot, one absent account",
+      "value": {
+        "bounty": { "protocol": "0x1ffd85c2270f97183b9b254b3269845f47ebc9ba", "name": "demo-vault-1" },
+        "whitehat": "whitehat_1.testnet",
+        "block": { "number": 18000000, "hash": "0x2b1c4f0d6a5e8f7c9b3a2d1e0f4c5b6a7d8e9f0a1b2c3d4e5f60718293a4b5c6" },
+        "header": "0xf90200a0",
+        "proofs": [
+          {
+            "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+            "nonce": "1",
+            "balance": "0",
+            "code_hash": "0x0c3f4e1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6",
+            "storage_hash": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "account_proof": [ "0xf90211a0", "0xf8518080" ],
+            "storage": [
+              {
+                "key": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "value": "0x00000000000000000000000000000000000000000000000000000000000f4240",
+                "proof": [ "0xe2a0" ]
+              }
+            ],
+            "code": "0x6080604052"
+          },
+          {
+            "address": "0x000000000000000000000000000000000000dead",
+            "nonce": "0",
+            "balance": "0",
+            "code_hash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+            "storage_hash": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "account_proof": [ "0xf90211a0" ],
+            "storage": [],
+            "code": "0x"
+          }
+        ],
+        "sealed_exploit": "c2VhbGVkIGV4cGxvaXQ="
+      }
+    },
+    { "kind": "verdict", "value": { "outcome": "PAYS", "reason": "minimum_theft_reached" } },
+    { "kind": "verdict", "value": { "outcome": "ZERO", "reason": "below_minimum_theft" } },
+    { "kind": "verdict", "value": { "outcome": "INVALID", "reason": "malformed_exploit" } },
+    { "kind": "verdict", "value": { "outcome": "INVALID", "reason": "account_mismatch" } },
+    { "kind": "verdict", "value": { "outcome": "INVALID", "reason": "existing_sender" } },
+    { "kind": "verdict", "value": { "outcome": "INVALID", "reason": "unproven_state" } },
+    { "kind": "verdict", "value": { "outcome": "INVALID", "reason": "block_not_confirmed" } },
+    { "kind": "verdict", "value": { "outcome": "INVALID", "reason": "stale_block" } },
+    {"kind": "exploit", "note": "#8: a call, then a contract creation (to: null)", "value": {"transactions": [{"from": "0x00000000000000000000000000000000000b0b01", "to": "0x5fbdb2315678afecb367f032d93f642f64180aa3", "value": "0", "input": "0xa9059cbb", "gas": 100000}, {"from": "0x00000000000000000000000000000000000b0b01", "to": null, "value": "1000", "input": "0x6080", "gas": 3000000}]}},
+    {"kind": "job", "note": "#8: a local replay with an absence proof", "value": {"replay": {"rules": {"covered_contracts": [{"chain_id": 84532, "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3"}, {"chain_id": 421614, "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3"}], "proof_chain": 84532, "recency_limit_secs": 300, "listed_tokens": [{"token": "0x036cbd53842c5426634e7929541ec2318f3dcf7e", "price": "1000000000000"}, {"token": "native", "price": "3000"}], "seed": {"native": "1000000000000000000", "tokens": []}, "bounty_amount": "1000000", "minimum_theft": "100000000000000000", "end_date_ns": "1794268800000000000", "disclosure_delay_days": 30, "exploit_public_key": "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA", "judge_build_hash": "0x9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}, "block": {"number": 12, "hash": "0xabababababababababababababababababababababababababababababababab"}, "header": "0xf90200", "proofs": [{"address": "0x00000000000000000000000000000000000b0b01", "nonce": "0", "balance": "0", "code_hash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470", "storage_hash": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421", "account_proof": ["0xe210"], "storage": [], "code": "0x"}], "exploit": {"transactions": [{"from": "0x00000000000000000000000000000000000b0b01", "to": "0x5fbdb2315678afecb367f032d93f642f64180aa3", "value": "0", "input": "0xa9059cbb", "gas": 100000}]}}}},
+    {"kind": "job", "note": "#22: the release job the bounty contract requests after a payout", "value": {"release": {"bounty": {"protocol": "protocol.testnet", "name": "vault"}, "claim_id": 7, "whitehat": "alice.testnet", "exploit_public_key": "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA"}}},
+    {"kind": "released_exploit", "note": "#22: what the Protocol opens", "value": {"bounty": {"protocol": "protocol.testnet", "name": "vault"}, "claim_id": 7, "whitehat": "alice.testnet", "exploit": {"transactions": [{"from": "0x00000000000000000000000000000000000b0b01", "to": "0x5fbdb2315678afecb367f032d93f642f64180aa3", "value": "0", "input": "0xa9059cbb", "gas": 100000}]}}},
+    {"kind": "release_output", "note": "#22: the release job's stdout", "value": {"released": "AXNlYWxlZCB0byB0aGUgcHJvdG9jb2w="}},
+    {"kind": "job", "note": "#23: the publication job the bounty contract requests after the disclosure delay", "value": {"publish": {"bounty": {"protocol": "protocol.testnet", "name": "vault"}, "claim_id": 7, "whitehat": "alice.testnet"}}},
+    {"kind": "publish_output", "note": "#23: the publication job's stdout", "value": {"published": "q1YqSi0uKcrMS1WyMjQwMDA1NDA0MjCwMjM2MDQ0Mlaq5QIA"}}
+  ],
+  "invalid": [
+    {"kind": "job", "note": "release without the exploit key", "value": {"release": {"bounty": {"protocol": "protocol.testnet", "name": "vault"}, "claim_id": 7, "whitehat": "alice.testnet"}}},
+    {"kind": "job", "note": "release naming an RPC or anything else", "value": {"release": {"bounty": {"protocol": "protocol.testnet", "name": "vault"}, "claim_id": 7, "whitehat": "alice.testnet", "exploit_public_key": "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA", "rpc": "https://example.test"}}},
+    {"kind": "released_exploit", "note": "claim id as a string", "value": {"bounty": {"protocol": "protocol.testnet", "name": "vault"}, "claim_id": "7", "whitehat": "alice.testnet", "exploit": {"transactions": []}}},
+    {"kind": "release_output", "note": "not base64", "value": {"released": "not base64!"}},
+    {"kind": "release_output", "note": "a verdict beside it", "value": {"released": "AQ==", "outcome": "PAYS"}},
+    {"kind": "job", "note": "publish naming a key or anything else", "value": {"publish": {"bounty": {"protocol": "protocol.testnet", "name": "vault"}, "claim_id": 7, "whitehat": "alice.testnet", "exploit_public_key": "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA"}}},
+    {"kind": "job", "note": "publish without the whitehat", "value": {"publish": {"bounty": {"protocol": "protocol.testnet", "name": "vault"}, "claim_id": 7}}},
+    {"kind": "publish_output", "note": "not base64", "value": {"published": "not base64!"}},
+    { "kind": "verdict", "note": "reason from another outcome", "value": { "outcome": "PAYS", "reason": "below_minimum_theft" } },
+    { "kind": "verdict", "note": "unknown outcome", "value": { "outcome": "MAYBE", "reason": "stale_block" } },
+    { "kind": "verdict", "note": "extra field (a score would leak a near-miss)", "value": { "outcome": "ZERO", "reason": "below_minimum_theft", "score": "5" } },
+    { "kind": "verdict", "note": "missing reason", "value": { "outcome": "ZERO" } },
+    { "kind": "bounty_id", "note": "uppercase account", "value": { "protocol": "Alice.testnet", "name": "x" } },
+    { "kind": "bounty_id", "note": "slash in name", "value": { "protocol": "alice.testnet", "name": "a/b" } },
+    { "kind": "bounty_id", "note": "name ends in a dash", "value": { "protocol": "alice.testnet", "name": "vault-" } },
+    { "kind": "bounty_id", "note": "account with double separator", "value": { "protocol": "alice..testnet", "name": "v" } },
+    { "kind": "bounty_id", "note": "one-character account", "value": { "protocol": "a", "name": "v" } },
+    { "kind": "bounty_id", "note": "empty name", "value": { "protocol": "alice.testnet", "name": "" } },
+    {"kind": "exploit", "note": "to left out (a creation is spelled to: null)", "value": {"transactions": [{"from": "0x00000000000000000000000000000000000b0b01", "value": "0", "input": "0xa9059cbb", "gas": 100000}]}},
+    {"kind": "exploit", "note": "gas as a string", "value": {"transactions": [{"from": "0x00000000000000000000000000000000000b0b01", "to": "0x5fbdb2315678afecb367f032d93f642f64180aa3", "value": "0", "input": "0xa9059cbb", "gas": "100000"}]}},
+    {"kind": "exploit", "note": "a signature field (the judge replays unsigned transactions)", "value": {"transactions": [{"from": "0x00000000000000000000000000000000000b0b01", "to": "0x5fbdb2315678afecb367f032d93f642f64180aa3", "value": "0", "input": "0xa9059cbb", "gas": 100000, "v": "0x1b"}]}},
+    {"kind": "exploit", "note": "checksummed sender", "value": {"transactions": [{"from": "0x5FbDB2315678afecb367f032d93F642f64180aa3", "to": "0x5fbdb2315678afecb367f032d93f642f64180aa3", "value": "0", "input": "0xa9059cbb", "gas": 100000}]}},
+    {"kind": "job", "note": "unknown action", "value": {"judge_claim": {}}},
+    {"kind": "job", "note": "replay without its exploit", "value": {"replay": {"rules": {"covered_contracts": [{"chain_id": 84532, "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3"}, {"chain_id": 421614, "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3"}], "proof_chain": 84532, "recency_limit_secs": 300, "listed_tokens": [{"token": "0x036cbd53842c5426634e7929541ec2318f3dcf7e", "price": "1000000000000"}, {"token": "native", "price": "3000"}], "seed": {"native": "1000000000000000000", "tokens": []}, "bounty_amount": "1000000", "minimum_theft": "100000000000000000", "end_date_ns": "1794268800000000000", "disclosure_delay_days": 30, "exploit_public_key": "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA", "judge_build_hash": "0x9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}, "block": {"number": 12, "hash": "0xabababababababababababababababababababababababababababababababab"}, "header": "0x", "proofs": []}}}
+  ],
+  "invalid_rules_edits": [
+    { "note": "checksummed (mixed-case) address", "path": ["covered_contracts", 0, "address"], "value": "0x5FbDB2315678afecb367f032d93F642f64180aa3" },
+    { "note": "address too short", "path": ["covered_contracts", 0, "address"], "value": "0x5fbdb2315678afecb367f032d93f642f64180aa" },
+    { "note": "chain ID beyond 2^53 - 1", "path": ["proof_chain"], "value": 9007199254740992 },
+    { "note": "negative chain ID", "path": ["proof_chain"], "value": -1 },
+    { "note": "amount as a JSON number", "path": ["bounty_amount"], "value": 1000000 },
+    { "note": "amount with a leading zero", "path": ["bounty_amount"], "value": "01000000" },
+    { "note": "price above 2^256 - 1", "path": ["listed_tokens", 1, "price"], "value": "115792089237316195423570985008687907853269984665640564039457584007913129639936" },
+    { "note": "end date above u64", "path": ["end_date_ns"], "value": "18446744073709551616" },
+    { "note": "token neither native nor an address", "path": ["listed_tokens", 1, "token"], "value": "eth" },
+    { "note": "disclosure delay above u16", "path": ["disclosure_delay_days"], "value": 65536 },
+    { "note": "key without a scheme", "path": ["exploit_public_key"], "value": "6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA" },
+    { "note": "key with a non-base58 character", "path": ["exploit_public_key"], "value": "x25519:0abc" },
+    { "note": "hash with uppercase hex", "path": ["judge_build_hash"], "value": "0x9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08" },
+    { "note": "unknown field", "path": ["payout_tiers"], "value": [] },
+    { "note": "missing field", "path": ["seed"], "value": null }
+  ]
+}

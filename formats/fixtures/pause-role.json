@@ -1,0 +1,31 @@
+{
+  "about": "D25 vectors. derived_public_key is what v1.signer-prod.testnet's own derived_public_key view returned for (path, predecessor = bounty_contract, domain_id 0) on Nov 4 2026; evm_address is keccak256 of that key's 64 uncompressed bytes, last 20 bytes, computed with `cast keccak`. Neither comes from BounTEE's code.",
+  "mpc_contract": "v1.signer-prod.testnet",
+  "root_public_key": "secp256k1:4NfTiv3UsGahebgTaHyD9vF8KYKMBnfd6kh94mK6xv8fGBiJB8TBtFMP5WWXz6B89Ac1fbpzPwAvoyQebemHFwx3",
+  "vectors": [
+    {
+      "bounty_contract": "bounty.bountee.testnet",
+      "protocol": "0x1ffd85c2270f97183b9b254b3269845f47ebc9ba",
+      "name": "demo-vault-1",
+      "path": "0x1ffd85c2270f97183b9b254b3269845f47ebc9ba/demo-vault-1",
+      "derived_public_key": "secp256k1:4FeUT4jZaURkRT5VbUWrgtucpbExpNALaCDLkiRakJus9F2RHJL8D1ayC632VMZAwFuNgsJPxiDL7ax2wDpDvdAq",
+      "evm_address": "0x94adeb7567ebc69c7d7c412b30edab30cb4caa3d"
+    },
+    {
+      "bounty_contract": "bountee.testnet",
+      "protocol": "alice.testnet",
+      "name": "truster",
+      "path": "alice.testnet/truster",
+      "derived_public_key": "secp256k1:2E7oijo5oYm4wGnFqWMFUzi4b7w5pqWb3VgW8CNb8TyNq9vh3V2vDgoDaCZKaSBfSKUMAntaZQn2um3VPPfvnphm",
+      "evm_address": "0xff108d2876065fb35a8c0bedcc382373d1c3b94a"
+    },
+    {
+      "bounty_contract": "bounty.bountee.testnet",
+      "protocol": "protocol.testnet",
+      "name": "x",
+      "path": "protocol.testnet/x",
+      "derived_public_key": "secp256k1:5V4Fyu37uyeXWViBkURyc64Rvbb1BvLbjfdY3XUFTiWudAYU3jUmv1r78SA8UwuMtwU5RPcuX2QZyv3PNuX98aS2",
+      "evm_address": "0xb003667e6cf512f7a6d53a0951863a2575e9c881"
+    }
+  ]
+}

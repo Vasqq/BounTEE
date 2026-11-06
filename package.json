@@ -1,0 +1,19 @@
+{
+  "name": "bountee",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "bash scripts/test-all.sh",
+    "test:formats": "bash scripts/test-all.sh formats",
+    "test:j": "bash scripts/test-all.sh j",
+    "test:c": "bash scripts/test-all.sh c",
+    "test:t": "bash scripts/test-all.sh t",
+    "test:w": "bash scripts/test-all.sh w",
+    "test:e": "bash scripts/test-all.sh e",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

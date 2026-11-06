@@ -1,0 +1,23 @@
+[package]
+name = "bountee-formats"
+version = "0.1.0"
+description = "BounTEE's shared formats: the rules, a claim, a verdict, and the pause-role address derivation (D25)"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["pause-role"]
+# D25: derive a bounty's pause-role address the way NEAR Chain Signatures does.
+pause-role = ["dep:k256", "dep:sha3", "dep:bs58"]
+# Borsh and JSON-schema derives, for use in the bounty contract's state and ABI.
+near = ["dep:borsh", "dep:schemars"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+k256 = { version = "0.13", default-features = false, features = ["arithmetic"], optional = true }
+sha3 = { version = "0.10", default-features = false, optional = true }
+bs58 = { version = "0.5", default-features = false, features = ["alloc"], optional = true }
+borsh = { version = "1", features = ["derive", "unstable__schema"], optional = true }
+schemars = { version = "0.8", optional = true }

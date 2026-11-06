@@ -1,0 +1,51 @@
+[package]
+name = "bountee-judge"
+version = "0.1.0"
+description = "BounTEE's judge: one WebAssembly build, run by OutLayer in the enclave and locally by the command-line tool"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The WebAssembly target is the one line in `judge/wasm-target`; every build script,
+# test harness and CI job reads it from there.
+
+[[bin]]
+name = "bountee-judge"
+path = "src/main.rs"
+
+[dependencies]
+bountee-formats = { workspace = true, features = ["pause-role"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Pure-Rust EVM: the C-backed precompile crates don't build for WASI (spike #2).
+revm = { version = "43.0.3", default-features = false, features = ["std"] }
+# Merkle-Patricia proof verification (EIP-1186) against the header's state root.
+alloy-trie = { version = "0.9", default-features = false, features = ["std", "ethereum"] }
+alloy-rlp = { version = "0.3", default-features = false, features = ["std"] }
+# Opening the sealed exploit (#15): base64, then raw DEFLATE; both pure Rust.
+base64 = "0.23"
+miniz_oxide = "0.8"
+# The release (#22): the winning exploit re-encrypted to the Protocol's X25519 exploit key
+# (ECIES: X25519, HKDF-SHA256, ChaCha20-Poly1305); all pure Rust, no default features.
+x25519-dalek = { version = "2", default-features = false }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+hkdf = "0.12"
+sha2 = { version = "0.10", default-features = false }
+bs58 = { version = "0.5", default-features = false, features = ["alloc"] }
+
+# wasi:http, the job's only network (block confirmation, R2.8). Only the WebAssembly
+# build has it; the host build `cargo test` makes alongside the tests answers no RPC.
+[target.'cfg(target_os = "wasi")'.dependencies]
+wasi = "0.13.3"
+
+[features]
+# TEST ONLY, never in the attested build: read the proof chain's RPC addresses from the
+# `BOUNTEE_TEST_RPCS` environment variable instead of the pinned list, so seam J's tests
+# can point the judge at local test stand-ins. OutLayer runs the build whose hash the
+# bounty contract pins, built without features; see `src/confirm.rs`.
+test-stand-in-rpcs = []
+
+[dev-dependencies]
+proptest = "1"
+alloy-rlp = { version = "0.3", default-features = false, features = ["std"] }
+bountee-formats = { workspace = true, features = ["pause-role"] }

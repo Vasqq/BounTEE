@@ -1,0 +1,53 @@
+# Rust
+target/
+
+# Node
+node_modules/
+*.tsbuildinfo
+
+# Next.js
+/web/.next/
+/web/next-env.d.ts
+
+# Playwright
+/web/test-results/
+/web/playwright-report/
+
+# Foundry
+/demo/out/
+/demo/cache/
+/demo/dependencies/
+/demo/dvd/out/
+/demo/dvd/cache/
+/demo/dvd/dependencies/
+/demo/dvd/broadcast/
+
+# Secrets never live in the repo (shared testnet secrets: ~/.bountee-testnet/)
+.env
+.env.*
+
+.DS_Store
+/demo/broadcast/
+
+# Judge fixture chain (judge/tests/fixtures/make-fixtures.ts): build output only
+/judge/tests/fixtures/chain/out/
+/judge/tests/fixtures/chain/cache/
+/judge/tests/fixtures/chain/broadcast/
+/judge/tests/fixtures/scenarios/chain/out/
+/judge/tests/fixtures/scenarios/chain/cache/
+/judge/tests/fixtures/scenarios/chain/broadcast/
+
+# bountee test fixture project (cli/test/fixtures): build output only
+/cli/test/fixtures/*/out/
+/cli/test/fixtures/*/cache/
+/cli/test/fixtures/*/broadcast/
+# bountee test saves its judged inputs here by default
+.bountee/
+
+# Impeccable design skill: its local runtime state (the engine itself caches in ~/.impeccable)
+.impeccable/config.local.json
+.impeccable/history/
+.impeccable/live/
+.impeccable/provider-smoke/
+**/.impeccable/hook.cache.json
+**/.impeccable/hook.pending.json
