@@ -30,8 +30,8 @@ import { checkQuote, OUTLAYER_REGISTER, type AttestationRecord } from "./attesta
 import { codeHash, reproducibleBuild, resolveRev, revFromSourceMetadata, sha256File } from "./build.ts";
 import { defaultRpc, evmReceipt, explorerTx } from "./chains.ts";
 import { KEYSTORE_API, NEAR_EXPLORER_TX, TX_API, type Network } from "./endpoints.ts";
+import { history, listTxs, txSigners, type Outcomes } from "./explorer.ts";
 import { type Near } from "./near.ts";
-import { postJson } from "./proofs.ts";
 import { rerunPublished } from "./publish.ts";
 import { loadClaimTxs, type BountyView, type ClaimView } from "./status.ts";
 
@@ -75,11 +75,6 @@ export interface VerifyOptions {
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const bare = (hash: string | null | undefined) => (hash ?? "").toLowerCase().replace(/^0x/, "");
-
-/** Receipts' outcomes, as `eventsOf` reads them. */
-interface Outcomes {
-  receipts: { executor_id: string; predecessor_id?: string; logs: string[]; ok: boolean }[];
-}
 
 /** A NEAR transaction as NEAR RPC gives it: every receipt, with its outcome and its calls. */
 interface Tx extends Outcomes {
@@ -141,52 +136,6 @@ function eventsOf(tx: Outcomes): Event[] {
   return out;
 }
 
-const post = <T>(url: string, body: unknown) => postJson<T>(url, body, { backoffMs: 1000 });
-
-/** The contract's transactions, newest first, a page at a time, as the explorer API lists them. */
-async function* history(api: string, account: string): AsyncGenerator<string[]> {
-  let resume: string | undefined;
-  for (let page = 0; page < 50; page++) {
-    const r = await post<{ account_txs: { transaction_hash: string }[]; resume_token?: string }>(`${api}/v0/account`, {
-      account_id: account,
-      limit: 200,
-      ...(resume ? { resume_token: resume } : {}),
-    });
-    yield [...new Set(r.account_txs.map((t) => t.transaction_hash))];
-    if (!r.resume_token) return;
-    resume = r.resume_token;
-  }
-}
-
-/** A transaction as FastNEAR's explorer API lists it. */
-interface IndexedTx {
-  transaction?: { hash?: string; signer_id?: string };
-  receipts?: { execution_outcome?: { outcome?: { executor_id?: string; logs?: string[]; status?: object } } }[];
-}
-
-/** What the explorer says a transaction is: who signed it and, as a hint of where to look, what it logged. */
-interface Listed extends Outcomes {
-  hash: string;
-  signer_id?: string;
-}
-
-async function listTxs(api: string, hashes: string[]): Promise<Listed[]> {
-  const out: Listed[] = [];
-  for (let i = 0; i < hashes.length; i += 20) {
-    const r = await post<{ transactions?: (IndexedTx | null)[] }>(`${api}/v0/transactions`, { tx_hashes: hashes.slice(i, i + 20) });
-    for (const t of r.transactions ?? []) {
-      if (!t?.transaction?.hash) continue;
-      const receipts = (t.receipts ?? []).map((x) => ({
-        executor_id: x.execution_outcome?.outcome?.executor_id ?? "",
-        logs: x.execution_outcome?.outcome?.logs ?? [],
-        ok: !("Failure" in (x.execution_outcome?.outcome?.status ?? {})),
-      }));
-      out.push({ hash: t.transaction.hash, signer_id: t.transaction.signer_id, receipts });
-    }
-  }
-  return out;
-}
-
 const succeeded = (status: unknown) => typeof status === "object" && status !== null && ("SuccessValue" in status || "SuccessReceiptId" in status);
 
 /** The transaction as NEAR RPC has it (the archival RPC once an ordinary one has dropped it), or null. */
@@ -240,7 +189,7 @@ async function findTxs(o: VerifyOptions, claim: ClaimView, claimId: number, want
   };
   const known = [...new Set([...(o.txs ?? []), ...loadClaimTxs(o.contract, claimId)])];
   if (known.length > 0) {
-    const signers = new Map((await listTxs(api, known).catch(() => [])).map((t) => [t.hash, t.signer_id]));
+    const signers = await txSigners(api, known);
     for (const hash of known) {
       await read(hash, signers.get(hash));
       if (done()) return { judged, paid };

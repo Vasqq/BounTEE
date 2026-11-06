@@ -176,6 +176,7 @@ try {
       rpcs: flags.rpc === undefined ? undefined : parseRpcFlags(flags.rpc.split(",")),
       outlayerApi: flags["outlayer-api"],
       txs: flags.tx === undefined ? loadClaimTxs(contract, claimId) : flags.tx.split(","),
+      txApi: flags["tx-api"],
     };
     // Followed live (--watch), each stage goes to stderr as it's reached; stdout carries the
     // final status alone.

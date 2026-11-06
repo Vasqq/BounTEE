@@ -272,6 +272,7 @@ async function seeThrough(
     near: c.near,
     rpcs: chainRpcs,
     outlayerApi: flag(args, "outlayer-api"),
+    txApi: flag(args, "tx-api"),
     txs,
   };
   let failed = false;
