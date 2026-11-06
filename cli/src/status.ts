@@ -180,22 +180,25 @@ function isVerified(verifications: { verified_pauses?: string[] }[], hash: strin
 }
 
 /**
- * A `--tx` transaction's outcome, from the archival RPC once an ordinary one has dropped it: a
- * claim is read long after it ran (publication waits out the disclosure delay), and an ordinary
- * RPC answers a dropped transaction with a timeout, never "unknown".
+ * A `--tx` transaction's status, or null. A claim is read long after it ran (publication waits
+ * out the disclosure delay), when an ordinary RPC has dropped its transactions, so those are read
+ * from the archival RPC. An ordinary RPC asked to wait for a dropped transaction times out after
+ * 30 s instead of saying it's unknown; asked not to wait, it says so at once. A transaction it
+ * knows may still be running, so that one is waited for there. A miss rejects rather than caching
+ * null, so a watch asks again on its next poll.
  */
-const txOutcome = (o: StatusOptions, cache: Cache, hash: string, sender: string) =>
+const nearTx = (o: StatusOptions, cache: Cache, hash: string, sender: string) =>
   once(cache, `tx:${hash}`, async () => {
-    for (const rpc of o.near.withArchive()) {
-      const status = await rpc.txStatus(hash, sender, 30).catch(() => null);
-      if (status) return status;
-    }
-    throw new Error(`no RPC has transaction ${hash}`);
+    const [ordinary, archive] = [o.near, o.near.withArchive()[1]];
+    const unknown = await ordinary
+      .rpc("EXPERIMENTAL_tx_status", { tx_hash: hash, sender_account_id: sender, wait_until: "NONE" })
+      .then(() => false, (e: Error) => /UNKNOWN_TRANSACTION/.test(e.message));
+    return unknown && archive ? archive.txStatus(hash, sender, 0) : ordinary.txStatus(hash, sender, 30);
   }).catch(() => null);
 
 async function findPayout(o: StatusOptions, cache: Cache, claim: ClaimView) {
   for (const hash of o.txs ?? []) {
-    const status = await txOutcome(o, cache, hash, claim.whitehat);
+    const status = await nearTx(o, cache, hash, claim.whitehat);
     if (!status) continue;
     const paid = events(status).some((e) => e.event === "bounty_paid" && e.data?.claim_id === o.claimId);
     if (!paid) continue;
@@ -215,7 +218,7 @@ async function findPayout(o: StatusOptions, cache: Cache, claim: ClaimView) {
 /** The claim's own transaction: the one whose `claim_submitted` event names it. */
 async function claimTx(o: StatusOptions, cache: Cache, whitehat: string): Promise<string | null> {
   for (const hash of o.txs ?? []) {
-    const status = await txOutcome(o, cache, hash, whitehat);
+    const status = await nearTx(o, cache, hash, whitehat);
     if (status && events(status).some((e) => e.event === "claim_submitted" && e.data?.claim_id === o.claimId)) return hash;
   }
   return null;
