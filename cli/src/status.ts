@@ -179,9 +179,23 @@ function isVerified(verifications: { verified_pauses?: string[] }[], hash: strin
   return verifications.some((c) => (c.verified_pauses ?? []).some((h) => h.toLowerCase() === hash.toLowerCase()));
 }
 
+/**
+ * A `--tx` transaction's outcome, from the archival RPC once an ordinary one has dropped it: a
+ * claim is read long after it ran (publication waits out the disclosure delay), and an ordinary
+ * RPC answers a dropped transaction with a timeout, never "unknown".
+ */
+const txOutcome = (o: StatusOptions, cache: Cache, hash: string, sender: string) =>
+  once(cache, `tx:${hash}`, async () => {
+    for (const rpc of o.near.withArchive()) {
+      const status = await rpc.txStatus(hash, sender, 30).catch(() => null);
+      if (status) return status;
+    }
+    throw new Error(`no RPC has transaction ${hash}`);
+  }).catch(() => null);
+
 async function findPayout(o: StatusOptions, cache: Cache, claim: ClaimView) {
   for (const hash of o.txs ?? []) {
-    const status = await once(cache, `tx:${hash}`, () => o.near.txStatus(hash, claim.whitehat, 30)).catch(() => null);
+    const status = await txOutcome(o, cache, hash, claim.whitehat);
     if (!status) continue;
     const paid = events(status).some((e) => e.event === "bounty_paid" && e.data?.claim_id === o.claimId);
     if (!paid) continue;
@@ -201,7 +215,7 @@ async function findPayout(o: StatusOptions, cache: Cache, claim: ClaimView) {
 /** The claim's own transaction: the one whose `claim_submitted` event names it. */
 async function claimTx(o: StatusOptions, cache: Cache, whitehat: string): Promise<string | null> {
   for (const hash of o.txs ?? []) {
-    const status = await once(cache, `tx:${hash}`, () => o.near.txStatus(hash, whitehat, 30)).catch(() => null);
+    const status = await txOutcome(o, cache, hash, whitehat);
     if (status && events(status).some((e) => e.event === "claim_submitted" && e.data?.claim_id === o.claimId)) return hash;
   }
   return null;

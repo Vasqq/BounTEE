@@ -15,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { defaultRpc } from "../src/chains.ts";
+import { ARCHIVAL_RPC } from "../src/endpoints.ts";
 import { Near } from "../src/near.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
@@ -52,7 +53,8 @@ describe("status on the Day-3 deployment", () => {
     // The payout: the transaction and the receipt where USDC moved to the Whitehat. Read back
     // independently from NEAR RPC: that receipt logged a NEP-141 transfer of the bounty to them.
     expect(receipt.payout.tx_hash).toBe(PAYS_TX);
-    const near = new Near("testnet");
+    // The archival RPC: an ordinary one drops a transaction this old.
+    const near = new Near("testnet", ARCHIVAL_RPC.testnet);
     const tx = await near.txStatus(PAYS_TX, WHITEHAT);
     const payoutReceipt = tx.receipts_outcome.find((o: any) => o.id === receipt.payout.receipt_id);
     const transfer = payoutReceipt.outcome.logs.map((l: string) => l.startsWith("EVENT_JSON:") && JSON.parse(l.slice(11))).find((e: any) => e?.event === "ft_transfer");
