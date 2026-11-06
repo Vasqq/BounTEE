@@ -5,6 +5,11 @@ import {Script, console} from "forge-std/Script.sol";
 import {DemoVault} from "../src/DemoVault.sol";
 import {MockUSDC} from "../src/MockUSDC.sol";
 
+/// The ERC-20 call the honest user makes on the vault's USDC, Circle's or the mock.
+interface IERC20 {
+    function approve(address spender, uint256 amount) external returns (bool);
+}
+
 /// Uniswap V2's router (UniswapV2Router02), the two functions the honest user needs.
 interface IUniswapV2Router {
     function WETH() external view returns (address);
@@ -36,13 +41,18 @@ contract HonestUser is Script {
     /// Uniswap V2's router on Base (8453) and Arbitrum One (42161).
     IUniswapV2Router constant UNISWAP_V2 = IUniswapV2Router(0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24);
 
+    /// Base or Arbitrum One: chains where the vault holds Circle's USDC, which has no public mint.
+    function isMainnet() internal view returns (bool) {
+        return block.chainid == 8453 || block.chainid == 42161;
+    }
+
     function run() external {
         DemoVault vault = DemoVault(vm.envAddress("VAULT"));
         address usdc = address(vault.token());
         uint256 amount = vm.envOr("AMOUNT", uint256(500e6));
 
         vm.startBroadcast();
-        if (block.chainid == 8453 || block.chainid == 42161) {
+        if (isMainnet()) {
             address[] memory path = new address[](2);
             path[0] = UNISWAP_V2.WETH();
             path[1] = usdc;
@@ -54,7 +64,7 @@ contract HonestUser is Script {
         } else {
             MockUSDC(usdc).mint(msg.sender, amount);
         }
-        MockUSDC(usdc).approve(address(vault), amount);
+        IERC20(usdc).approve(address(vault), amount);
         vault.deposit(amount);
         vault.withdraw(amount); // never more than deposited
         vm.stopBroadcast();
