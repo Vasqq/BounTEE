@@ -16,36 +16,48 @@ const X = { near: 'https://nearblocks.io/', base: 'https://basescan.org/', arb: 
 // `live`, which `update` fills once the app's server has read them. Until then, and for
 // anything not on chain yet, a value is an en dash and a transaction is "tx pending".
 const DASH = '–';
-const live = { name: null, amount: DASH, min: DASH, delay: null, pauses: null, chains: null, steps: [], paidOnce: null, verdict: null, cheat: false, verified: null, published: false, contract: null };
+const live = { protocol: null, name: null, amount: DASH, min: DASH, delay: null, pauses: null, chains: null, proofChain: null, steps: [], checked: false, claimKey: null, verdict: null, cheat: false, paidOnce: false, landed: null, verified: null, published: false };
 const BOUNTY = {
   actor: 'agent', who: 'Whitehat',
-  get name() { return live.name || DASH; },
-  sealed: 'The Whitehat\'s AI agent, holding only a claim key, sealed the exploit it found so only the bounty contract\'s enclave job can read it, and filed the claim. The key can claim and nothing else.'
+  get name() { return live.name || DASH; }
 };
 const STEPS = ['Posted', 'Sealed', 'Checked', 'Signed', 'Paid', 'Landed', 'Verified', 'Published'];
 const days = n => n == null ? DASH + ' days' : `${n === 1 ? 'one-day' : n + '-day'}`;
 const chainList = () => live.chains ? (live.chains.length > 1 ? live.chains.slice(0, -1).join(', ') + ' and ' + live.chains.at(-1) : live.chains[0]) : DASH;
-function stepsFor(b) {
-  const t = (c, href) => ({ c, href });
+const all = pair => !!pair && pair[1] > 0 && pair[0] === pair[1];
+// Each sentence states only what the chains show: a fact not read (or not true) of this
+// bounty is left out, not asserted.
+function stepsFor() {
+  const t = (chain, href) => ({ chain, href });
   const ex = live.steps;
   const tx = (i, fallback) => ex[i] && ex[i].length ? ex[i] : fallback;
   return [
-    { d: `The Protocol granted BounTEE the pause role on its vault on ${chainList()}, topped up pause gas, and locked ${live.amount} behind rules nobody can change.`, tx: tx(0, [t('NEAR', X.near)]) },
-    { d: b.sealed, tx: tx(1, [t('NEAR', X.near)]) },
-    { d: `The Enclave replayed the exploit with revm against recent ${live.proofChain || DASH} state. It took more than the ${live.min} minimum theft. An earlier cheat claim, passed off as theft, scored zero and nothing moved.`, chips: [...(live.verdict === 'PAYS' ? [['ok', 'Verdict PAYS']] : []), ...(live.cheat ? [['mute', 'Cheat claim: ZERO']] : [])], tx: tx(2, [t('NEAR', X.near)]) },
+    { d: live.checked
+        ? `The Protocol granted BounTEE the pause role on its vault on ${chainList()}, topped up pause gas, and locked ${live.amount} behind rules nobody can change.`
+        : `The Protocol locks ${live.amount} behind rules nobody can change, once the posting check confirms the pause role and pause gas on ${chainList()}.`,
+      tx: tx(0, [t('NEAR', X.near)]) },
+    { d: live.claimKey
+        ? 'The Whitehat\'s AI agent, holding only a claim key, sealed the exploit it found so only the bounty contract\'s enclave job can read it, and filed the claim. The key can claim and nothing else.'
+        : 'The Whitehat seals the exploit so only the bounty contract\'s enclave job can read it, and files the claim.',
+      tx: tx(1, [t('NEAR', X.near)]) },
+    { d: `The Enclave replayed the exploit with revm against recent ${live.proofChain || DASH} state.` +
+        (live.verdict === 'PAYS' ? ` It took more than the ${live.min} minimum theft.` : '') +
+        (live.cheat ? ' An earlier cheat claim, passed off as theft, scored zero and nothing moved.' : ''),
+      chips: [...(live.verdict === 'PAYS' ? [['ok', 'Verdict PAYS']] : []), ...(live.cheat ? [['mute', 'Cheat claim: ZERO']] : [])], tx: tx(2, [t('NEAR', X.near)]) },
     { d: 'NEAR\'s MPC network signed a pause for every covered contract. Only the bounty contract can ask it to, and only after a PAYS verdict.', tx: tx(3, [t('NEAR MPC', X.near)]) },
-    { d: `${live.amount} went to the Whitehat's account, once. A second claim was refused: <q>this bounty is closed</q>.`, chips: live.paidOnce ? [['ok', live.amount]] : [], tx: tx(4, [t('NEAR', X.near)]) },
-    { d: `The signed pauses reached ${chainList()}. Anyone could send them; nobody could change them. Both covered vaults now read paused.`, tx: tx(5, [t('Base', X.base), t('Arbitrum One', X.arb)]) },
-    { d: 'NEAR\'s MPC network confirmed each pause in a block safe from reorganisation, and the bounty contract recorded both as verified pauses.', chips: live.verified ? [[live.verified[0] === live.verified[1] ? 'ok' : 'mute', `${live.verified[0]} of ${live.verified[1]} verified`]] : [], tx: tx(6, [t('NEAR', X.near)]) },
+    { d: live.paidOnce ? `${live.amount} went to the Whitehat's account, once.` : `${live.amount} goes to the Whitehat's account, once.`, chips: live.paidOnce ? [['ok', live.amount]] : [], tx: tx(4, [t('NEAR', X.near)]) },
+    { d: `The signed pauses reach ${chainList()}. Anyone can send them; nobody can change them.` + (all(live.landed) ? ' Every covered vault now reads paused.' : ''), tx: tx(5, [t('Base', X.base), t('Arbitrum One', X.arb)]) },
+    { d: 'NEAR\'s MPC network confirms each pause in a block safe from reorganisation, and the bounty contract records it as a verified pause.', chips: live.verified ? [[all(live.verified) ? 'ok' : 'mute', `${live.verified[0]} of ${live.verified[1]} verified`]] : [], tx: tx(6, [t('NEAR', X.near)]) },
     { d: `After the ${days(live.delay)} disclosure delay the winning exploit is published, so anyone can re-run it. Until then only the Protocol can open it.`, tx: tx(7, []), pending: live.published ? null : `pending · after ${live.delay == null ? DASH : live.delay === 1 ? '1 day' : live.delay + ' days'}` }
   ];
 }
-const cmdFor = b => `bountee verify ${live.name ? live.protocol + '/' + live.name : '<protocol>/' + b.name} --network mainnet`;
+const cmdFor = () => `bountee verify ${live.name ? live.protocol + '/' + live.name : '<protocol>/<name>'} --network mainnet`;
 const ext = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4 2h6v6M10 2 3 9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
 const short = h => h.length > 12 ? `${h.slice(0, 6)}…${h.slice(-4)}` : h;
 const copyIco = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M8.5 1.5h-6a1 1 0 0 0-1 1v6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
 const checkIco = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="m2.5 6.5 2.3 2.3L9.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+// Everything put into HTML from the chains is escaped, attributes included.
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 /* =====================================================================
    THE ISOMETRIC WORLD. One projection, a handful of primitives, used by
@@ -585,33 +597,37 @@ function buildClose() {
    PAGE
    ===================================================================== */
 const num = n => `${n + 1}.`;
-const chipHTML = s => (s.chips || []).map(([c, l]) => `<span class="chip ${c}">${l}</span>`).join('') +
+const chipHTML = s => (s.chips || []).map(([c, l]) => `<span class="chip ${c}">${esc(l)}</span>`).join('') +
   s.tx.map(x => x.hash
-    ? `<span class="tx"><span class="chip">${x.c}</span><span class="chip link"><a href="${x.href}" target="_blank" rel="noopener" title="${x.hash}">${short(x.hash)}${ext}</a><button type="button" class="cp" aria-label="Copy transaction hash" data-hash="${x.hash}">${copyIco}</button></span></span>`
-    : `<span class="chip">${x.c}</span><a class="chip" href="${x.href}" target="_blank" rel="noopener">tx pending${ext}</a>`).join('') +
+    ? `<span class="tx"><span class="chip">${esc(x.chain)}</span><span class="chip link"><a href="${esc(x.href)}" target="_blank" rel="noopener" title="${esc(x.hash)}">${esc(short(x.hash))}${ext}</a><button type="button" class="cp" aria-label="Copy transaction hash" data-hash="${esc(x.hash)}">${copyIco}</button></span></span>`
+    : `<span class="chip">${esc(x.chain)}</span><a class="chip" href="${esc(x.href)}" target="_blank" rel="noopener">${esc(x.label || 'tx pending')}${ext}</a>`).join('') +
   (s.pending ? `<span class="chip">NEAR</span><span class="chip mute">${s.pending}</span>` : '');
 
 // the story
 document.getElementById('storyName').textContent = BOUNTY.name;
 const panelsEl = document.getElementById('panels');
-panelsEl.innerHTML = stepsFor(BOUNTY).map((s, i) => `<li class="panel${i ? '' : ' on'}" data-step="${i}"><h3><span class="n">${num(i)}</span>${STEPS[i]}</h3><p>${s.d}</p><div class="meta">${chipHTML(s)}</div></li>`).join('');
+panelsEl.innerHTML = stepsFor().map((s, i) => `<li class="panel${i ? '' : ' on'}" data-step="${i}"><h3><span class="n">${num(i)}</span>${STEPS[i]}</h3><p>${esc(s.d)}</p><div class="meta">${chipHTML(s)}</div></li>`).join('');
 // Live data swaps into the panels in place: their text and chips, never their order or state.
 function renderStory() {
   document.getElementById('storyName').textContent = BOUNTY.name;
-  stepsFor(BOUNTY).forEach((s, i) => { const li = panelsEl.children[i]; li.querySelector('p').innerHTML = s.d; li.querySelector('.meta').innerHTML = chipHTML(s); });
-  document.getElementById('cmd').innerHTML = `<span class="p" aria-hidden="true">$</span>${esc(cmdFor(BOUNTY))}`;
-  document.getElementById('termNote').textContent = `reading ${BOUNTY.name} from ${live.chains ? 'NEAR, ' + chainList() : 'NEAR, Base and Arbitrum One'}`;
+  stepsFor().forEach((s, i) => { const li = panelsEl.children[i]; li.querySelector('p').textContent = s.d; li.querySelector('.meta').innerHTML = chipHTML(s); });
+  document.getElementById('cmd').innerHTML = `<span class="p" aria-hidden="true">$</span>${esc(cmdFor())}`;
+  document.getElementById('termNote').textContent = `reading ${BOUNTY.name} from NEAR, ${chainList()}`;
   story.draw(Math.max(0, active), reduce ? 1 : 0.999);
 }
+// Copying a hash is announced, as the app's own tx chips do.
+const copied = Object.assign(document.createElement('span'), { className: 'sr-only' });
+copied.setAttribute('aria-live', 'polite');
+panelsEl.after(copied);
 panelsEl.addEventListener('click', async e => {
   const b = e.target.closest('.cp'); if (!b) return;
-  try { await navigator.clipboard.writeText(b.dataset.hash); b.innerHTML = checkIco; setTimeout(() => b.innerHTML = copyIco, 1600); } catch {}
+  try { await navigator.clipboard.writeText(b.dataset.hash); b.innerHTML = checkIco; copied.textContent = 'Copied'; setTimeout(() => { b.innerHTML = copyIco; copied.textContent = ''; }, 1600); } catch {}
 });
 const dock = document.getElementById('dock');
 dock.innerHTML = STEPS.map((n, i) => `<button type="button" data-go="${i}"><span class="k">${num(i)}</span><span class="lbl">${n}</span></button>`).join('');
 
 // verify
-document.getElementById('cmd').innerHTML = `<span class="p" aria-hidden="true">$</span>${esc(cmdFor(BOUNTY))}`;
+document.getElementById('cmd').innerHTML = `<span class="p" aria-hidden="true">$</span>${esc(cmdFor())}`;
 document.getElementById('termNote').textContent = `reading ${BOUNTY.name} from NEAR, Base and Arbitrum One`;
 
 // pictures

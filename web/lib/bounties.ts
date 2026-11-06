@@ -153,8 +153,19 @@ export interface BountyPage {
   chains: ChainPause[];
 }
 
-/** How many of this bounty's claims have a verdict (D22). Claims still being judged aren't counted, or shown (R7.7). */
-async function claimsJudged(c: Config, id: BountyId): Promise<number> {
+/** A claim as the contract keeps it, the parts the pages read. */
+export interface ClaimRecord {
+  id: number;
+  whitehat: string;
+  state: "storing" | "store_failed" | "judging" | "no_verdict" | "judged";
+  verdict: { outcome: string; reason: string } | null;
+}
+
+/**
+ * This bounty's claims. The claims map has no index; its keys are the `Claims` prefix (1) then
+ * the claim ID (u64 little-endian), and each record's Borsh starts with its bounty ID.
+ */
+export async function claimsOf(c: Config, id: BountyId): Promise<ClaimRecord[]> {
   const entries = await viewState(c, 1);
   const mine = entries.filter(({ key, value }) => {
     if (key.length !== 9) return false;
@@ -162,8 +173,18 @@ async function claimsJudged(c: Config, id: BountyId): Promise<number> {
     const [name] = borshString(value, at);
     return protocol === id.protocol && name === id.name;
   });
-  const states = await Promise.all(mine.map(({ key }) => view<{ state: string } | null>(c, c.contract, "claim", { claim_id: Number(key.readBigUInt64LE(1)) })));
-  return states.filter((s) => s?.state === "judged").length;
+  return Promise.all(
+    mine.map(async ({ key }) => {
+      const claimId = Number(key.readBigUInt64LE(1));
+      const r = await view<Omit<ClaimRecord, "id">>(c, c.contract, "claim", { claim_id: claimId });
+      return { id: claimId, whitehat: r.whitehat, state: r.state, verdict: r.verdict };
+    }),
+  );
+}
+
+/** How many of this bounty's claims have a verdict (D22). Claims still being judged aren't counted, or shown (R7.7). */
+async function claimsJudged(c: Config, id: BountyId): Promise<number> {
+  return (await claimsOf(c, id)).filter((x) => x.state === "judged").length;
 }
 
 const nearTx = (c: Config, hash: string): TxLink => ({ chain: "NEAR", hash, href: `${c.nearExplorerTx}${hash}` });

@@ -104,3 +104,16 @@ test("R15.6: a bounty the contract doesn't hold says so @phone", async ({ page }
   await open(page, { protocol: "nobody.near", name: "nothing" });
   await expect(page.getByText("The bounty contract holds no bounty nobody.near/nothing.")).toBeVisible();
 });
+
+test("D8: the warning shows for a signed pause that hasn't landed, and goes once it lands", async ({ page }) => {
+  const w = emptyWorld();
+  post(w, ID);
+  win(w, ID, 0, { landed: [BASE] });
+  w.evm[ARBITRUM]!.balances[PAUSE_ROLE] = "1";
+  w.evm[BASE]!.balances[PAUSE_ROLE] = "1";
+  await setWorld(page, w);
+  await open(page);
+  await expect(chainRow(page, "Arbitrum One").getByRole("note")).toContainText("Low pause gas");
+  // Base's pause has landed: its gas no longer matters.
+  await expect(chainRow(page, "Base").getByText("Low pause gas")).toHaveCount(0);
+});

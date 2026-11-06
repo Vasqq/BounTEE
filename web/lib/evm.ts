@@ -1,10 +1,7 @@
-// An EVM chain's JSON-RPC: a pause's receipt, and the pause-role address's gas.
-async function call<T>(url: string, method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), cache: "no-store" });
-  const body = (await res.json()) as { result?: T; error?: { message?: string } };
-  if (body.error) throw new Error(body.error.message ?? JSON.stringify(body.error));
-  return body.result as T;
-}
+// An EVM chain's JSON-RPC: a pause's receipt (the command-line tool's reader), and the
+// pause-role address's gas.
+import { evmReceipt } from "@bountee/cli/src/chains.ts";
+import { rpc } from "@bountee/cli/src/proofs.ts";
 
 export interface Receipt {
   ok: boolean;
@@ -12,12 +9,12 @@ export interface Receipt {
   to: string | null;
 }
 
-/** The transaction's receipt, or null while it hasn't landed. */
+/** The transaction's receipt, or null while it hasn't landed (or the RPC didn't answer). */
 export async function receipt(url: string, hash: string): Promise<Receipt | null> {
-  const r = await call<{ status: string; blockNumber: string; to?: string | null } | null>(url, "eth_getTransactionReceipt", [hash]);
-  return r ? { ok: r.status === "0x1", block: Number(r.blockNumber), to: r.to ?? null } : null;
+  const r = await evmReceipt(url, hash);
+  return r ? { ok: r.status === "success", block: r.block, to: r.to } : null;
 }
 
 export async function balance(url: string, address: string): Promise<bigint> {
-  return BigInt(await call<string>(url, "eth_getBalance", [address, "latest"]));
+  return BigInt(await rpc<string>(url, "eth_getBalance", [address, "latest"]));
 }

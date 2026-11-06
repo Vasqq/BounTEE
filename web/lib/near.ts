@@ -79,3 +79,28 @@ export function borshString(b: Buffer, at: number): [string, number] {
   const n = b.readUInt32LE(at);
   return [b.subarray(at + 4, at + 4 + n).toString("utf8"), at + 4 + n];
 }
+
+/**
+ * Whether a transaction was signed with a function-call key limited to `contract` (a claim
+ * key, R14.2), read as the key stood in the block the transaction ran in. Null if NEAR RPC
+ * can't say.
+ */
+export async function signedWithFunctionCallKey(c: Config, hash: string, signer: string, contract: string): Promise<boolean | null> {
+  for (const url of [c.nearRpc, c.nearArchivalRpc]) {
+    const tx = await rpc<{ transaction: { hash: string; public_key: string }; transaction_outcome: { block_hash: string } }>(url, "EXPERIMENTAL_tx_status", {
+      tx_hash: hash,
+      sender_account_id: signer,
+      wait_until: "NONE",
+    }).catch(() => null);
+    if (tx?.transaction?.hash !== hash) continue;
+    const key = await rpc<{ permission: "FullAccess" | { FunctionCall: { receiver_id: string } } }>(url, "query", {
+      request_type: "view_access_key",
+      block_id: tx.transaction_outcome.block_hash,
+      account_id: signer,
+      public_key: tx.transaction.public_key,
+    }).catch(() => null);
+    if (!key) continue;
+    return key.permission !== "FullAccess" && key.permission.FunctionCall.receiver_id === contract;
+  }
+  return null;
+}

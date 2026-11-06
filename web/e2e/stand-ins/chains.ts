@@ -101,6 +101,10 @@ function nearRpc(w: World, method: string, params: any): { result?: unknown; err
       const prefix = Buffer.from(params.prefix_base64 ?? "", "base64")[0] ?? 0;
       return { result: { values: state(w, prefix), block_height: 1, block_hash: "stand-in" } };
     }
+    if (params.request_type === "view_access_key") {
+      const claimKey = w.claimKeys?.[`${params.account_id}/${params.public_key}`];
+      return { result: { nonce: 1, permission: claimKey ? { FunctionCall: { allowance: null, receiver_id: claimKey, method_names: ["submit_claim", "retry_claim"] } } : "FullAccess" } };
+    }
     if (params.request_type === "view_account") {
       const a = w.accounts[params.account_id];
       if (!a) return { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT" } } };
@@ -113,7 +117,8 @@ function nearRpc(w: World, method: string, params: any): { result?: unknown; err
     return {
       result: {
         status: { SuccessValue: "" },
-        transaction: { hash: tx.hash, signer_id: tx.signer, receiver_id: w.contract, actions: [] },
+        transaction: { hash: tx.hash, signer_id: tx.signer, public_key: tx.publicKey ?? `ed25519:full-${tx.signer}`, receiver_id: w.contract, actions: [] },
+        transaction_outcome: { id: tx.hash, block_hash: `block-of-${tx.hash}`, outcome: { executor_id: tx.signer, logs: [], status: { SuccessReceiptId: "" } } },
         receipts: tx.receipts.map((r, i) => ({ receipt_id: `${tx.hash}-${i}`, predecessor_id: r.predecessor ?? tx.signer, receipt: { Action: { actions: [] } } })),
         receipts_outcome: tx.receipts.map((r, i) => ({
           id: `${tx.hash}-${i}`,

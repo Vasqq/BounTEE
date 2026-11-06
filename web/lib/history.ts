@@ -2,6 +2,7 @@
 // step (NEP-297 `EVENT_JSON:`); FastNEAR's explorer API says which of the contract's
 // transactions logged which, and every one the page links is read again from NEAR RPC, so
 // the explorer is trusted for nothing (as the command-line tool's verify does).
+import { history as explorerHistory, listTxs } from "@bountee/cli/src/explorer.ts";
 import type { Config } from "./config.ts";
 import { txReceipts } from "./near.ts";
 
@@ -10,12 +11,6 @@ export interface ContractEvent {
   data: Record<string, unknown>;
   tx: string;
   signer: string;
-}
-
-async function post<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), cache: "no-store" });
-  if (!res.ok) throw new Error(`${url} answered ${res.status}`);
-  return (await res.json()) as T;
 }
 
 function eventsIn(logs: string[]): { event: string; data: Record<string, unknown> }[] {
@@ -33,32 +28,13 @@ function eventsIn(logs: string[]): { event: string; data: Record<string, unknown
 
 /** Every event the bounty contract logged, oldest first, as the explorer indexes them (unconfirmed). */
 async function indexed(c: Config): Promise<ContractEvent[]> {
-  const hashes: string[] = [];
-  let resume: string | undefined;
-  for (let page = 0; page < 20; page++) {
-    const r = await post<{ account_txs: { transaction_hash: string }[]; resume_token?: string }>(`${c.txApi}/v0/account`, {
-      account_id: c.contract,
-      limit: 200,
-      ...(resume ? { resume_token: resume } : {}),
-    });
-    for (const t of r.account_txs) if (!hashes.includes(t.transaction_hash)) hashes.push(t.transaction_hash);
-    if (!r.resume_token) break;
-    resume = r.resume_token;
-  }
   const out: ContractEvent[] = [];
-  for (let i = 0; i < hashes.length; i += 20) {
-    const r = await post<{ transactions?: ({ transaction?: { hash?: string; signer_id?: string }; receipts?: { execution_outcome?: { outcome?: { executor_id?: string; logs?: string[]; status?: object } } }[] } | null)[] }>(
-      `${c.txApi}/v0/transactions`,
-      { tx_hashes: hashes.slice(i, i + 20) },
-    );
-    for (const t of r.transactions ?? []) {
-      const hash = t?.transaction?.hash;
-      const signer = t?.transaction?.signer_id;
-      if (!hash || !signer) continue;
-      for (const rc of t?.receipts ?? []) {
-        const o = rc.execution_outcome?.outcome;
-        if (o?.executor_id !== c.contract || "Failure" in (o.status ?? {})) continue;
-        for (const e of eventsIn(o.logs ?? [])) out.push({ ...e, tx: hash, signer });
+  for await (const page of explorerHistory(c.txApi, c.contract)) {
+    for (const t of await listTxs(c.txApi, page)) {
+      if (!t.signer_id) continue;
+      for (const r of t.receipts) {
+        if (r.executor_id !== c.contract || !r.ok) continue;
+        for (const e of eventsIn(r.logs)) out.push({ ...e, tx: t.hash, signer: t.signer_id });
       }
     }
   }

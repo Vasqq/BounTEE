@@ -16,3 +16,6 @@ export const isoDate = (ns: string) => new Date(Number(BigInt(ns) / 1_000_000n))
 export const shortHash = (hash: string) => (hash.length > 12 ? `${hash.slice(0, 6)}…${hash.slice(-4)}` : hash);
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** A list as the copy writes it: "NEAR, Base and Arbitrum One". */
+export const listOf = (items: string[]) => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);

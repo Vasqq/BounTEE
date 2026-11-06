@@ -4,6 +4,7 @@
 // dock and hero motion are the prototype's own script (runtime.js).
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { Demo } from "@/lib/demo.ts";
+import { listOf } from "@/lib/format.ts";
 import { useVerify, VerifyRun } from "../Verify.tsx";
 import { startLanding } from "./runtime.js";
 
@@ -85,10 +86,10 @@ export function Landing() {
           <div className="wrap story-head">
             <h2 id="storyH" className="rise">The demo, one transaction at a time.</h2>
             <div>
-              <p className="lead rise" style={delay("80ms")}>A Whitehat claimed it: an independent AI agent, given only the instructions file and a claim key, found the bug and filed the claim. The Whitehat was paid in seconds, by rule: no triage, no downgrade, nobody to dispute it.</p>
+              <p className="lead rise" style={delay("80ms")}>{demo?.story.claimKey ? "A Whitehat claimed it: an independent AI agent, given only the instructions file and a claim key, found the bug and filed the claim. The Whitehat was paid in seconds, by rule: no triage, no downgrade, nobody to dispute it." : "A Whitehat's claim is paid by rule: no triage, no downgrade, nobody to dispute it. Each step links its mainnet transaction once it happens."}</p>
               <dl className="proof rise" style={delay("140ms")} aria-label="What ran on mainnet">
-                <dt>Ran on</dt><dd>{demo?.chains ? `NEAR, ${demo.chains.join(", ")} mainnet` : DASH}</dd>
-                <dt>Claimed by</dt><dd>a Whitehat's AI agent, with a claim key</dd>
+                <dt>Ran on</dt><dd>{demo?.chains ? `${listOf(["NEAR", ...demo.chains])} mainnet` : DASH}</dd>
+                <dt>Claimed by</dt><dd>{demo?.story.claimKey ? "a Whitehat's AI agent, with a claim key" : DASH}</dd>
                 <dt>Paid</dt><dd>{demo?.paidOnce ? <><span className="ok">{demo.amount}</span>, once</> : DASH}</dd>
                 <dt>Every step</dt><dd>{demo?.contract ? <a href={demo.contractHref} target="_blank" rel="noopener">{demo.contract} on nearblocks</a> : <a href="https://nearblocks.io/" target="_blank" rel="noopener">tx pending</a>}</dd>
               </dl>

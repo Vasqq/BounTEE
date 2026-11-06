@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { DEMO, emptyWorld, finishedDemo, post, setWorld } from "./stand-ins/world.ts";
+import { ARBITRUM, BASE, DEMO, emptyWorld, finishedDemo, judge, post, setWorld, win } from "./stand-ins/world.ts";
 
 const ORDER = ["Posted", "Sealed", "Checked", "Signed", "Paid", "Landed", "Verified", "Published"];
 const panel = (page: Page, i: number) => page.locator("#panels > li").nth(i);
@@ -79,7 +79,7 @@ test("R15.6: the story's amounts and delay are the bounty's on chain", async ({ 
   await expect(page.getByRole("definition").filter({ hasText: "25 USDC" })).toContainText("25 USDC, once");
 });
 
-test("ADR-0017: no testnet string or explorer link ships in the mainnet build", async ({ page }) => {
+test("D4, ADR-0017: no testnet string or explorer link ships in the mainnet build", async ({ page }) => {
   await setWorld(page, finishedDemo());
   await page.goto("/");
   await expect(panel(page, 0).locator("a").first()).toHaveAttribute("href", /nearblocks/);
@@ -102,4 +102,35 @@ test("D6: the landing page's Verify lists the demo bounty's checks, read live", 
   await expect(run.getByRole("listitem").filter({ hasText: "Payout on NEAR" })).toContainText("PASS");
   await expect(run.getByRole("listitem").filter({ hasText: "Pauses verified on NEAR" })).toContainText("PASS");
   await expect(page.locator("#cmd")).toHaveText(`$bountee verify ${DEMO.protocol}/${DEMO.name} --network mainnet`);
+});
+
+test("D4, R15.6: the story says an AI agent won with a claim key only when NEAR shows the claim was filed with one", async ({ page }) => {
+  // Won, but the winning claim was signed with the Whitehat's full-access key.
+  const w = emptyWorld();
+  post(w, DEMO);
+  win(w, DEMO, 1, { landed: [BASE, ARBITRUM], verified: [BASE, ARBITRUM] });
+  await setWorld(page, w);
+  await page.goto("/");
+  await expect(panel(page, 4)).toContainText("went to the Whitehat's account, once.");
+  await expect(page.locator("#panels")).not.toContainText("claim key");
+  await expect(page.getByRole("definition").filter({ hasText: "claim key" })).toHaveCount(0);
+
+  // The same win, filed with a claim key.
+  await setWorld(page, finishedDemo());
+  await page.reload();
+  await expect(panel(page, 1)).toContainText("holding only a claim key");
+  await expect(page.getByText("a Whitehat's AI agent, with a claim key")).toBeVisible();
+});
+
+test("R15.6: a ZERO claim on another bounty isn't this bounty's cheat claim", async ({ page }) => {
+  const w = emptyWorld();
+  post(w, { protocol: "other.near", name: "pool" });
+  judge(w, { protocol: "other.near", name: "pool" }, 0, "ZERO");
+  post(w, DEMO);
+  win(w, DEMO, 1, { landed: [BASE, ARBITRUM] });
+  await setWorld(page, w);
+  await page.goto("/");
+  await expect(panel(page, 2)).toContainText("Verdict PAYS");
+  await expect(panel(page, 2)).not.toContainText("Cheat claim");
+  await expect(panel(page, 2)).not.toContainText("cheat claim");
 });

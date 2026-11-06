@@ -33,6 +33,8 @@ export interface BountyView {
 export interface NearTx {
   hash: string;
   signer: string;
+  /** The key that signed it; a claim key when it is in `World.claimKeys`. */
+  publicKey?: string;
   receipts: { executor: string; logs: string[]; ok: boolean; predecessor?: string }[];
 }
 
@@ -53,6 +55,8 @@ export interface World {
   verifications: Record<string, any[]>;
   publications: Record<string, any>;
   releases: Record<string, any>;
+  /** Function-call keys, `<account>/<public key>` → the contract they may call (claim keys, R14.2). */
+  claimKeys?: Record<string, string>;
   /** OutLayer's attestation records, by the transaction that holds the job's verdict. */
   attestations?: Record<string, unknown>;
   /** The contract's NEAR transactions, oldest first, as the explorer indexes them. */
@@ -300,6 +304,14 @@ export function finishedDemo(): World {
   post(w, DEMO);
   judge(w, DEMO, 0, "ZERO", "cheat.near");
   win(w, DEMO, 1, { landed: [BASE, ARBITRUM], verified: [BASE, ARBITRUM] });
+  withClaimKey(w, 1);
   publish(w, DEMO, 1);
   return w;
+}
+
+/** Claim `claimId` was filed with a claim key: a function-call key limited to the bounty contract. */
+export function withClaimKey(w: World, claimId: number) {
+  const tx = w.nearTxs.find((t) => t.hash === nearHash(`submit${claimId}`))!;
+  tx.publicKey = "ed25519:ClaimKeyOfTheWhitehatsAgent";
+  w.claimKeys = { ...w.claimKeys, [`${tx.signer}/${tx.publicKey}`]: CONTRACT };
 }

@@ -2,12 +2,13 @@
 // Chips (DESIGN.md, Chips): a bounty's status, and a transaction as a chain chip plus a
 // link chip that shows its shortened hash, an external-link glyph and a copy button.
 import { useState } from "react";
+import type { PublicState } from "@/lib/bounties.ts";
 import { shortHash } from "@/lib/format.ts";
 
-const TONE: Record<string, string> = { Paid: "ok", "Ended, unclaimed": "mute", Withdrawn: "mute", "Check failed": "fail" };
+const TONE: Record<PublicState, string> = { Live: "", Checking: "", Paying: "", Paid: "ok", "Ended, unclaimed": "mute", Withdrawn: "mute", "Check failed": "fail" };
 
-export function StatusChip({ state }: { state: string }) {
-  return <span className={`chip ${TONE[state] ?? ""}`.trim()}>{state}</span>;
+export function StatusChip({ state }: { state: PublicState }) {
+  return <span className={`chip ${TONE[state]}`.trim()}>{state}</span>;
 }
 
 export const Ext = () => (

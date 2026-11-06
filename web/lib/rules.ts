@@ -1,10 +1,6 @@
 // A bounty's rules and what doesn't pay, in plain English, from the rules read off the chain.
 import type { BountyPage } from "./bounties.ts";
-import { plural } from "./format.ts";
-
-function list(items: string[]): string {
-  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
-}
+import { listOf as list, plural } from "./format.ts";
 
 export function rulesInPlainEnglish(b: BountyPage): string[] {
   const chains = list([...new Set(b.covered.map((c) => c.chain))]);
