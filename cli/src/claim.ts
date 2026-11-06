@@ -44,6 +44,7 @@
 // Whitehat runs with their own key for each.
 import { readFileSync } from "node:fs";
 import { actions } from "near-api-js";
+import { BARE_FLAGS } from "./usage.ts";
 import { parseBlockRef, parseExploit, parseAccountProof, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
 import { parseBountyId } from "./bounties.ts";
 import { parseRpcFlags } from "./broadcast.ts";
@@ -81,9 +82,8 @@ function required(args: string[], name: string): string {
 
 /** The first argument that is neither a flag nor a flag's value. */
 function positional(args: string[]): string | undefined {
-  const bare = new Set(["--json", "--watch", "--dry-run", "--no-wait", "--no-broadcast", "--no-verify"]);
   for (let i = 0; i < args.length; i++) {
-    if (bare.has(args[i]!)) continue;
+    if (BARE_FLAGS.has(args[i]!)) continue;
     if (args[i]!.startsWith("--")) { i++; continue; }
     return args[i];
   }
