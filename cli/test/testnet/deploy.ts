@@ -97,17 +97,18 @@ export function need(who: string, chain: string, asset: string, have: bigint, wa
 /**
  * The preflight's end (spec, Testing Decisions): every balance to stderr; if any is short, a
  * JSON line naming each top-up and exit status 3, before anything is spent; with
- * PREFLIGHT_ONLY=1, a JSON line and exit status 0 either way.
+ * PREFLIGHT_ONLY=1, a JSON line and exit status 0 either way. `plan` (what the run will do,
+ * such as its claim count) goes into both JSON lines.
  */
-export function stopIfShort(needs: Need[]): void {
+export function stopIfShort(needs: Need[], plan: Record<string, unknown> = {}): void {
   console.error(needs.map((n) => `${n.ok ? "ok   " : "SHORT"} ${n.who} (${n.chain}) ${n.asset}: has ${n.have}, needs ${n.need}`).join("\n"));
   const short = needs.filter((n) => !n.ok);
   if (short.length > 0) {
-    console.log(JSON.stringify({ ok: false, balances: needs, top_up: short.map((n) => `${n.top_up} to ${n.who} on ${n.chain}`) }));
+    console.log(JSON.stringify({ ok: false, ...plan, balances: needs, top_up: short.map((n) => `${n.top_up} to ${n.who} on ${n.chain}`) }));
     process.exit(3);
   }
   if (process.env.PREFLIGHT_ONLY === "1") {
-    console.log(JSON.stringify({ ok: true, balances: needs }));
+    console.log(JSON.stringify({ ok: true, ...plan, balances: needs }));
     process.exit(0);
   }
 }

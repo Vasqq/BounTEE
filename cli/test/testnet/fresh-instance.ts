@@ -29,8 +29,9 @@
 // ~/.bountee-<network>/day3-deployment.json), PROTOCOL (holds the USDC; default
 // bountee-spike4.testnet, required on mainnet), BOUNTY_NAME (default demo-<UTC yyyymmddhhmm>),
 // BOUNTY_AMOUNT (USDC smallest unit; default 100e6 on testnet, 10e6 on mainnet),
-// MINIMUM_THEFT (default 1000e6 on testnet, 1e6 on mainnet), WHITEHAT and CLAIMS (the
-// Whitehat and how many claims the run files, for the preflight), DEPLOYER_ENV (default
+// MINIMUM_THEFT (default 1000e6 on testnet, 1e6 on mainnet), DISCLOSURE_DELAY_DAYS (1-90,
+// default 1, ADR-0018), WHITEHAT and CLAIMS (the Whitehat and how many claims the run files,
+// for the preflight; default 2, ADR-0018's cheat and win), DEPLOYER_ENV (default
 // ~/.bountee-testnet/base-sepolia-deployer.env, ~/.bountee-mainnet/deployer.env; the same key
 // deploys on every chain), CHAINS (comma-separated chain IDs, the proof chain first; default
 // 84532 on testnet, 8453,42161 on mainnet), RPC (the proof chain's RPC), CHAIN_RPCS
@@ -60,11 +61,30 @@ const CONTRACT: string = deployment.contract;
 const USDC: string = deployment.usdc;
 const PROTOCOL = process.env.PROTOCOL ?? (MAINNET ? undefined : "bountee-spike4.testnet");
 if (!PROTOCOL) throw new Error("set PROTOCOL: the NEAR account that posts the bounty");
+/** A whole-number setting from the environment, or its default; anything else stops the script. */
+function wholeNumber(name: string, fallback: number): number {
+  const text = process.env[name];
+  if (text === undefined || text === "") return fallback;
+  if (!/^\d+$/.test(text)) throw new Error(`${name} must be a whole number, not ${JSON.stringify(text)}`);
+  return Number(text);
+}
 const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 12);
 const NAME = process.env.BOUNTY_NAME ?? `demo-${stamp}`;
 // ADR-0018: on mainnet a 10 USDC bounty and a 1 USDC minimum theft.
 const BOUNTY_AMOUNT = process.env.BOUNTY_AMOUNT ?? (MAINNET ? "10000000" : "100000000");
 const MINIMUM_THEFT = process.env.MINIMUM_THEFT ?? (MAINNET ? "1000000" : "1000000000");
+// ADR-0018's run: the exploit is published a disclosure delay after the payout, and the demo
+// must reach "published" by Nov 11, so the delay is R1.4's minimum, 1 day, on both networks
+// (testnet rehearses the mainnet run, #33). The contract refuses one outside 1-90 days, but
+// only after the vaults are deployed and funded, so it is checked here, before anything.
+const DISCLOSURE_DELAY_DAYS = wholeNumber("DISCLOSURE_DELAY_DAYS", 1);
+if (DISCLOSURE_DELAY_DAYS < 1 || DISCLOSURE_DELAY_DAYS > 90) {
+  throw new Error(`DISCLOSURE_DELAY_DAYS is ${DISCLOSURE_DELAY_DAYS}: a disclosure delay is 1-90 days (R1.4)`);
+}
+// The claims the run files, for the Whitehat's preflight: ADR-0018's run files two, the cheat
+// that scores zero and the winning claim. A run that files more (the Day-3 checkpoint's three)
+// says so.
+const CLAIMS = wholeNumber("CLAIMS", 2);
 const CHAIN_IDS = (process.env.CHAINS ?? (MAINNET ? "8453,42161" : "84532")).split(",").map(Number);
 const CHAIN = CHAIN_IDS[0]!;
 const chainRpcs = { ...parseRpcFlags(process.env.CHAIN_RPCS ? process.env.CHAIN_RPCS.split(",") : []), ...(process.env.RPC ? { [CHAIN]: process.env.RPC } : {}) };
@@ -128,7 +148,6 @@ const deployWei = (rpc: string) => {
   const deployPrice = 3n * gasPrice > 50_000_000n ? 3n * gasPrice : 50_000_000n;
   return 4_000_000n * deployPrice + 50_000_000_000_000n;
 };
-const claims = Number(process.env.CLAIMS ?? 3);
 const WHITEHAT = process.env.WHITEHAT;
 const ftBalance = async (who: string) => BigInt(await near.view<string>(USDC, "ft_balance_of", { account_id: who }));
 
@@ -147,9 +166,9 @@ needs.push(need(PROTOCOL, nearChain, "NEAR", (await near.balance(PROTOCOL)) ?? 0
 needs.push(need(PROTOCOL, nearChain, `${MAINNET ? "" : "test "}USDC (${USDC})`, await ftBalance(PROTOCOL), BigInt(BOUNTY_AMOUNT), showUsdc));
 if (WHITEHAT) {
   // Each live claim draws ~0.9 NEAR (its ~120 KB input is held while the job runs) plus gas.
-  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.balance(WHITEHAT)) ?? 0n, milliNear(1100 * claims), showNear));
+  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.balance(WHITEHAT)) ?? 0n, milliNear(1100 * CLAIMS), showNear));
 }
-stopIfShort(needs);
+stopIfShort(needs, { run: { claims: CLAIMS, disclosure_delay_days: DISCLOSURE_DELAY_DAYS } });
 
 // ---- 1. Pause-role address -------------------------------------------------------------------------
 
@@ -230,7 +249,7 @@ const rules = {
   bounty_amount: BOUNTY_AMOUNT,
   minimum_theft: MINIMUM_THEFT,
   end_date_ns: String(BigInt(Date.now() + 30 * 86_400_000) * 1_000_000n),
-  disclosure_delay_days: 30,
+  disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
   exploit_public_key: `x25519:${base58.encode(pub)}`,
   judge_build_hash: config.judge_build_hash,
 };

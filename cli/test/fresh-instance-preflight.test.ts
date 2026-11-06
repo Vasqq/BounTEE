@@ -10,6 +10,10 @@
 //   (the deployer's ETH and USDC on each chain, the Protocol's NEAR and USDC, the Whitehat's
 //   NEAR) with ADR-0018's amounts; exit status 3 naming each top-up when any is short; and
 //   that no request sends anything.
+//   Ticket #35's prep adds: the run ADR-0018 makes (2 claims, the cheat and the win; a 1-day
+//   disclosure delay, so the exploit is published by Nov 11) as the defaults the preflight
+//   reports and checks the Whitehat against, and a delay outside R1.4's 1-90 days refused
+//   before anything is read.
 //   Misses: the real mainnet balances and gas prices (read when #35 runs it), and every step
 //   after the preflight (each spends; rehearsed on testnet, #33).
 import { spawn } from "node:child_process";
@@ -97,7 +101,7 @@ beforeAll(async () => {
 
 afterAll(() => server.close());
 
-async function preflight(): Promise<{ status: number | null; out: any; stderr: string }> {
+async function preflight(extraEnv: Record<string, string> = {}): Promise<{ status: number | null; out: any; stderr: string }> {
   const dir = mkdtempSync(join(tmpdir(), "bountee-preflight-"));
   writeFileSync(join(dir, "deployment.json"), JSON.stringify({ network: "mainnet", contract: CONTRACT, usdc: NEAR_USDC }));
   writeFileSync(join(dir, "deployer.env"), `DEPLOYER_ADDRESS=${DEPLOYER}\nDEPLOYER_PRIVATE_KEY=${DEPLOYER_KEY}\n`);
@@ -112,10 +116,10 @@ async function preflight(): Promise<{ status: number | null; out: any; stderr: s
       DEPLOYER_ENV: join(dir, "deployer.env"),
       PROTOCOL,
       WHITEHAT,
-      CLAIMS: "2",
       NEAR_RPC: `${base}/near`,
       CHAIN_RPCS: `8453=${base}/8453,42161=${base}/42161`,
       PREFLIGHT_ONLY: "1",
+      ...extraEnv,
     },
   });
   let stdout = "";
@@ -169,4 +173,27 @@ test("D21: a funded mainnet run passes the preflight and spends nothing", async 
   expect(r.out.ok).toBe(true);
   expect(r.out.balances.every((b: any) => b.ok)).toBe(true);
   expectNothingSent();
+});
+
+/** D21, ADR-0018: with no settings, the preflight plans ADR-0018's run: two claims (the cheat and the win) and a 1-day disclosure delay. */
+test("D21, R1.4: by default the mainnet preflight plans ADR-0018's run: 2 claims and a 1-day disclosure delay", async () => {
+  world.near.clear();
+  const r = await preflight();
+  expect(r.out.run).toEqual({ claims: 2, disclosure_delay_days: 1 });
+  const whitehat = r.out.balances.find((b: any) => b.who === WHITEHAT);
+  expect(whitehat.need).toBe("2.2 NEAR");
+  expectNothingSent();
+});
+
+/** R1.4: the delay is a setting, and one outside 1-90 days stops the script before it reads or sends anything. */
+test("R1.4: DISCLOSURE_DELAY_DAYS sets the delay; outside 1-90 days it is refused before anything is read", async () => {
+  const set = await preflight({ DISCLOSURE_DELAY_DAYS: "7", CLAIMS: "3" });
+  expect(set.out.run).toEqual({ claims: 3, disclosure_delay_days: 7 });
+  for (const bad of ["0", "91", "1.5", "x"]) {
+    const r = await preflight({ DISCLOSURE_DELAY_DAYS: bad });
+    expect(r.status, bad).not.toBe(0);
+    expect(r.status, bad).not.toBe(3);
+    expect(r.stderr, bad).toMatch(/DISCLOSURE_DELAY_DAYS/);
+    expect(world.requests, bad).toEqual([]);
+  }
 });
