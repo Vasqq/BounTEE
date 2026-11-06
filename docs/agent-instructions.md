@@ -38,7 +38,7 @@ The key can't top up the claim balance. If it is short, `bountee claim` stops be
 
 2. **Find the bug.** Read the covered contracts' source. Look for any path that moves the contract's funds to a caller who shouldn't get them: a missing access check, an unchecked external call, a reentrancy, a broken price or share calculation. Read the deployed state with `cast` (for example `cast call <address> "balanceOf(address)(uint256)" <vault> --rpc-url <url>`). Done when you can say which function, called by an account with no role, moves which tokens to you.
 
-3. **Write the exploit as a Foundry script.** Make a project with `forge init <dir>` and write a script under `script/`. Its `run()` wraps the attack in `vm.startBroadcast()` / `vm.stopBroadcast()` and sends the stolen tokens to `msg.sender`. The tool runs it from a **fresh account** that holds only the bounty's seed (1 native token by default) and no role on any contract. Hard-code the covered contract's address, or read it from an environment variable.
+3. **Write the exploit as a Foundry script.** Make a project with `forge init <dir>` and write a script under `script/`. Its `run()` wraps the attack in `vm.startBroadcast()` / `vm.stopBroadcast()` and sends the stolen tokens to `msg.sender`. The tool runs it from a **fresh account** that holds only the bounty's seed (1 native token by default) and no role on any contract. Hard-code the covered contract's address, or read it from an environment variable. `bountee show` prints addresses in lowercase, and solc rejects a lowercase address literal: write it checksummed (EIP-55), as `cast to-check-sum-address <address>` prints it.
 
 4. **Judge it locally.** `bountee test <dir>/script/<File>.s.sol --bounty <protocol>/<name> --contract <bounty contract> --json`. This needs no keys or funds. Read `verdict.outcome`:
    - `PAYS`: go to step 5.
@@ -53,11 +53,11 @@ The key can't top up the claim balance. If it is short, `bountee claim` stops be
      --no-verify --timeout 540 --json
    ```
 
-   The tool collects fresh proofs, seals, files, then follows the claim until it is paid and its pauses have been broadcast. `--no-verify` skips the pause verification, which waits for each chain's safe head and can take half an hour. `--timeout 540` keeps the command inside a ten-minute command limit. Save the `claim_id` it prints.
+   The tool collects fresh proofs, seals, files, then follows the claim until it is paid and its pauses have been broadcast. `--no-verify` skips the pause verification, which waits for each chain's safe head and can take half an hour. `--timeout 540` keeps the command inside a ten-minute command limit. If your shell stops commands sooner (many cap them near 120 s), run `claim` in the background, writing its output to a file, and follow the claim with `bountee status` as in step 6; its stage lines on stderr carry the `claim_id` once it is filed. Save the `claim_id` it prints.
 
-6. **See it through.** If the claim command stopped before `paid` (for example, on its timeout), follow the claim with `bountee status <claim id> --contract <bounty contract> --watch --timeout 540 --json` until the stages reach `paid`. Done when `status` shows `paid` and a receipt holding the payout transaction.
+6. **See it through.** If the claim command stopped before `paid` (for example, on its timeout), follow the claim with `bountee status <claim id> --contract <bounty contract> --watch --timeout 540 --json` until the stages reach `paid`. Pick a `--timeout` under your shell's command limit and run it again until then. Done when `status` shows `paid` and a receipt holding the payout transaction. While `claim` is still finishing, `status` can show `bounty_state: paid` with `receipt.payout: null` and `done: false`: that is not yet the receipt.
 
-7. **Report** to your Whitehat: the bug in one sentence, the script's path, the claim id, the verdict, and the payout transaction from the receipt.
+7. **Report** to your Whitehat: the bug in one sentence, the script's path, the claim id, the verdict, and the payout transaction from the receipt. Report the payout transaction only once `claim` has exited, or once `status` shows a receipt whose `payout` is filled in.
 
 ## When something fails
 
