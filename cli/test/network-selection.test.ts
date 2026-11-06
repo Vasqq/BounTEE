@@ -86,7 +86,7 @@ function asked(args: string[]): string[] {
 
 for (const [name, args] of COMMANDS) {
   /** R14.5's commands (#43; ADR-0017): the command reads NEAR mainnet, and nothing on testnet. */
-  test(`${name} --network mainnet reads mainnet only`, () => {
+  test(`R14.5's commands: ${name} --network mainnet reads mainnet only`, () => {
     const urls = asked(args);
     expect(urls.map((u) => new URL(u).origin)).toContain(new URL(NEAR_RPC.mainnet).origin);
     for (const url of urls) expect(mainnetOrigins, url).toContain(new URL(url).origin);
@@ -94,12 +94,12 @@ for (const [name, args] of COMMANDS) {
 }
 
 /** D18: `init --network mainnet` makes a local key and asks nothing of testnet's faucet. */
-test("init --network mainnet asks nothing of testnet", () => {
+test("D18: init --network mainnet asks nothing of testnet", () => {
   expect(asked(["init", "--network", "mainnet"])).toEqual([]);
 });
 
 /** R2.8: the tool shows the judge's pinned RPCs for Base and Arbitrum One, as the mainnet build pins them. */
-test("the mainnet chains carry the judge build's pinned RPCs", () => {
+test("R2.8: the mainnet chains carry the judge build's pinned RPCs", () => {
   const source = readFileSync(confirmRs, "utf8");
   const mainnet = source.slice(source.indexOf("const MAINNET"), source.indexOf("];", source.indexOf("const MAINNET")));
   for (const id of [8453, 42161]) {

@@ -46,13 +46,12 @@ import { base58 } from "@scure/base";
 import { PAUSE_GAS_PER_PAUSE, pauseRole } from "@bountee/formats";
 import { parseRpcFlags } from "../../src/broadcast.ts";
 import { CHAINS, defaultRpc } from "../../src/chains.ts";
-import { Near, formatNear, milliNear, parseNetwork } from "../../src/near.ts";
-import { MPC_ROOT, need, stopIfShort, type Need } from "./deploy.ts";
+import { formatNear, milliNear } from "../../src/near.ts";
+import { MPC_ROOT, near, network as NETWORK, need, stopIfShort, type Need } from "./deploy.ts";
 import { keystoreEnv, redact } from "./evm-key.ts";
 
 const home = homedir();
 const root = fileURLToPath(new URL("../../../", import.meta.url));
-const NETWORK = parseNetwork(process.env.NETWORK);
 const MAINNET = NETWORK === "mainnet";
 const dir = join(home, `.bountee-${NETWORK}`);
 const deployment = JSON.parse(readFileSync(process.env.BOUNTEE_DAY3 ?? join(dir, "day3-deployment.json"), "utf8"));
@@ -87,7 +86,6 @@ const deployerEnv: Record<string, string> = Object.fromEntries(
 const DEPLOYER = deployerEnv.DEPLOYER_ADDRESS ?? "";
 const DEPLOYER_KEY = deployerEnv.DEPLOYER_PRIVATE_KEY ?? "";
 if (!DEPLOYER || !DEPLOYER_KEY) throw new Error("the deployer env file needs DEPLOYER_ADDRESS and DEPLOYER_PRIVATE_KEY");
-const near = new Near(NETWORK, process.env.NEAR_RPC);
 // The deployer key reaches forge and cast as an encrypted keystore named in the environment,
 // never on a command line, and any error this script prints is redacted (evm-key.ts).
 const deployerKeystore = keystoreEnv(DEPLOYER_KEY);

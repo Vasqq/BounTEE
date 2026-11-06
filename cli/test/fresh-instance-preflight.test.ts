@@ -133,7 +133,7 @@ function expectNothingSent() {
 }
 
 /** D21: with everything empty, the preflight names every balance and its top-up, exits 3, and sends nothing. */
-test("d21 the mainnet preflight lists every balance the run needs and names each top-up", async () => {
+test("D21: the mainnet preflight lists every balance the run needs and names each top-up", async () => {
   world.near.clear();
   world.nearUsdc.clear();
   world.eth.clear();
@@ -158,7 +158,7 @@ test("d21 the mainnet preflight lists every balance the run needs and names each
 });
 
 /** D21: with every balance there, the preflight passes and still sends nothing (PREFLIGHT_ONLY). */
-test("d21 a funded mainnet run passes the preflight and spends nothing", async () => {
+test("D21: a funded mainnet run passes the preflight and spends nothing", async () => {
   for (const who of [PROTOCOL, WHITEHAT]) world.near.set(who, 5n * YOCTO);
   world.nearUsdc.set(PROTOCOL, 10_000_000n);
   for (const chain of [8453, 42161]) world.eth.set(chain, ETH / 100n);
