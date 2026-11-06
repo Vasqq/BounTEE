@@ -15,6 +15,15 @@ import {MockUSDC} from "../src/MockUSDC.sol";
 /// The vault models the DEPUSDT/LEVUSDC hack of June 2023: a fund-moving function meant to be
 /// operator-only (`executeStrategy`) that is missing its access check, so anyone can move the
 /// vault's entire token balance to an address they control.
+///
+/// The bug is deliberate, and documented here and in docs/spec.md ("The demo contracts"), not
+/// in DemoVault.sol: the vault's own comments read as a real protocol's would (#33), because the
+/// demo's AI agent and the judges read that source, and a comment naming the bug would hand the
+/// agent the answer. What the source no longer says: `executeStrategy` is meant to be
+/// operator-only but never checks `operator`, so the role is decorative (R4.10 row 21); every
+/// function on the exploit's path refuses to run once paused, so replaying the exploit after a
+/// pause fails (R7.5); the pause role can only pause, with no unpause and no power over funds
+/// (R8.2).
 contract DemoVaultTest is Test {
     MockUSDC usdc;
     DemoVault vault;
