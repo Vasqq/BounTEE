@@ -50,7 +50,7 @@ beforeAll(() => {
   }
 }, 600_000);
 
-test("R15.4 D19: the checker runs every offline README step with no network and each shows its expected output", () => {
+test("R15.4: the checker runs every offline README step with no network and each shows its expected output", () => {
   const res = offline(process.execPath, [CHECKER, "--offline", "--json"]);
   expect(res.code, res.stdout + res.stderr).toBe(0);
   const report = JSON.parse(res.stdout) as { steps: { command: string; status: string }[] };

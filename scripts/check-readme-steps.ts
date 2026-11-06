@@ -4,7 +4,7 @@
 //
 // A step is a `$ <command>` line in a ```console block; the lines after it, up to the next `$ `
 // line or the block's end, are what its output must show: each must appear in the command's
-// stdout and stderr, compared with runs of spaces collapsed. The command runs from the repo root
+// stdout or stderr, compared with runs of spaces collapsed. The command runs from the repo root
 // under bash, with `bountee` meaning `node cli/src/main.ts`, and must exit 0.
 //
 // A ```console online block needs the network (but no keys or funds); --offline skips it. A

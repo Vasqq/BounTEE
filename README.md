@@ -1,6 +1,6 @@
 # BounTEE
 
-**Bug bounties that pay the whitehat the moment their exploit is proven, and pause the bug on every chain before anyone else can use it.**
+**Bug bounties that pay the Whitehat the moment their exploit is proven, and pause the bug on every chain before anyone else can use it.**
 
 A Protocol posts a bounty in USDC on a NEAR contract that nobody holds a key to. A Whitehat (a person, or an AI agent with a key that can only file claims) writes the exploit as a Foundry script, seals it on their own machine and files a claim. An enclave replays it against the chain's recent state. If fresh accounts walk away with at least the bounty's minimum theft from the covered contracts, NEAR Chain Signatures signs a pause for every covered contract on every chain, the Whitehat is paid the whole bounty, and only then can the Protocol open the exploit. Anyone can check all of it afterwards, with no keys and no funds.
 
@@ -77,7 +77,7 @@ verdict: PAYS (minimum_theft_reached)
 block: 17484161
 ```
 
-**5. The payout rule, case by case.** The judge's scenario tests: a depositor's own withdrawal, an owner rescue, a public sweep, a flash loan, a reentrancy drain, a mint, a forged owner transaction, an unproven read, a score just below and exactly at the minimum theft, and more (the table under R4.10 in [docs/requirements.md](docs/requirements.md)).
+**5. The payout rule, case by case.** The judge's scenario tests: a depositor's own withdrawal, an owner rescue, a public sweep, a flash loan, a reentrancy theft, a mint, a forged owner transaction, an unproven read, a score just below and exactly at the minimum theft, and more (the table under R4.10 in [docs/requirements.md](docs/requirements.md)).
 
 ```console
 $ cargo test -p bountee-judge --test seam_j_scenarios
@@ -97,7 +97,7 @@ $ curl -s https://free.rpc.fastnear.com -H 'content-type: application/json' -d '
 "keys":[]
 ```
 
-**Everything about the demo bounty checks out.** `verify` rebuilds the contract and the judge from this repo and compares their hashes with what ran, checks the enclave's attestation against Intel's certificates, the payout, each pause's landing and its verified record on NEAR, and re-runs the published exploit.
+**Everything about the demo bounty checks out.** This one also needs Docker, for the reproducible build. `verify` rebuilds the contract and the judge from this repo and compares their hashes with what ran, checks the enclave's attestation against Intel's certificates, the payout, each pause's landing and its verified record on NEAR, and re-runs the published exploit.
 
 ```console online
 $ bountee verify <MAINNET: demo bounty id> --contract bounty.bountee.near --network mainnet
@@ -111,6 +111,13 @@ pass rerun
 ```
 
 There is no live bounty for you to win. A win closes its bounty and pauses its vault, so every winning run uses a fresh instance, deployed and posted by `cli/test/testnet/fresh-instance.ts` (with `NETWORK=mainnet` for the demo).
+
+## Not production-ready
+
+- Not audited.
+- The bounty contract trusts OutLayer's verdict; it doesn't check the enclave's attestation itself. Anyone can check it afterwards with `bountee verify`.
+- One payout per bounty, one proof chain per bounty, EVM chains only.
+- The demo bounty is deliberately small: 10 USDC, with 2 USDC in the Base vault and 1 in the Arbitrum vault.
 
 ## The mainnet demo bounty
 
@@ -132,6 +139,7 @@ One bounty, one story: an independent AI agent, given only [docs/agent-instructi
 | Pause verified on NEAR, Base | _pending_ <!-- MAINNET: verify-pause tx, Base --> |
 | Pause verified on NEAR, Arbitrum One | _pending_ <!-- MAINNET: verify-pause tx, Arbitrum --> |
 | Exploit published after its disclosure delay | _pending_ <!-- MAINNET: publish tx --> |
+| Winnings withdrawn to Base through NEAR Intents (`bountee withdraw`) | _pending_ <!-- MAINNET: withdraw deposit tx on NEAR; delivery tx on Base (D12) --> |
 
 ## Threat model
 
@@ -148,7 +156,7 @@ So a depositor's own withdrawal, an owner rescue, a sweep to the treasury, a swa
 | **OutLayer** (its operator, its upgradeable contract, and the one-member DAO that governs its keystore and approves enclave builds) | Running the pinned judge in the enclave and returning its verdict; opening sealed exploits only in jobs the bounty contract asks for | Could forge a verdict: the worst that does is pause the covered contracts and pay one bounty. Could read sealed exploits, or refuse to run jobs (claims then wait, unpaid and unjudged). A forged verdict is caught after the fact by the attestation, the rebuilt judge hash and the re-run of the published exploit (`bountee verify`). |
 | **Intel** (TDX hardware and attestation) | The enclave really isolates the judge, and its attestation is genuine | A broken enclave or forged attestation could leak sealed exploits or forge verdicts, with the same worst case as above. The re-run of the published exploit doesn't depend on Intel. |
 | **NEAR's MPC network** (Chain Signatures and foreign-chain verification) | Signing the bounty's pauses, and checking that they landed | Could sign other transactions from a bounty's pause address, but the pause role can only pause: it can't unpause or move funds. Could refuse to sign (a winning claim waits, unpaid), or record a pause as verified that didn't land (the payout never depends on it, and anyone can check the chain). |
-| **The RPCs pinned in the judge's build** (three per chain; at least two must answer and all answers must agree) | Confirming the claim's block hash, and reading each chain at posting | Two colluding RPCs could confirm a fake block, letting a claim be judged against invented state: a forged verdict. One RPC alone can only stall a claim. |
+| **The RPCs pinned in the judge's build** (three per chain; at least two must answer and all answers must agree) | Confirming the claim's block hash, and reading each chain at posting | Two colluding RPCs, with the third unreachable, could confirm a fake block, letting a claim be judged against invented state: a forged verdict. One RPC alone can only stall a claim. |
 | **NEAR** (its validators) | Running the bounty contract as written | The same trust as any NEAR contract. |
 | **Circle** (the USDC issuer) | USDC keeps its value and stays transferable | Could blocklist the bounty contract or the winner on NEAR's USDC (its contract has `blocklist` and `is_blocklisted`), freezing their USDC. |
 | **BounTEE's builders** (us) | Nothing after deployment | The contract holds no keys, so we can't move funds, pause, or change a bounty's rules. We chose the judge and its pinned RPCs at deployment; both are open source here, and `verify` rebuilds them and compares the hashes that ran. |
@@ -174,14 +182,7 @@ Nobody needs to trust the Whitehat, the broadcaster of a signed pause (anyone ca
 
 **Only contracts that pay nothing to callers by design can be covered.** An AMM pool, a lending market that pays liquidation bonuses, or a contract that pays keeper rewards hands value to fresh accounts as part of normal use, so the rule would count it as theft. Cover the contracts that hold funds and pay out only to their owners; such pools can still appear in an exploit as dependencies, where value taken from them never counts.
 
-Also out of scope: bugs where nobody profits (a freeze, denial of service, insolvency), attacks needing several blocks or time to pass, attacks needing a victim's later transaction, theft of users' approvals from their own wallets, and chains NEAR's MPC network can't verify (Base and Arbitrum can).
-
-## Not production-ready
-
-- Not audited.
-- The bounty contract trusts OutLayer's verdict; it doesn't check the enclave's attestation itself. Anyone can check it afterwards with `bountee verify`.
-- One payout per bounty, one proof chain per bounty, EVM chains only.
-- The demo bounty is deliberately small: 10 USDC, with 2 USDC in the Base vault and 1 in the Arbitrum vault.
+Also out of scope: bugs where nobody profits (locked funds, denial of service, insolvency), attacks needing several blocks or time to pass, attacks needing a victim's later transaction, theft of users' approvals from their own wallets, and chains NEAR's MPC network can't verify (Base and Arbitrum can).
 
 ## Similar projects
 
@@ -195,7 +196,7 @@ Also out of scope: bugs where nobody profits (a freeze, denial of service, insol
 
 ## Disclosures
 
-- Damn Vulnerable DeFi v4 (MIT): three levels copied unmodified as judge scenarios, and adapted with a standard pause as demo bounties; see `demo/dvd/NOTICE`.
+- Damn Vulnerable DeFi v4 (MIT): three levels copied unmodified as judge scenarios, and adapted with a standard pause as demo contracts for offline replays (none is posted live); see `demo/dvd/NOTICE`.
 - The historical replay reproduces DeFiHackLabs' DEPUSDT/LEVUSDC exploit (Apache-2.0).
 - Built on revm, near-sdk, near-api-js, OpenZeppelin Contracts and Foundry.
 - Much of the code was written with AI coding agents, under review.
