@@ -114,7 +114,8 @@ There is no live bounty for you to win. A win closes its bounty and pauses its v
 
 ## Not production-ready
 
-- Not audited.
+- Not audited by a third party. Our own audit of the deployed build found no critical or high issues, and its five known issues are listed in [docs/audit.md](docs/audit.md). They stay unfixed in the demo, because the deployed build must be the one the full rehearsal ran.
+- The contract has no admin and can't be upgraded. A bounty whose pause signatures can never be made (if NEAR's MPC network changed its interface), or whose winner Circle has blocklisted, stays stuck, and its USDC stays locked.
 - The bounty contract trusts OutLayer's verdict; it doesn't check the enclave's attestation itself. Anyone can check it afterwards with `bountee verify`.
 - One payout per bounty, one proof chain per bounty, EVM chains only.
 - The demo bounty is deliberately small: 10 USDC, with 2 USDC in the Base vault and 1 in the Arbitrum vault.
