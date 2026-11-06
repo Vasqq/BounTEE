@@ -30,7 +30,7 @@ After a PAYS, a few steps anyone may take need other methods: asking again for t
 
 **The key does spend the claim balance.** Every claim it files draws its fee and storage deposit from the Whitehat's **claim balance**, whatever its verdict. Junk claims burn that balance. So file a claim only after `bountee test` gives PAYS on the same script.
 
-The key can't top up the claim balance. If it is short, `bountee claim` stops before filing and says how much to add. Stop there and report that number to your Whitehat: there is nothing further you can do until they top it up.
+The key can't top up the claim balance. If it is short, `bountee claim` stops before filing and names the amount to add. Stop there and report that number to your Whitehat: there is nothing further you can do until they top it up.
 
 ## Steps
 
@@ -40,7 +40,7 @@ The key can't top up the claim balance. If it is short, `bountee claim` stops be
 
 3. **Write the exploit as a Foundry script.** Make a project with `forge init <dir>` and write a script under `script/`. Its `run()` wraps the attack in `vm.startBroadcast()` / `vm.stopBroadcast()` and sends the stolen tokens to `msg.sender`. The tool runs it from a **fresh account** that holds only the bounty's seed (1 native token by default) and no role on any contract. Hard-code the covered contract's address, or read it from an environment variable. `bountee show` prints addresses in lowercase, and solc rejects a lowercase address literal: write it checksummed (EIP-55), as `cast to-check-sum-address <address>` prints it.
 
-4. **Judge it locally.** `bountee test <dir>/script/<File>.s.sol --bounty <protocol>/<name> --contract <bounty contract> --json`. This needs no keys or funds. Read `verdict.outcome`:
+4. **Judge it locally.** `bountee test <dir>/script/<File>.s.sol --bounty <protocol>/<name> --contract <bounty contract> --json`. This needs no keys or funds. The first run forks the chain and runs the judge under wasmtime, so it can take a few minutes with no output. Read `verdict.outcome`:
    - `PAYS`: go to step 5.
    - `ZERO`: the theft fell short, or a transaction reverted. Read `verdict.reason` and `diagnostics`, fix the script and test again.
    Done when `bountee test` prints `PAYS`.
@@ -53,11 +53,11 @@ The key can't top up the claim balance. If it is short, `bountee claim` stops be
      --no-verify --timeout 540 --json
    ```
 
-   The tool collects fresh proofs, seals, files, then follows the claim until it is paid and its pauses have been broadcast. `--no-verify` skips the pause verification, which waits for each chain's safe head and can take half an hour. `--timeout 540` keeps the command inside a ten-minute command limit. If your shell stops commands sooner (many cap them near 120 s), run `claim` in the background, writing its output to a file, and follow the claim with `bountee status` as in step 6; its stage lines on stderr carry the `claim_id` once it is filed. Save the `claim_id` it prints.
+   The tool collects fresh proofs, seals, files, then follows the claim until it is paid and its pauses have been broadcast. `--no-verify` skips the pause verification, which waits for each chain's safe head and can take half an hour. `--timeout 540` keeps the command inside a ten-minute command limit. If your shell stops commands sooner (many cap them near 120 s), run `claim` in the background with stdout and stderr in separate files, and follow the claim with `bountee status` as in step 6. Its live stages go to stderr as they happen, carrying the `claim_id` once it is filed; its JSON result reaches stdout only when it exits. Save the `claim_id`.
 
 6. **See it through.** If the claim command stopped before `paid` (for example, on its timeout), follow the claim with `bountee status <claim id> --contract <bounty contract> --watch --timeout 540 --json` until the stages reach `paid`. Pick a `--timeout` under your shell's command limit and run it again until then. Done when `status` shows `paid` and a receipt holding the payout transaction. While `claim` is still finishing, `status` can show `bounty_state: paid` with `receipt.payout: null` and `done: false`: that is not yet the receipt.
 
-7. **Report** to your Whitehat: the bug in one sentence, the script's path, the claim id, the verdict, and the payout transaction from the receipt. Report the payout transaction only once `claim` has exited, or once `status` shows a receipt whose `payout` is filled in.
+7. **Report** to your Whitehat: the bug in one sentence, the script's path, the claim id, the verdict, and the payout transaction from the receipt. Report the payout transaction only once `claim` has exited, or once `status` shows a non-null `receipt.payout`. That is enough to report even while a background `claim` still runs: it keeps following the pauses until it exits.
 
 ## When something fails
 
@@ -80,10 +80,10 @@ Do these once, with your own full-access key, before your agent starts:
 
    `bountee --version` checks it, and `wasmtime --version` the judge's runtime.
 2. **An account.** On testnet, `bountee init --json` creates a faucet-funded account and saves its key in `~/.near-credentials/testnet/`.
-3. **The claim balance.** Top it up for every claim you are willing to pay for. Each claim draws about 1 NEAR, whatever the verdict. The claim key can't top up, so you do:
+3. **The claim balance.** Top it up for every claim you are willing to pay for. What a claim draws, whatever the verdict, depends on the size of its exploit's proofs: about 0.3 NEAR on testnet, 1 to 3 NEAR on mainnet. If the balance is short, your agent's `claim` stops and names the amount to add. The claim key can't top up, so you do:
 
    ```
-   bountee balance top-up 1.2 --contract <bounty contract> --as <your account> --json
+   bountee balance top-up <NEAR> --contract <bounty contract> --as <your account> --json
    ```
 
    This balance is what a claim key can spend, junk claims included, so keep only what you are willing to lose. `bountee balance --contract <bounty contract> --as <your account> --json` shows what is left, and `bountee balance withdraw [<NEAR>] ...` takes it back (all of it if you name no amount); a claim key can do neither.
