@@ -24,7 +24,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { RpcError, nearView, runScript, sendsAmong, standIns, type Logged } from "./testnet/stand-ins.ts";
 
@@ -69,6 +69,10 @@ const world = {
 };
 
 const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
+
+// Each preflight runs the script, which compiles the demo contracts to size the claims' code
+// (forge inspect): seconds each, more while other suites build.
+vi.setConfig({ testTimeout: 180_000 });
 
 let stands: Awaited<ReturnType<typeof standIns>>;
 let requests: Logged[] = [];
