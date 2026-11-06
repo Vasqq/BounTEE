@@ -35,6 +35,7 @@ export default defineConfig({
         NEAR_RPC: `${chains}/near`,
         NEAR_ARCHIVAL_RPC: `${chains}/near`,
         TX_API: `${chains}/txapi`,
+        OUTLAYER_API: `${chains}/outlayer`,
         EVM_RPC_8453: `${chains}/evm/8453`,
         EVM_RPC_42161: `${chains}/evm/42161`,
         DEMO_BOUNTY: "0x9f2c3e1a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e/mainnet-demo",

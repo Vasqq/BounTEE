@@ -33,7 +33,7 @@ export interface BountyView {
 export interface NearTx {
   hash: string;
   signer: string;
-  receipts: { executor: string; logs: string[]; ok: boolean }[];
+  receipts: { executor: string; logs: string[]; ok: boolean; predecessor?: string }[];
 }
 
 export interface EvmReceipt {
@@ -53,6 +53,8 @@ export interface World {
   verifications: Record<string, any[]>;
   publications: Record<string, any>;
   releases: Record<string, any>;
+  /** OutLayer's attestation records, by the transaction that holds the job's verdict. */
+  attestations?: Record<string, unknown>;
   /** The contract's NEAR transactions, oldest first, as the explorer indexes them. */
   nearTxs: NearTx[];
   evm: Record<
@@ -235,6 +237,12 @@ export function win(
     receipts: [
       { executor: CONTRACT, logs: [event("pauses_signed", { bounty: id, claim_id: claimId, pauses: b.signed_pauses.length })], ok: true },
       { executor: CONTRACT, logs: [event("bounty_paid", { bounty: id, claim_id: claimId, amount: b.rules.bounty_amount })], ok: true },
+      {
+        executor: USDC,
+        predecessor: CONTRACT,
+        logs: [`EVENT_JSON:${JSON.stringify({ standard: "nep141", version: "1.0.0", event: "ft_transfer", data: [{ old_owner_id: CONTRACT, new_owner_id: "whitehat.near", amount: b.rules.bounty_amount }] })}`],
+        ok: true,
+      },
     ],
   });
   for (const p of b.signed_pauses) {

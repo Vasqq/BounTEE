@@ -2,16 +2,19 @@
 // The landing page: the locked prototype's markup (landing C3), with the demo bounty's values
 // read live (lib/demo.ts) in place of the prototype's placeholders. The pictures, story panels,
 // dock and hero motion are the prototype's own script (runtime.js).
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { Demo } from "@/lib/demo.ts";
+import { useVerify, VerifyRun } from "../Verify.tsx";
 import { startLanding } from "./runtime.js";
 
 const DASH = "–";
 /** The prototype's staggered entrance: `--d` delays a `.rise`. */
 const delay = (d: string) => ({ "--d": d }) as CSSProperties;
 
-export function Landing({ verify }: { verify?: ReactNode }) {
+export function Landing() {
   const [demo, setDemo] = useState<Demo | null>(null);
+  const demoId = useMemo(() => (demo ? { protocol: demo.story.protocol, name: demo.story.name } : null), [demo?.story.protocol, demo?.story.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { result } = useVerify(demoId);
   useEffect(() => {
     const page = startLanding();
     let stop = false;
@@ -146,7 +149,7 @@ export function Landing({ verify }: { verify?: ReactNode }) {
               </div>
               <div className="term-body">
                 <p className="note" id="termNote"></p>
-                {verify ?? <ul className="run" aria-label="Check results" />}
+                {result ? <VerifyRun rows={result.rows} /> : <ul className="run" aria-label="Check results" />}
               </div>
             </div>
             <p className="verify-foot">Prefer the browser? Every bounty page runs the same checks, read live from the chains.</p>

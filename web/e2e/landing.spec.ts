@@ -93,3 +93,13 @@ test("ADR-0017: no testnet string or explorer link ships in the mainnet build", 
   const hits = files.filter((f) => /testnet|sepolia/i.test(readFileSync(f, "utf8")));
   expect(hits).toEqual([]);
 });
+
+test("D6: the landing page's Verify lists the demo bounty's checks, read live", async ({ page }) => {
+  await setWorld(page, finishedDemo());
+  await page.goto("/");
+  await page.locator("#verify").scrollIntoViewIfNeeded();
+  const run = page.getByRole("list", { name: "Check results" });
+  await expect(run.getByRole("listitem").filter({ hasText: "Payout on NEAR" })).toContainText("PASS");
+  await expect(run.getByRole("listitem").filter({ hasText: "Pauses verified on NEAR" })).toContainText("PASS");
+  await expect(page.locator("#cmd")).toHaveText(`$bountee verify ${DEMO.protocol}/${DEMO.name} --network mainnet`);
+});

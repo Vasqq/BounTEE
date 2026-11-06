@@ -116,3 +116,7 @@
 }
 .app .block h2.h-panel, .panel-app h2.h-panel { font-size: var(--fs-4); }
 .panel-app h2.h-panel + * { margin-top: 12px; }
+
+/* Verify: FAIL and its count (DESIGN.md, Verify check list: Extension) */
+.run .st.fail { color: var(--fail); }
+.sum b.fail { color: var(--fail); }

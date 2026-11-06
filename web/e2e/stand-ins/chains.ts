@@ -114,7 +114,7 @@ function nearRpc(w: World, method: string, params: any): { result?: unknown; err
       result: {
         status: { SuccessValue: "" },
         transaction: { hash: tx.hash, signer_id: tx.signer, receiver_id: w.contract, actions: [] },
-        receipts: [],
+        receipts: tx.receipts.map((r, i) => ({ receipt_id: `${tx.hash}-${i}`, predecessor_id: r.predecessor ?? tx.signer, receipt: { Action: { actions: [] } } })),
         receipts_outcome: tx.receipts.map((r, i) => ({
           id: `${tx.hash}-${i}`,
           block_hash: "stand-in",
@@ -194,6 +194,11 @@ createServer(async (req, res) => {
     const evm = /^\/evm\/(\d+)$/.exec(url.pathname);
     if (evm) return json(res, 200, { jsonrpc: "2.0", id: b.id, ...evmRpc(world, Number(evm[1]), b.method, b.params ?? []) });
     if (url.pathname.startsWith("/txapi/")) return json(res, 200, txApi(world, url.pathname.slice("/txapi".length), b));
+    const attestation = /^\/outlayer\/attestations\/by-tx\/(.+)$/.exec(url.pathname);
+    if (attestation) {
+      const a = world.attestations?.[attestation[1]!];
+      return a ? json(res, 200, a) : json(res, 404, { error: "not found" });
+    }
     return json(res, 404, { error: "not found" });
   } catch (e) {
     return json(res, 500, { error: (e as Error).message });

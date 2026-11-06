@@ -32,6 +32,8 @@ export function config() {
     nearArchivalRpc: env("NEAR_ARCHIVAL_RPC", "https://archival-rpc.mainnet.fastnear.com"),
     /** FastNEAR's explorer API: says which transactions to look at; trusted for nothing. */
     txApi: env("TX_API", "https://tx.main.fastnear.com"),
+    /** OutLayer's API, for the winning claim's attestation. */
+    outlayerApi: env("OUTLAYER_API", "https://api.outlayer.ai"),
     nearExplorer: "https://nearblocks.io/",
     nearExplorerTx: "https://nearblocks.io/txns/",
     contract: env("BOUNTY_CONTRACT", "bounty.bountee.near"),

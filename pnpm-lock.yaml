@@ -221,6 +221,9 @@ importers:
 
   web:
     dependencies:
+      '@bountee/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@bountee/formats':
         specifier: workspace:*
         version: link:../formats/ts

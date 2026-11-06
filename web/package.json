@@ -12,6 +12,7 @@
     "typecheck": "tsc -p . --noEmit"
   },
   "dependencies": {
+    "@bountee/cli": "workspace:*",
     "@bountee/formats": "workspace:*",
     "next": "16.4.3",
     "react": "^19.3.1",

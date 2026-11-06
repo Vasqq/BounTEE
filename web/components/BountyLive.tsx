@@ -2,13 +2,15 @@
 // A bounty's public page, read live: the browser asks the app's server, which reads the
 // chains on each request (R15.6), and asks again every 15 s. Values swap in place; nothing
 // animates in (DESIGN.md, Motion).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { BountyId, BountyPage, ChainPause } from "@/lib/bounties.ts";
 import { rulesInPlainEnglish, whatDoesntPay } from "@/lib/rules.ts";
 import { ChainMark } from "./ChainMark.tsx";
 import { StatusChip, TxChip } from "./Chips.tsx";
 import { CommandBlock } from "./CommandBlock.tsx";
 import { ReadFailed } from "./ReadFailed.tsx";
+import { VerifyTerminal } from "./Verify.tsx";
+import { SendPause } from "./SendPause.tsx";
 
 const POLL_MS = 15_000;
 const CHAIN_IDS: Record<string, number> = { Base: 8453, "Arbitrum One": 42161 };
@@ -93,12 +95,13 @@ export function BountyLive({ id }: { id: BountyId }) {
             <h2 id="pauseH">Pause, per chain</h2>
             <div className="pauses">
               {b.chains.map((c) => (
-                <PauseRow key={c.chainId} c={c} />
+                <PauseRow key={c.chainId} c={c} refresh={read} />
               ))}
             </div>
           </section>
         </>
       )}
+      <VerifyTerminal id={id} />
     </>
   );
 }
@@ -115,8 +118,22 @@ function Step({ n, label, done, children, waiting = "not yet" }: { n: number; la
   );
 }
 
-function PauseRow({ c }: { c: ChainPause }) {
+function PauseRow({ c, refresh }: { c: ChainPause; refresh: () => void }) {
   const signed = c.pauses.length > 0;
+  const unlanded = c.pauses.filter((p) => !p.landed);
+  // Once sent, its receipt is read every 3 s until it lands (up to two minutes).
+  const [sent, setSent] = useState(false);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => () => void (timer.current && clearInterval(timer.current)), []);
+  useEffect(() => {
+    if (c.landed && timer.current) clearInterval(timer.current);
+  }, [c.landed]);
+  const onSent = () => {
+    setSent(true);
+    refresh();
+    let n = 0;
+    timer.current = setInterval(() => (++n > 40 && timer.current ? clearInterval(timer.current) : refresh()), 3000);
+  };
   return (
     <section className="panel-app pause-row" aria-label={`Pause on ${c.chain}`}>
       <div className="pause-head">
@@ -127,7 +144,7 @@ function PauseRow({ c }: { c: ChainPause }) {
         <Step n={1} label="Signed" done={signed}>
           {c.signed && <TxChip {...c.signed} />}
         </Step>
-        <Step n={2} label="Landed" done={c.landed}>
+        <Step n={2} label="Landed" done={c.landed} waiting={sent ? "sent · waiting for the receipt" : "not yet"}>
           {c.pauses.map((p) => (
             <TxChip key={p.hash} chain={c.chain} hash={p.hash} href={p.href} />
           ))}
@@ -136,6 +153,7 @@ function PauseRow({ c }: { c: ChainPause }) {
           {c.verified?.hash ? <TxChip {...c.verified} /> : null}
         </Step>
       </ol>
+      {signed && unlanded.length > 0 && !sent && <SendPause chain={c.chain} rpc={c.rpc} pauses={unlanded} onSent={onSent} />}
       {c.gas?.low && (
         <div className="warnbox" role="note" aria-label={`Low pause gas on ${c.chain}`}>
           <span className="chip warn">Low pause gas</span>
