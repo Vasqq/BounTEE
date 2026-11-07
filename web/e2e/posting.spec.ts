@@ -14,14 +14,14 @@ const PAUSE_ROLE = pauseRole.address(pauseRole.MAINNET_ROOT_PUBLIC_KEY, CONTRACT
 const step = (page: Page, n: number) => page.getByRole("region", { name: new RegExp(`^${n}\\. `) });
 const item = (page: Page, title: RegExp) => page.getByRole("listitem").filter({ has: page.getByRole("heading", { name: title }) });
 
+/** The rules need no wallet; MetaMask connects at the pause-role step, the first that needs its address. */
 async function connect(page: Page) {
-  await page.goto("/post");
-  await page.getByRole("button", { name: "Connect MetaMask" }).click();
-  await expect(page.getByText(ACCOUNT).first()).toBeVisible();
+  await step(page, 2).getByRole("button", { name: "Connect MetaMask" }).click();
+  await expect(step(page, 2)).toContainText(PAUSE_ROLE, { ignoreCase: true });
 }
 
 async function fillRules(page: Page) {
-  const s = step(page, 2);
+  const s = step(page, 1);
   await s.getByLabel("Bounty name").fill(NAME);
   await s.getByLabel("Chain").first().selectOption("Base");
   await s.getByLabel("Contract address").first().fill(VAULT_BASE);
@@ -41,18 +41,14 @@ test("D13, D5, D17, D20, D15: one MetaMask grants the pause roles, tops up pause
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await metamask(page, PROTOCOL_KEY);
   await setWorld(page, postingWorld(ACCOUNT, { near: "0", usdc: "10000000" }));
-  await connect(page);
+  await page.goto("/post");
 
-  // 1. Connect: the NEAR account is the wallet's address; NEAR signing is enabled once, for free.
-  await page.getByRole("button", { name: "Enable NEAR signing" }).click();
-  await expect(step(page, 1)).toContainText("done");
-  await page.getByRole("button", { name: "Continue" }).click();
-
-  // 2. Rules, with the coverage limit stated (R4.12).
-  await expect(step(page, 2)).toContainText("Only contracts that pay nothing to callers by design can be covered.");
+  // 1. Rules, with the coverage limit stated (R4.12).
+  await expect(step(page, 1)).toContainText("Only contracts that pay nothing to callers by design can be covered.");
   await fillRules(page);
 
-  // 3. Pause role, per covered contract, ticked off as each grant lands (D5).
+  // 2. Pause role, per covered contract, ticked off as each grant lands (D5). MetaMask connects here.
+  await connect(page);
   await expect(item(page, /Base/)).toContainText("not yet");
   await item(page, /Base/).getByRole("button", { name: "Grant on Base" }).click();
   await expect(item(page, /Base/)).toContainText("done");
@@ -66,8 +62,8 @@ test("D13, D5, D17, D20, D15: one MetaMask grants the pause roles, tops up pause
   }
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // 4. Pause gas, with the plain explanation (D5), ticked off per chain.
-  const gas = step(page, 4);
+  // 3. Pause gas, with the plain explanation (D5), ticked off per chain.
+  const gas = step(page, 3);
   await expect(gas).toContainText("The pause is a real transaction on that chain, paid by the pause-role address");
   await expect(gas).toContainText("BounTEE's funds on NEAR can't pay gas there");
   await expect(gas).toContainText("nobody, the Protocol included, can take that gas back");
@@ -80,8 +76,8 @@ test("D13, D5, D17, D20, D15: one MetaMask grants the pause roles, tops up pause
   expect(BigInt(topUp.value!)).toBe(BigInt(PAUSE_GAS_PER_PAUSE));
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // 5. A little NEAR: the address with Copy, ticked off once it arrives (D17). No faucet on mainnet.
-  const near = step(page, 5);
+  // 4. A little NEAR: the address with Copy, ticked off once it arrives (D17). No faucet on mainnet.
+  const near = step(page, 4);
   await expect(near).toContainText(ACCOUNT);
   await expect(near).toContainText("0.7 NEAR");
   await expect(near.getByRole("link", { name: /faucet/i })).toHaveCount(0);
@@ -90,17 +86,20 @@ test("D13, D5, D17, D20, D15: one MetaMask grants the pause roles, tops up pause
   await expect(near).toContainText("done", { timeout: 15_000 });
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // 6. The exploit key, from one MetaMask signature (asked twice to check it repeats) (D20).
+  // 5. The exploit key, from one MetaMask signature (asked twice to check it repeats) (D20).
   const key = exploitPublicKey(PROTOCOL_KEY, { protocol: ACCOUNT, name: NAME });
   await page.getByRole("button", { name: "Sign with MetaMask" }).click();
-  await expect(step(page, 6)).toContainText(key);
+  await expect(step(page, 5)).toContainText(key);
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // 7. The rules read back, the risk panel beside the two prompts (D5, D15), then post.
-  const post = step(page, 7);
+  // 6. The rules read back, the risk panel beside the two prompts (D5, D15), then post. NEAR
+  // signing is enabled once, for free, just before the first NEAR transaction.
+  const post = step(page, 6);
   await expect(post).toContainText("Pays 10 USDC to the first Whitehat whose claim takes at least 1 USDC");
   const risk = page.getByRole("complementary", { name: "What you're risking" });
   await expect(risk).toBeVisible();
+  await post.getByRole("button", { name: "Enable NEAR signing" }).click();
+  await expect(item(page, /Enable NEAR signing/)).toContainText("done");
   await post.getByRole("button", { name: "Prepay the posting fee" }).click();
   await post.getByRole("button", { name: "Post the bounty" }).click();
   await expect(post).toContainText("Your bounty is live.", { timeout: 15_000 });
@@ -130,9 +129,9 @@ test("D14: each grant can be copied for a multisig", async ({ page }) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await metamask(page, PROTOCOL_KEY);
   await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
-  await connect(page);
-  await page.getByRole("button", { name: "Continue" }).click();
+  await page.goto("/post");
   await fillRules(page);
+  await connect(page);
   await item(page, /Base/).getByRole("button", { name: "Copy for your multisig" }).click();
   const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
   expect(copied).toMatchObject({ chainId: BASE, to: VAULT_BASE, value: "0" });
@@ -163,21 +162,21 @@ test("D15: the risk panel states every point before anything is signed", async (
 test("D20: a wallet whose signatures differ falls back to a saved key file", async ({ page }) => {
   await metamask(page, PROTOCOL_KEY, { unstable: true });
   await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
-  await connect(page);
-  await page.getByRole("button", { name: "Continue" }).click();
+  await page.goto("/post");
   await fillRules(page);
-  await page.getByRole("navigation", { name: "Posting steps" }).getByRole("button", { name: "6. Exploit key" }).click();
+  await connect(page);
+  await page.getByRole("navigation", { name: "Posting steps" }).getByRole("button", { name: "5. Exploit key" }).click();
   await page.getByRole("button", { name: "Sign with MetaMask" }).click();
-  await expect(step(page, 6)).toContainText("gave two different signatures");
+  await expect(step(page, 5)).toContainText("gave two different signatures");
   // The fallback: a saved X25519 key, 32 bytes as hex.
-  await step(page, 6).getByLabel("Exploit key file").setInputFiles({ name: "exploit-key.hex", mimeType: "text/plain", buffer: Buffer.from("11".repeat(32)) });
-  await expect(step(page, 6)).toContainText(/x25519:[1-9A-HJ-NP-Za-km-z]{43,44}/);
+  await step(page, 5).getByLabel("Exploit key file").setInputFiles({ name: "exploit-key.hex", mimeType: "text/plain", buffer: Buffer.from("11".repeat(32)) });
+  await expect(step(page, 5)).toContainText(/x25519:[1-9A-HJ-NP-Za-km-z]{43,44}/);
 });
 
 test("R4.12: the posting flow states the coverage limit @phone", async ({ page }) => {
   await metamask(page, PROTOCOL_KEY);
   await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
-  await page.goto("/post#2");
+  await page.goto("/post");
   await expect(page.getByText("Only contracts that pay nothing to callers by design can be covered.")).toBeVisible();
 });
 
@@ -185,9 +184,8 @@ test("R12.1: a mistyped address with no code never ticks as granted", async ({ p
   await metamask(page, PROTOCOL_KEY);
   const w = postingWorld(ACCOUNT, { onboarded: true });
   await setWorld(page, w);
-  await connect(page);
-  await page.getByRole("button", { name: "Continue" }).click();
-  const s = step(page, 2);
+  await page.goto("/post");
+  const s = step(page, 1);
   await s.getByLabel("Bounty name").fill(NAME);
   await s.getByLabel("Contract address").first().fill("0x00000000000000000000000000000000000000aa");
   await s.getByLabel("Bounty amount").fill("10");
@@ -195,7 +193,21 @@ test("R12.1: a mistyped address with no code never ticks as granted", async ({ p
   await s.getByLabel("End date").fill("2026-12-31");
   await s.getByLabel("Disclosure delay").fill("1");
   await s.getByRole("button", { name: "Continue" }).click();
+  await connect(page);
   await expect(item(page, /Base/)).toContainText("not yet");
   await page.waitForTimeout(5_000);
   await expect(item(page, /Base/)).toContainText("not yet");
+});
+
+test("D13: the rules are filled in before any wallet connects; MetaMask is asked only at the first step that needs it", async ({ page }) => {
+  await metamask(page, PROTOCOL_KEY);
+  await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
+  await page.goto("/post");
+  const rules = step(page, 1);
+  await expect(rules.getByRole("button", { name: "Connect MetaMask" })).toHaveCount(0);
+  await expect(rules.getByLabel("Chain").first().locator("option")).toHaveText(["Base", "Arbitrum One"]);
+  await fillRules(page);
+  expect(await page.evaluate(() => sessionStorage.getItem("__authorized"))).toBeNull();
+  await connect(page);
+  expect(await page.evaluate(() => sessionStorage.getItem("__authorized"))).toBe("1");
 });

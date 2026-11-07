@@ -1,9 +1,9 @@
 // A bounty being posted, as the Protocol fills it in, and the rules it becomes (R1.1). The
 // rules are checked with the shared formats' own parser before anything is signed, so the
 // browser never sends a posting the contract would refuse for its shape.
-import { parseBountyId, parseRules, type Rules } from "@bountee/formats";
+import { isBountyName, parseRules, type Rules } from "@bountee/formats";
 import { parseUnits } from "viem";
-import type { PostingStatus } from "./posting.ts";
+import type { PostingBasics } from "./posting.ts";
 
 export interface Draft {
   name: string;
@@ -17,23 +17,18 @@ export interface Draft {
 
 export const emptyDraft = (): Draft => ({ name: "", covered: [{ chainId: 8453, address: "" }], proofChain: 8453, amount: "", minimum: "", endDate: "", delay: "30" });
 
-/** The bounty ID's rule, as the contract applies it; the error to show, or null. */
-export function nameProblem(name: string, protocol: string): string | null {
+/** The bounty name's rule, as the contract applies it; the error to show, or null. */
+export function nameProblem(name: string): string | null {
   if (!name) return "Name the bounty.";
-  try {
-    parseBountyId({ protocol, name });
-    return null;
-  } catch {
-    return "1 to 64 characters of a–z, 0–9 and -, not starting or ending with -.";
-  }
+  return isBountyName(name) ? null : "1 to 64 characters of a–z, 0–9 and -, not starting or ending with -.";
 }
 
 const isAddress = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a);
 
 /** What's wrong with the draft, field by field; empty when it can be posted. */
-export function draftProblems(d: Draft, protocol: string, decimals: number): Record<string, string> {
+export function draftProblems(d: Draft, decimals: number): Record<string, string> {
   const out: Record<string, string> = {};
-  const n = nameProblem(d.name, protocol);
+  const n = nameProblem(d.name);
   if (n) out.name = n;
   d.covered.forEach((c, i) => {
     if (!isAddress(c.address)) out[`covered.${i}`] = "A contract address: 0x and 40 hex characters.";
@@ -57,7 +52,7 @@ export function draftProblems(d: Draft, protocol: string, decimals: number): Rec
 }
 
 /** The rules to post: the Protocol's draft plus what BounTEE fixes (recency limit, seed, judge build). */
-export function rulesOf(d: Draft, s: PostingStatus, exploitPublicKey: string): Rules {
+export function rulesOf(d: Draft, s: PostingBasics, exploitPublicKey: string): Rules {
   const usdc = s.chains.find((c) => c.id === d.proofChain)!.usdc;
   return parseRules({
     covered_contracts: d.covered.map((c) => ({ chain_id: c.chainId, address: c.address.toLowerCase() })),

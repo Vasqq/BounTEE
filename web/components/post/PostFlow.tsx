@@ -1,8 +1,9 @@
 "use client";
 // The posting flow (#31): a Protocol posts a bounty with the MetaMask it already uses (D13).
-// Seven steps, moved between with the floating dock (DESIGN.md, Posting flow). Everything
+// Six steps, moved between with the floating dock (DESIGN.md, Posting flow). Everything
 // checked is read live (lib/posting.ts) and ticked off only once it is on chain; MetaMask signs
 // the EVM grants and top-ups directly, and NEAR transactions as the Protocol's 0x… account.
+// The rules need no wallet: MetaMask connects at the first step that needs its address.
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { encodeFunctionData, formatUnits, hexToBytes, keccak256, parseAbi, toHex, type Address } from "viem";
@@ -12,14 +13,14 @@ import { draftProblems, emptyDraft, rulesOf, type Draft } from "@/lib/draft.ts";
 import { exploitKeyMessage, keyFromFile, keyFromSignature, publicKeyText } from "@/lib/exploit-key.ts";
 import { units } from "@/lib/format.ts";
 import { enableNearSigning, MAX_GAS, nearFunctionCall } from "@/lib/near-eth.ts";
-import type { EvmCall, PostingStatus } from "@/lib/posting.ts";
+import type { EvmCall, PostingBasics, PostingStatus } from "@/lib/posting.ts";
 import { BOUNTY_CONTRACT, NEAR_USDC, pauseRoleOf } from "@/lib/pinned.ts";
 import { rulesInPlainEnglish } from "@/lib/rules.ts";
 import { wagmiConfig } from "@/lib/wagmi.ts";
 import { CommandBlock } from "../CommandBlock.tsx";
 import { RiskPanel } from "./RiskPanel.tsx";
 
-const STEPS = ["Connect", "Rules", "Pause role", "Pause gas", "Add NEAR", "Exploit key", "Post"] as const;
+const STEPS = ["Rules", "Pause role", "Pause gas", "Add NEAR", "Exploit key", "Post"] as const;
 /** What a first posting-fee prepayment adds for its balance entry's storage, with room to spare (as `bountee post` does). */
 const ENTRY_STORAGE = 10n ** 22n;
 const near = (yocto: string | bigint) => `${Number(units(yocto, 24)).toLocaleString("en-US", { maximumFractionDigits: 3 })} NEAR`;
@@ -30,6 +31,21 @@ function walletError(e: unknown): string {
   const err = e as { shortMessage?: string; message?: string; code?: number; cause?: { code?: number } };
   if (err.code === 4001 || err.cause?.code === 4001 || /reject|denied/i.test(err.message ?? "")) return "MetaMask didn't send it.";
   return err.shortMessage ?? err.message ?? "Something went wrong.";
+}
+
+/** Checked like the full status: the contract and USDC this build pins. */
+function useBasics() {
+  return useQuery({
+    queryKey: ["posting-basics"],
+    queryFn: async () => {
+      const res = await fetch("/api/post");
+      if (!res.ok) throw new Error(`the posting basics answered ${res.status}`);
+      const b = ((await res.json()) as { basics: PostingBasics }).basics;
+      if (b.contract !== BOUNTY_CONTRACT || b.usdc !== NEAR_USDC) throw new Error("The app's server named another bounty contract or USDC than this page expects, so nothing will be signed.");
+      return b;
+    },
+    staleTime: Infinity,
+  });
 }
 
 function usePostingStatus(account: string | undefined, draft: Draft) {
@@ -85,8 +101,10 @@ export function PostFlow() {
   const [key, setKey] = useState<{ publicKey: string; from: "wallet" | "key-file" } | null>(null);
   const { address } = useAccount();
   const account = address?.toLowerCase();
+  const basics = useBasics();
   const q = usePostingStatus(account, draft);
   const s = q.data;
+  const b = s ?? basics.data;
   // The exploit key is derived from a message naming the bounty (D20): a new name needs a new signature.
   useEffect(() => setKey(null), [draft.name]);
 
@@ -94,7 +112,7 @@ export function PostFlow() {
   useEffect(() => {
     const read = () => {
       const n = Number(location.hash.slice(1));
-      if (n >= 1 && n <= 7) setStep(n);
+      if (n >= 1 && n <= STEPS.length) setStep(n);
     };
     read();
     addEventListener("hashchange", read);
@@ -106,32 +124,34 @@ export function PostFlow() {
     scrollTo({ top: 0 });
   };
 
-  const problems = useMemo(() => (s && account ? draftProblems(draft, account, s.usdcDecimals) : { pending: "" }), [draft, account, s]);
-  const rulesOk = Object.keys(problems).length === 0 && !!s && !s.nameTaken;
+  const problems = useMemo(() => (b ? draftProblems(draft, b.usdcDecimals) : { pending: "" }), [draft, b]);
+  // A name is taken only within the Protocol's own bounties, so it is known once the wallet is.
+  const rulesOk = Object.keys(problems).length === 0 && !s?.nameTaken;
   const nearOk = !!s && BigInt(s.account.near) >= BigInt(s.nearNeeded);
   const posted = s?.bountyState === "live";
   // Proven steps turn green only once the chain shows them; the others are only complete.
-  const proven = [!!s?.account.onboarded && !!account, false, !!s && s.covered.length > 0 && s.covered.every((c) => c.granted), !!s && s.gas.length > 0 && s.gas.every((g) => g.ok), nearOk, false, posted];
-  const complete = [proven[0], rulesOk, proven[2], proven[3], nearOk, !!key, posted];
+  const proven = [false, !!s && s.covered.length > 0 && s.covered.every((c) => c.granted), !!s && s.gas.length > 0 && s.gas.every((g) => g.ok), nearOk, false, posted];
+  const complete = [rulesOk, proven[1], proven[2], nearOk, !!key, posted];
 
   return (
     <>
       <h1 className="page-title">Post a bounty</h1>
-      <p className="lead">Posting connects MetaMask. It signs every step, on Base, Arbitrum One and NEAR.</p>
+      <p className="lead">One MetaMask signs it all: the pause-role grants on Base and Arbitrum One, and the bounty on NEAR as the NEAR account named after your address.</p>
       <div className="post-grid">
         <div>
-          {q.isError && (
-            <p role="alert" className="ink post-error">
-              {(q.error as Error).message}
-            </p>
+          {[basics, q].map((x, i) =>
+            x.isError ? (
+              <p key={i} role="alert" className="ink post-error">
+                {(x.error as Error).message}
+              </p>
+            ) : null,
           )}
-          {step === 1 && <ConnectStep s={s} account={account} done={!!proven[0]} next={() => go(2)} />}
-          {step === 2 && <RulesStep s={s} account={account} draft={draft} setDraft={setDraft} problems={problems} ok={rulesOk} next={() => go(3)} />}
-          {step === 3 && <GrantStep s={rulesOk ? s : undefined} done={!!proven[2]} next={() => go(4)} />}
-          {step === 4 && <GasStep s={rulesOk ? s : undefined} done={!!proven[3]} next={() => go(5)} />}
-          {step === 5 && <NearStep s={s} account={account} done={nearOk} next={() => go(6)} />}
-          {step === 6 && <KeyStep s={s} account={account} draft={draft} keyState={key} setKey={setKey} next={() => go(7)} />}
-          {step === 7 && <PostStep s={s} account={account} draft={draft} exploitKey={key?.publicKey ?? null} ready={complete.slice(0, 6).every(Boolean)} />}
+          {step === 1 && <RulesStep b={b} s={s} account={account} draft={draft} setDraft={setDraft} problems={problems} ok={rulesOk} next={() => go(2)} />}
+          {step === 2 && <GrantStep account={account} s={rulesOk ? s : undefined} done={!!proven[1]} next={() => go(3)} />}
+          {step === 3 && <GasStep account={account} s={rulesOk ? s : undefined} done={!!proven[2]} next={() => go(4)} />}
+          {step === 4 && <NearStep s={s} account={account} done={nearOk} next={() => go(5)} />}
+          {step === 5 && <KeyStep s={s} account={account} draft={draft} keyState={key} setKey={setKey} next={() => go(6)} />}
+          {step === 6 && <PostStep s={s} account={account} draft={draft} exploitKey={key?.publicKey ?? null} ready={complete.slice(0, 5).every(Boolean)} />}
         </div>
         <RiskPanel className="risk-side" />
       </div>
@@ -191,7 +211,11 @@ function Problem({ m }: { m: { isError: boolean; error: unknown } }) {
   return m.isError ? <p role="alert">{walletError(m.error)}</p> : null;
 }
 
-function ConnectStep({ s, account, done, next }: { s?: PostingStatus; account?: string; done: boolean; next: () => void }) {
+/**
+ * MetaMask connects only when a step first needs it: the wallet's address is the Protocol's
+ * NEAR account and part of the bounty's ID, which the pause-role address comes from (D13, D25).
+ */
+function WithWallet({ account, why, children }: { account?: string; why: string; children: ReactNode }) {
   const { connectors, connectAsync } = useConnect();
   const connect = useMutation({
     mutationFn: async () => {
@@ -200,41 +224,17 @@ function ConnectStep({ s, account, done, next }: { s?: PostingStatus; account?: 
       await connectAsync({ connector: mm });
     },
   });
-  const enable = useMutation({ mutationFn: () => enableNearSigning(account as Address, s!.account.relayerKey) });
+  if (account) return <>{children}</>;
   return (
-    <Step n={1} title="Connect">
-      <p className="step-lead">One MetaMask signs everything: the pause-role grants on Base and Arbitrum One, and the bounty on NEAR as your account named after your address.</p>
-      <ol className="checklist">
-        <Item n={1} title="Your NEAR account" done={done}>
-          {account ? (
-            <>
-              <CommandBlock text={account} />
-              {s && !s.account.onboarded && (
-                <>
-                  <p>MetaMask signs NEAR transactions through NEAR's relayer. Let it submit them for this account: it's free, and needed once.</p>
-                  <div className="send">
-                    <button type="button" className="btn btn-ink" onClick={() => enable.mutate()} disabled={enable.isPending}>
-                      {enable.isPending ? "Enabling" : "Enable NEAR signing"}
-                    </button>
-                  </div>
-                  <Problem m={enable} />
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="send">
-                <button type="button" className="btn btn-ink" onClick={() => connect.mutate()} disabled={connect.isPending}>
-                  {connect.isPending ? "Connecting" : "Connect MetaMask"}
-                </button>
-              </div>
-              <Problem m={connect} />
-            </>
-          )}
-        </Item>
-      </ol>
-      {done && <Next ok next={next} />}
-    </Step>
+    <>
+      <div className="send">
+        <button type="button" className="btn btn-ink" onClick={() => connect.mutate()} disabled={connect.isPending}>
+          {connect.isPending ? "Connecting" : "Connect MetaMask"}
+        </button>
+        <p>{why}</p>
+      </div>
+      <Problem m={connect} />
+    </>
   );
 }
 
@@ -249,10 +249,10 @@ function Field({ label, error, help, children }: { label: string; error?: string
   );
 }
 
-function RulesStep(p: { s?: PostingStatus; account?: string; draft: Draft; setDraft: (d: Draft) => void; problems: Record<string, string>; ok: boolean; next: () => void }) {
+function RulesStep(p: { b?: PostingBasics; s?: PostingStatus; account?: string; draft: Draft; setDraft: (d: Draft) => void; problems: Record<string, string>; ok: boolean; next: () => void }) {
   const { draft: d, setDraft } = p;
   const set = (patch: Partial<Draft>) => setDraft({ ...d, ...patch });
-  const chains = p.s?.chains ?? [];
+  const chains = p.b?.chains ?? [];
   const setCovered = (i: number, patch: Partial<Draft["covered"][number]>) => set({ covered: d.covered.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
   const coveredChains = [...new Set(d.covered.map((c) => c.chainId))];
   // A typo shows once its field has been left.
@@ -260,10 +260,10 @@ function RulesStep(p: { s?: PostingStatus; account?: string; draft: Draft; setDr
   const err = (k: string) => (seen[k] ? p.problems[k] : undefined);
   const touch = (k: string) => () => setSeen((x) => ({ ...x, [k]: true }));
   return (
-    <Step n={2} title="Rules">
+    <Step n={1} title="Rules">
       <p className="step-lead">Fixed once posted: nobody can change them, you included.</p>
       <div className="form">
-        <Field label="Bounty name" error={err("name") ?? (p.s?.nameTaken && d.name ? "That name is taken: a bounty name is never reused." : undefined)} help={p.account ? `Its ID: ${p.account}/${d.name || "<name>"}. The pause-role address comes from it, so renaming after a grant or top-up means doing them again.` : undefined}>
+        <Field label="Bounty name" error={err("name") ?? (p.s?.nameTaken && d.name ? "That name is taken: a bounty name is never reused." : undefined)} help={`Its ID: ${p.account ?? "<your wallet's address>"}/${d.name || "<name>"}. The pause-role address comes from it, so renaming after a grant or top-up means doing them again.`}>
           <input className="datum" value={d.name} onChange={(e) => set({ name: e.target.value.trim() })} onBlur={touch("name")} spellCheck={false} />
         </Field>
         <fieldset className="covered">
@@ -320,24 +320,26 @@ function RulesStep(p: { s?: PostingStatus; account?: string; draft: Draft; setDr
           </Field>
         </div>
       </div>
-      <Next ok={p.ok} next={() => (coveredChains.includes(d.proofChain) ? p.next() : (set({ proofChain: coveredChains[0]! }), p.next()))} why={p.account ? "Fill in every field to continue." : "Connect MetaMask first."} />
+      <Next ok={p.ok} next={() => (coveredChains.includes(d.proofChain) ? p.next() : (set({ proofChain: coveredChains[0]! }), p.next()))} why="Fill in every field to continue." />
     </Step>
   );
 }
 
-function GrantStep({ s, done, next }: { s?: PostingStatus; done: boolean; next: () => void }) {
+function GrantStep({ account, s, done, next }: { account?: string; s?: PostingStatus; done: boolean; next: () => void }) {
   return (
-    <Step n={3} title="Pause role">
+    <Step n={2} title="Pause role">
       <p className="step-lead">
         Grant the pause role on each covered contract to the bounty's pause-role address. It can only pause: no unpause, no other power. Granting it is what proves you control the contract.
       </p>
-      {s ? <CommandBlock text={s.pauseRole} /> : <p className="step-lead">Fill in the rules first: the pause-role address comes from the bounty's name.</p>}
-      <ol className="checklist">
-        {s?.covered.map((c, i) => (
-          <GrantItem key={`${c.chainId}:${c.address}`} n={i + 1} c={c} pauseRole={s.pauseRole} primary={i === s.covered.findIndex((x) => !x.granted && x.grant)} />
-        ))}
-      </ol>
-      <Next ok={done} next={next} why="Each grant ticks off once pause() from the pause-role address succeeds on its chain." />
+      <WithWallet account={account} why="The pause-role address comes from your wallet's address and the bounty's name.">
+        {s ? <CommandBlock text={s.pauseRole} /> : <p className="step-lead">Fill in the rules first: the pause-role address comes from the bounty's name.</p>}
+        <ol className="checklist">
+          {s?.covered.map((c, i) => (
+            <GrantItem key={`${c.chainId}:${c.address}`} n={i + 1} c={c} pauseRole={s.pauseRole} primary={i === s.covered.findIndex((x) => !x.granted && x.grant)} />
+          ))}
+        </ol>
+        <Next ok={done} next={next} why="Each grant ticks off once pause() from the pause-role address succeeds on its chain." />
+      </WithWallet>
     </Step>
   );
 }
@@ -383,20 +385,22 @@ function GrantItem({ n, c, pauseRole, primary }: { n: number; c: PostingStatus["
   );
 }
 
-function GasStep({ s, done, next }: { s?: PostingStatus; done: boolean; next: () => void }) {
+function GasStep({ account, s, done, next }: { account?: string; s?: PostingStatus; done: boolean; next: () => void }) {
   return (
-    <Step n={4} title="Pause gas">
+    <Step n={3} title="Pause gas">
       <p className="step-lead">
         The pause is a real transaction on that chain, paid by the pause-role address, so it needs a few cents of that chain's token there in advance. BounTEE's funds on NEAR can't pay gas there. Only the BounTEE
         contract can sign for that address, so nobody, the Protocol included, can take that gas back. Nobody presses the pause button: a proven exploit triggers it.
       </p>
-      {!s && <p className="step-lead">Fill in the rules first: the pause-role address comes from the bounty's name.</p>}
-      <ol className="checklist">
-        {s?.gas.map((g, i) => (
-          <GasItem key={g.chainId} n={i + 1} g={g} pauseRole={s.pauseRole} primary={i === s.gas.findIndex((x) => !x.ok)} />
-        ))}
-      </ol>
-      <Next ok={done} next={next} why="Each chain ticks off once the pause-role address holds what its pauses need." />
+      <WithWallet account={account} why="The pause-role address comes from your wallet's address and the bounty's name.">
+        {!s && <p className="step-lead">Fill in the rules first: the pause-role address comes from the bounty's name.</p>}
+        <ol className="checklist">
+          {s?.gas.map((g, i) => (
+            <GasItem key={g.chainId} n={i + 1} g={g} pauseRole={s.pauseRole} primary={i === s.gas.findIndex((x) => !x.ok)} />
+          ))}
+        </ol>
+        <Next ok={done} next={next} why="Each chain ticks off once the pause-role address holds what its pauses need." />
+      </WithWallet>
     </Step>
   );
 }
@@ -428,27 +432,29 @@ function GasItem({ n, g, pauseRole, primary }: { n: number; g: PostingStatus["ga
 function NearStep({ s, account, done, next }: { s?: PostingStatus; account?: string; done: boolean; next: () => void }) {
   const faucet = process.env.NEXT_PUBLIC_NEAR_FAUCET;
   return (
-    <Step n={5} title="Add NEAR">
+    <Step n={4} title="Add NEAR">
       <p className="step-lead">Your NEAR account pays the posting fee and the gas of the two posting prompts. Send NEAR to it from an exchange or another wallet.</p>
-      <ol className="checklist">
-        <Item n={1} title={s ? `Needs ${near(s.nearNeeded)}` : "Needs NEAR"} done={done}>
-          {s && (
-            <p>
-              The posting fee is {near(s.postingFee)}; the rest pays gas. It holds {near(s.account.near)}.
-            </p>
-          )}
-          {account && <CommandBlock text={account} />}
-          {/* D17: a faucet exists only for a testnet rehearsal build. */}
-          {faucet && (
-            <p>
-              <a href={faucet} target="_blank" rel="noopener">
-                Get NEAR from the faucet
-              </a>
-            </p>
-          )}
-        </Item>
-      </ol>
-      <Next ok={done} next={next} why="It ticks off once the NEAR arrives." />
+      <WithWallet account={account} why="Your NEAR account is your wallet's address.">
+        <ol className="checklist">
+          <Item n={1} title={s ? `Needs ${near(s.nearNeeded)}` : "Needs NEAR"} done={done}>
+            {s && (
+              <p>
+                The posting fee is {near(s.postingFee)}; the rest pays gas. It holds {near(s.account.near)}.
+              </p>
+            )}
+            {account && <CommandBlock text={account} />}
+            {/* D17: a faucet exists only for a testnet rehearsal build. */}
+            {faucet && (
+              <p>
+                <a href={faucet} target="_blank" rel="noopener">
+                  Get NEAR from the faucet
+                </a>
+              </p>
+            )}
+          </Item>
+        </ol>
+        <Next ok={done} next={next} why="It ticks off once the NEAR arrives." />
+      </WithWallet>
     </Step>
   );
 }
@@ -471,46 +477,48 @@ function KeyStep(p: { s?: PostingStatus; account?: string; draft: Draft; keyStat
   });
   const [fileProblem, setFileProblem] = useState("");
   return (
-    <Step n={6} title="Exploit key">
+    <Step n={5} title="Exploit key">
       <p className="step-lead">
         After the payout, the winning exploit is released to this key, and only you can open it. It comes from one MetaMask signature, so there's no file to keep: sign the same message again to open it.
       </p>
-      <ol className="checklist">
-        <Item n={1} title="Your exploit key" done={false}>
-          {p.keyState ? (
-            <CommandBlock text={p.keyState.publicKey} />
-          ) : differs ? (
-            <>
-              <p className="ink">Your wallet gave two different signatures, so no key can come from it. Use a saved X25519 key file instead.</p>
-              <Field label="Exploit key file" error={fileProblem || undefined} help="PKCS#8 PEM, or 32 bytes as hex: openssl genpkey -algorithm x25519">
-                <input
-                  type="file"
-                  onChange={async (e) => {
-                    const f = e.target.files?.[0];
-                    if (!f) return;
-                    try {
-                      p.setKey({ publicKey: publicKeyText(keyFromFile(await f.text())), from: "key-file" });
-                      setFileProblem("");
-                    } catch (err) {
-                      setFileProblem((err as Error).message);
-                    }
-                  }}
-                />
-              </Field>
-            </>
-          ) : (
-            <>
-              <div className="send">
-                <button type="button" className="btn btn-ink" onClick={() => sign.mutate()} disabled={sign.isPending || !p.s || !p.draft.name}>
-                  {sign.isPending ? "Signing" : "Sign with MetaMask"}
-                </button>
-              </div>
-              <Problem m={sign} />
-            </>
-          )}
-        </Item>
-      </ol>
-      <Next ok={!!p.keyState} next={p.next} />
+      <WithWallet account={p.account} why="The key comes from your wallet's signature.">
+        <ol className="checklist">
+          <Item n={1} title="Your exploit key" done={false}>
+            {p.keyState ? (
+              <CommandBlock text={p.keyState.publicKey} />
+            ) : differs ? (
+              <>
+                <p className="ink">Your wallet gave two different signatures, so no key can come from it. Use a saved X25519 key file instead.</p>
+                <Field label="Exploit key file" error={fileProblem || undefined} help="PKCS#8 PEM, or 32 bytes as hex: openssl genpkey -algorithm x25519">
+                  <input
+                    type="file"
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      try {
+                        p.setKey({ publicKey: publicKeyText(keyFromFile(await f.text())), from: "key-file" });
+                        setFileProblem("");
+                      } catch (err) {
+                        setFileProblem((err as Error).message);
+                      }
+                    }}
+                  />
+                </Field>
+              </>
+            ) : (
+              <>
+                <div className="send">
+                  <button type="button" className="btn btn-ink" onClick={() => sign.mutate()} disabled={sign.isPending || !p.s || !p.draft.name}>
+                    {sign.isPending ? "Signing" : "Sign with MetaMask"}
+                  </button>
+                </div>
+                <Problem m={sign} />
+              </>
+            )}
+          </Item>
+        </ol>
+        <Next ok={!!p.keyState} next={p.next} />
+      </WithWallet>
     </Step>
   );
 }
@@ -540,6 +548,8 @@ function PostStep({ s, account, draft, exploitKey, ready }: { s?: PostingStatus;
         deposit: 1n,
       }),
   });
+  const enable = useMutation({ mutationFn: () => enableNearSigning(account as Address, s!.account.relayerKey) });
+  const onboarded = !!s?.account.onboarded;
   const live = s?.bountyState === "live";
   const plain = rules && s
     ? rulesInPlainEnglish({
@@ -553,7 +563,7 @@ function PostStep({ s, account, draft, exploitKey, ready }: { s?: PostingStatus;
       } as Parameters<typeof rulesInPlainEnglish>[0])
     : [];
   return (
-    <Step n={7} title="Post">
+    <Step n={6} title="Post">
       {plain.length > 0 ? (
         <div className="panel-app readback">
           <h3>Your rules, read back</h3>
@@ -565,51 +575,69 @@ function PostStep({ s, account, draft, exploitKey, ready }: { s?: PostingStatus;
         <p className="step-lead">Finish the steps before this one to see your rules read back.</p>
       )}
       <RiskPanel className="risk-inline" />
-      <ol className="checklist">
-        <Item n={1} title="Prepay the posting fee" done={prepaid}>
-          {!prepaid && s && (
-            <>
-              <p>
-                {near(feeShort)} toward the posting check, storage and later jobs. It isn't refunded, even if the posting check fails.
-              </p>
-              <div className="send">
-                <button type="button" className="btn btn-ink" onClick={() => prepay.mutate()} disabled={!ready || prepay.isPending || prepay.isSuccess}>
-                  {prepay.isPending ? "Signing" : prepay.isSuccess ? "Confirming" : "Prepay the posting fee"}
-                </button>
-                {!ready && <p>Finish steps 1 to 6 first.</p>}
-              </div>
-              <Problem m={prepay} />
-            </>
-          )}
-        </Item>
-        <Item n={2} title="Post the bounty" done={live}>
-          {live ? (
-            <>
-              <p className="ink">Your bounty is live.</p>
-              <a className="btn btn-line" href={`/bounties/${account}/${draft.name}`}>
-                See your bounty
-              </a>
-            </>
-          ) : s?.bountyState === "check_failed" ? (
-            <p className="ink">The posting check failed: the bounty amount came back in full. Check each grant and the pause gas, then post again under a new name.</p>
-          ) : (
-            <>
-              <p>
-                Sends {rules ? `${formatUnits(BigInt(rules.bounty_amount), s!.usdcDecimals)} USDC` : "the bounty amount"} with the rules. The bounty goes live once the posting check confirms every grant and the pause gas.
-              </p>
-              {usdcShort && <p className="ink">Your account holds {formatUnits(BigInt(s!.account.usdc), s!.usdcDecimals)} USDC on NEAR; the bounty needs more.</p>}
-              <div className="send">
-                <button type="button" className={ink(prepaid)} onClick={() => post.mutate()} disabled={!ready || !prepaid || !rules || usdcShort || post.isPending || post.isSuccess}>
-                  {post.isPending ? "Signing" : post.isSuccess ? "Checking" : "Post the bounty"}
-                </button>
-                {ready && !prepaid && <p>Prepay the posting fee first.</p>}
-                {post.isSuccess && !live && <p>The posting check is confirming every grant and the pause gas.</p>}
-              </div>
-              <Problem m={post} />
-            </>
-          )}
-        </Item>
-      </ol>
+      <WithWallet account={account} why="Your wallet signs the NEAR prompts as your NEAR account.">
+        <ol className="checklist">
+          {/* NEAR signing is enabled here, before the first NEAR transaction, once the account holds NEAR. */}
+          <Item n={1} title="Enable NEAR signing" done={onboarded}>
+            {!onboarded && s && (
+              <>
+                <p>MetaMask signs NEAR transactions through NEAR's relayer. Let it submit them for this account: it's free, and needed once.</p>
+                <div className="send">
+                  <button type="button" className="btn btn-ink" onClick={() => enable.mutate()} disabled={!ready || enable.isPending || enable.isSuccess}>
+                    {enable.isPending ? "Enabling" : enable.isSuccess ? "Confirming" : "Enable NEAR signing"}
+                  </button>
+                  {!ready && <p>Finish steps 1 to 5 first.</p>}
+                </div>
+                <Problem m={enable} />
+              </>
+            )}
+          </Item>
+          <Item n={2} title="Prepay the posting fee" done={prepaid}>
+            {!prepaid && s && (
+              <>
+                <p>
+                  {near(feeShort)} toward the posting check, storage and later jobs. It isn't refunded, even if the posting check fails.
+                </p>
+                <div className="send">
+                  <button type="button" className={ink(onboarded)} onClick={() => prepay.mutate()} disabled={!ready || !onboarded || prepay.isPending || prepay.isSuccess}>
+                    {prepay.isPending ? "Signing" : prepay.isSuccess ? "Confirming" : "Prepay the posting fee"}
+                  </button>
+                  {!ready && <p>Finish steps 1 to 5 first.</p>}
+                  {ready && !onboarded && <p>Enable NEAR signing first.</p>}
+                </div>
+                <Problem m={prepay} />
+              </>
+            )}
+          </Item>
+          <Item n={3} title="Post the bounty" done={live}>
+            {live ? (
+              <>
+                <p className="ink">Your bounty is live.</p>
+                <a className="btn btn-line" href={`/bounties/${account}/${draft.name}`}>
+                  See your bounty
+                </a>
+              </>
+            ) : s?.bountyState === "check_failed" ? (
+              <p className="ink">The posting check failed: the bounty amount came back in full. Check each grant and the pause gas, then post again under a new name.</p>
+            ) : (
+              <>
+                <p>
+                  Sends {rules ? `${formatUnits(BigInt(rules.bounty_amount), s!.usdcDecimals)} USDC` : "the bounty amount"} with the rules. The bounty goes live once the posting check confirms every grant and the pause gas.
+                </p>
+                {usdcShort && <p className="ink">Your account holds {formatUnits(BigInt(s!.account.usdc), s!.usdcDecimals)} USDC on NEAR; the bounty needs more.</p>}
+                <div className="send">
+                  <button type="button" className={ink(prepaid)} onClick={() => post.mutate()} disabled={!ready || !prepaid || !rules || usdcShort || post.isPending || post.isSuccess}>
+                    {post.isPending ? "Signing" : post.isSuccess ? "Checking" : "Post the bounty"}
+                  </button>
+                  {ready && !prepaid && <p>Prepay the posting fee first.</p>}
+                  {post.isSuccess && !live && <p>The posting check is confirming every grant and the pause gas.</p>}
+                </div>
+                <Problem m={post} />
+              </>
+            )}
+          </Item>
+        </ol>
+      </WithWallet>
     </Step>
   );
 }
