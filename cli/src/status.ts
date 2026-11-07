@@ -15,7 +15,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { BlockRef, BountyId, Rules, Verdict } from "@bountee/formats";
 import { defaultRpc, evmReceipt, explorerTx } from "./chains.ts";
-import { KEYSTORE_API, NEAR_EXPLORER_TX, type Network } from "./endpoints.ts";
+import { KEYSTORE_API, NEAR_EXPLORER_TX, TX_API, type Network } from "./endpoints.ts";
+import { txSigners } from "./explorer.ts";
 import { events, Near } from "./near.ts";
 
 /**
@@ -138,6 +139,8 @@ export interface StatusOptions {
   outlayerApi?: string;
   /** NEAR transactions known to belong to the claim: the claim's own first. */
   txs?: string[];
+  /** FastNEAR's explorer API, asked who signed each of `txs`. */
+  txApi?: string;
 }
 
 /** Where `claim` saves the transactions it sent, so `status` can find them later. */
@@ -179,19 +182,52 @@ function isVerified(verifications: { verified_pauses?: string[] }[], hash: strin
   return verifications.some((c) => (c.verified_pauses ?? []).some((h) => h.toLowerCase() === hash.toLowerCase()));
 }
 
+/**
+ * A `--tx` transaction's status, or null. NEAR RPC finds a transaction only when asked with its
+ * signer, and anyone may send a payout's `retry_payout`: the explorer says who signed it, and a
+ * claim's own are the Whitehat's, tried too in case the explorer is wrong. A miss rejects rather
+ * than caching null, so a watch asks again on its next poll.
+ */
+const nearTx = (o: StatusOptions, cache: Cache, hash: string, whitehat: string) =>
+  once(cache, `tx:${hash}`, async () => {
+    const signer = (await txSigners(o.txApi ?? TX_API[o.network], [hash])).get(hash);
+    for (const sender of new Set([signer ?? whitehat, whitehat])) {
+      const status = await signedTx(o.near, hash, sender).catch(() => null);
+      if (status) return status;
+    }
+    throw new Error(`no RPC has transaction ${hash}`);
+  }).catch(() => null);
+
+/**
+ * A claim is read long after it ran (publication waits out the disclosure delay), when an
+ * ordinary RPC has dropped its transactions, so those are read from the archival RPC. An ordinary
+ * RPC asked to wait for a dropped transaction times out after 30 s instead of saying it's
+ * unknown; asked not to wait, it says so at once. A transaction it knows may still be running, so
+ * that one is waited for there.
+ */
+async function signedTx(near: Near, hash: string, sender: string): Promise<any> {
+  const archive = near.withArchive()[1];
+  const unknown = await near
+    .rpc("EXPERIMENTAL_tx_status", { tx_hash: hash, sender_account_id: sender, wait_until: "NONE" })
+    .then(() => false, (e: Error) => /UNKNOWN_TRANSACTION/.test(e.message));
+  return unknown && archive ? archive.txStatus(hash, sender, 0) : near.txStatus(hash, sender, 30);
+}
+
 async function findPayout(o: StatusOptions, cache: Cache, claim: ClaimView) {
   for (const hash of o.txs ?? []) {
-    const status = await once(cache, `tx:${hash}`, () => o.near.txStatus(hash, claim.whitehat, 30)).catch(() => null);
+    const status = await nearTx(o, cache, hash, claim.whitehat);
     if (!status) continue;
-    const paid = events(status).some((e) => e.event === "bounty_paid" && e.data?.claim_id === o.claimId);
-    if (!paid) continue;
-    // The receipt where USDC moved to the Whitehat: the token's NEP-141 `ft_transfer` event.
-    const transfer = (status as any).receipts_outcome.find((r: any) =>
-      events({ receipts_outcome: [r] }).some((e) => e.event === "ft_transfer" && e.data?.new_owner_id === claim.whitehat),
-    );
+    // Any account can log these events, so they count only from the bounty contract and from
+    // the USDC it pays in, as `verify` checks: the receipt where USDC moved to the Whitehat.
+    const config = await once(cache, "config", () => o.near.view<any>(o.contract, "config"));
+    const logged = (executor: string, holds: (e: { event: string; data: any }) => boolean) =>
+      (status as any).receipts_outcome.find((r: any) => r.outcome.executor_id === executor && events({ receipts_outcome: [r] }).some(holds));
+    const paid = logged(o.contract, (e) => e.event === "bounty_paid" && e.data?.claim_id === o.claimId);
+    const transfer = logged(config.usdc, (e) => e.event === "ft_transfer" && e.data?.old_owner_id === o.contract && e.data?.new_owner_id === claim.whitehat);
+    if (!paid || !transfer) continue;
     return {
       tx_hash: hash,
-      receipt_id: transfer?.id ?? "",
+      receipt_id: transfer.id,
       link: `${NEAR_EXPLORER_TX[o.network]}${hash}`,
     };
   }
@@ -201,7 +237,7 @@ async function findPayout(o: StatusOptions, cache: Cache, claim: ClaimView) {
 /** The claim's own transaction: the one whose `claim_submitted` event names it. */
 async function claimTx(o: StatusOptions, cache: Cache, whitehat: string): Promise<string | null> {
   for (const hash of o.txs ?? []) {
-    const status = await once(cache, `tx:${hash}`, () => o.near.txStatus(hash, whitehat, 30)).catch(() => null);
+    const status = await nearTx(o, cache, hash, whitehat);
     if (status && events(status).some((e) => e.event === "claim_submitted" && e.data?.claim_id === o.claimId)) return hash;
   }
   return null;

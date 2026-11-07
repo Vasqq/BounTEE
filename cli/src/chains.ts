@@ -13,10 +13,12 @@ export interface Chain {
   explorerTx: string;
   /**
    * The RPCs the judge's build pins for this chain as a proof chain (`judge/src/confirm.rs`
-   * `PINNED`; at least two must agree, ADR-0014), shown as a trusted party. The judge build,
+   * `TESTNET` or `MAINNET`, the build's network's; at least two must agree, ADR-0014), shown as a trusted party. The judge build,
    * named by its hash, is what binds them; keep this list equal to it.
    */
   judgeRpcs?: string[];
+  /** Circle's USDC on a mainnet chain (spec, demo contracts); testnet demos mint a mock. */
+  usdc?: string;
 }
 
 export const CHAINS: Record<number, Chain> = {
@@ -38,8 +40,24 @@ export const CHAINS: Record<number, Chain> = {
       "https://arbitrum-sepolia.gateway.tenderly.co",
     ],
   },
-  8453: { name: "Base", rpcs: ["https://mainnet.base.org"], proofRpcs: [], explorerTx: "https://basescan.org/tx/" },
-  42161: { name: "Arbitrum One", rpcs: ["https://arb1.arbitrum.io/rpc"], proofRpcs: [], explorerTx: "https://arbiscan.io/tx/" },
+  8453: {
+    name: "Base",
+    rpcs: ["https://mainnet.base.org", "https://8453.rpc.thirdweb.com"],
+    // Not mainnet.base.org: it answers "no state found" for a proof 100 blocks back (Nov 5).
+    proofRpcs: ["https://8453.rpc.thirdweb.com", "https://base.drpc.org"],
+    explorerTx: "https://basescan.org/tx/",
+    judgeRpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co"],
+    usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+  },
+  42161: {
+    name: "Arbitrum One",
+    rpcs: ["https://arb1.arbitrum.io/rpc", "https://42161.rpc.thirdweb.com"],
+    // Not PublicNode: it wants a token for proofs 100 blocks back (Nov 5).
+    proofRpcs: ["https://arb1.arbitrum.io/rpc", "https://42161.rpc.thirdweb.com"],
+    explorerTx: "https://arbiscan.io/tx/",
+    judgeRpcs: ["https://arb1.arbitrum.io/rpc", "https://arbitrum-one-rpc.publicnode.com", "https://arbitrum.gateway.tenderly.co"],
+    usdc: "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+  },
 };
 
 /** The chain's default public RPC, if BounTEE knows the chain. */

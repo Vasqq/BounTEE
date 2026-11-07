@@ -69,6 +69,11 @@ export async function prepareClaim(o: { job?: string; test?: TestOptions; rpc?: 
   return { replay, local: result.verdict, saved: result.saved, block_age_secs: age, reran: o.job !== undefined, test: result };
 }
 
+/** The size of a claim's job input (contract `claims.rs` `judge_input`): its proofs, header and block, with room for the rules and the rest. */
+export function claimInputBytes(proofsJsonBytes: number, headerBytes: number, blockJsonBytes: number): number {
+  return proofsJsonBytes + headerBytes + blockJsonBytes + 4096;
+}
+
 /** What `submit_claim` will draw from the claim balance (contract `claims.rs`), with slack. */
 export function claimCost(fees: any, inputBytes: number, sealedBytes: number): bigint {
   const perByte = BigInt(fees.storage_price_per_byte);
@@ -178,7 +183,7 @@ export async function settle(
     out.broadcast = await broadcastCommand({
       bounty: `${o.bounty.protocol}/${o.bounty.name}`,
       contract: o.contract,
-      nearRpc: near.url,
+      near,
       rpcs: o.rpcs,
       waitSecs: 120,
     });

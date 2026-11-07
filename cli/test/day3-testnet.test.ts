@@ -35,6 +35,7 @@ const home = homedir();
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const freshInstance = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
+const copiedExploit = fileURLToPath(new URL("./testnet/copied-exploit.ts", import.meta.url));
 const RPC = defaultRpc(84532)!;
 const ATTACKER = process.env.ATTACKER ?? "bts1-mallory-1104.testnet";
 const evidenceFile = join(home, ".bountee-testnet", "day3-evidence.json");
@@ -227,44 +228,17 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
 
   test("R5.2: the PAYS claim's sealed exploit, copied and sent straight to OutLayer, is refused", async () => {
     expect(paysClaim).toBeDefined();
-    const claim = await near.view(contract, "claim", { claim_id: paysClaim!.claim_id });
-    const status = await near.txStatus(paysClaim!.tx_hash, whitehat);
-    const args = JSON.parse(Buffer.from(status.transaction.actions[0].FunctionCall.args, "base64").toString("utf8"));
-    const copied: string = args.sealed_exploit;
-    const bounty = await near.view(contract, "bounty", { id: claim.bounty });
-    const input = JSON.stringify({ judge_claim: {
-      rules: bounty.rules, bounty: claim.bounty, whitehat: ATTACKER, block: claim.block, header: claim.header,
-      proofs_json: args.proofs, submitted_at_ns: claim.submitted_at_ns,
-    } });
-    const judge = { url: deployment.judge.url, hash: deployment.judge.hash.replace(/^0x/, "") };
-    const job = async (label: string, secretsRef: object) => {
-      const r = await near.account(ATTACKER).signAndSendTransaction({
-        receiverId: "outlayer.testnet",
-        actions: [actions.functionCall("request_execution", {
-          source: { WasmUrl: { url: judge.url, hash: judge.hash, build_target: "wasm32-wasip2" } },
-          resource_limits: { max_instructions: 100_000_000_000, max_memory_mb: 512, max_execution_seconds: 60 },
-          input_data: input, secrets_ref: secretsRef, response_format: "Json", payer_account_id: null, params: null,
-        }, tgas(300), milliNear(20) + BigInt(Math.max(0, Buffer.byteLength(input) - 32 * 1024)) * 10n ** 19n)],
-        throwOnFailure: false,
-        waitUntil: "FINAL",
-      });
-      const s = await near.txStatus(r.transaction.hash, ATTACKER);
-      const all = JSON.stringify(s);
-      record(label, r.transaction.hash);
-      expect(all).not.toMatch(/\\?"outcome\\?":\\?"(PAYS|ZERO|INVALID)/);
-      return all;
-    };
-    // The contract's own secret, asked for by another account: OutLayer's access rule refuses.
-    expect(await job("R5.2 direct job on the contract's secret", { profile: claim.secret_profile, account_id: contract })).toMatch(/Access denied/i);
-    // The ciphertext copied under the attacker's own account: it can't be decrypted there.
-    const store = await near.account(ATTACKER).signAndSendTransaction({
-      receiverId: "outlayer.testnet",
-      actions: [actions.functionCall("store_secrets", {
-        accessor: { WasmHash: { hash: judge.hash } }, profile: `d3copy${paysClaim!.claim_id}`, encrypted_secrets_base64: copied, access: "AllowAll", vault_id: null,
-      }, tgas(50), milliNear(100))],
-      waitUntil: "FINAL",
+    // The same driver #35 runs on mainnet (testnet/copied-exploit.ts), signed by the attacker.
+    const r = await run(process.execPath, [copiedExploit], {
+      CONTRACT: contract, CLAIM: String(paysClaim!.claim_id), CLAIM_TX: paysClaim!.tx_hash, SIGNER: ATTACKER,
     });
-    record("R5.2 copy stored under the attacker", store.transaction.hash);
-    expect(await job("R5.2 job on the copy", { profile: `d3copy${paysClaim!.claim_id}`, account_id: ATTACKER })).toMatch(/decrypt/i);
+    const out = JSON.parse(r.stdout.trim().split("\n").at(-1) || "{}");
+    record("R5.2 direct job on the contract's secret", out.direct_job?.tx);
+    record("R5.2 copy stored under the attacker", out.copy_stored);
+    record("R5.2 job on the copy", out.job_on_copy?.tx);
+    expect(r.code, `${r.stderr}\n${r.stdout}`).toBe(0);
+    expect(out.outlayer).toBe("outlayer.testnet");
+    expect(out.direct_job).toMatchObject({ refused: true, verdict: false });
+    expect(out.job_on_copy).toMatchObject({ refused: true, verdict: false });
   }, 600_000);
 });

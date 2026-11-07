@@ -16,6 +16,10 @@
 //!   stderr; and, on the attested build, that it never reads the test override. Misses:
 //!   real RPCs, real contracts' access control and a real revert's error shape (seam T,
 //!   `bountee post` on testnet), and how the bounty contract acts on the answer (seam C).
+//!   Ticket #43 adds a test build pinned to the mainnet bounty contract (`.near`): it
+//!   catches that the posting check reads Base and Arbitrum One, derives the pause-role
+//!   address under the mainnet MPC root key, and refuses the other network's chains (each
+//!   build's own network only), asking no RPC. It misses the mainnet RPCs themselves.
 //! - C (`contract/tests/seam_c.rs`): the contract goes live only on a passing answer, and
 //!   refunds the USDC in full otherwise (R1.6, R7.6, R12.1, R12.2), and refuses a contract
 //!   another live or pending bounty covers (R12.3).
@@ -34,7 +38,9 @@ use bountee_formats::{
     from_json, pause_gas_per_pause, pause_role, AccountId, BountyId, PostingCheckResult,
     PostingFailureReason, PAUSE_GAS_LIMIT, PAUSE_MAX_FEE_PER_GAS,
 };
-use common::{attested_build, test_build};
+use common::{
+    attested_build, mainnet_test_build, test_build, ARBITRUM_ONE, BASE, MAINNET_BOUNTY_CONTRACT,
+};
 use serde_json::{json, Value};
 use test_chain_rpc::{Answer, Chain, TestChainRpc};
 
@@ -52,9 +58,14 @@ fn bounty() -> Value {
 
 /// The bounty's pause-role address (D25), from the formats' own derivation.
 fn pause_role() -> String {
+    pause_role_under(pause_role::TESTNET_ROOT_PUBLIC_KEY, BOUNTY_CONTRACT)
+}
+
+/// The bounty's pause-role address under the MPC root key `root`, for `contract`.
+fn pause_role_under(root: &str, contract: &str) -> String {
     let id: BountyId = from_json(&bounty().to_string()).unwrap();
-    let contract = AccountId::parse(BOUNTY_CONTRACT).unwrap();
-    pause_role::address(pause_role::TESTNET_ROOT_PUBLIC_KEY, &contract, &id)
+    let contract = AccountId::parse(contract).unwrap();
+    pause_role::address(root, &contract, &id)
         .unwrap()
         .as_str()
         .to_owned()
@@ -102,6 +113,17 @@ fn run_per_chain(
     rpcs: &[TestChainRpc],
     per_chain: &[(u64, &[TestChainRpc])],
 ) -> Output {
+    run_as(BOUNTY_CONTRACT, wasm, job, rpcs, per_chain)
+}
+
+/// [`run_per_chain`] for a build pinned to `contract`, in a job that contract requested.
+fn run_as(
+    contract: &str,
+    wasm: &PathBuf,
+    job: &Value,
+    rpcs: &[TestChainRpc],
+    per_chain: &[(u64, &[TestChainRpc])],
+) -> Output {
     let mut command = Command::new("wasmtime");
     command
         .args(["run", "-S", "http"])
@@ -114,7 +136,7 @@ fn run_per_chain(
     }
     let mut child = command
         .arg("--env")
-        .arg(format!("NEAR_PREDECESSOR_ID={BOUNTY_CONTRACT}"))
+        .arg(format!("NEAR_PREDECESSOR_ID={contract}"))
         .arg("--")
         .arg(wasm)
         .stdin(Stdio::piped())
@@ -411,4 +433,80 @@ fn r12_1_eight_failures_fit_in_the_output() {
     let covered: Vec<(u64, &str)> = addresses.iter().map(|a| (CHAIN, a.as_str())).collect();
     let (result, _) = check(&job(&covered), all(Chain::at(HEAD)));
     assert_eq!(result.failures.len(), 8);
+}
+
+// ---- R12.5: each build reads only its own network's chains (#43) ------------------------
+
+const ARBITRUM_SEPOLIA: u64 = 421614;
+
+fn asked(rpcs: &[TestChainRpc]) -> usize {
+    rpcs.iter().map(|r| r.requests().len()).sum()
+}
+
+/// R12.5, R12.1, R7.6: a build for the mainnet bounty contract checks a vault on Base and
+/// one on Arbitrum One through each chain's own RPCs, from the pause-role address under
+/// the mainnet MPC root key (the only address the stand-ins let pause), and both pass.
+#[test]
+fn r12_5_mainnet_build_checks_base_and_arbitrum_one() {
+    let role = pause_role_under(pause_role::MAINNET_ROOT_PUBLIC_KEY, MAINNET_BOUNTY_CONTRACT);
+    let chain = Chain::at(HEAD)
+        .contract(VAULT, Some(&role))
+        .balance(&role, needed(1));
+    let base = all(chain.clone()).map(TestChainRpc::answering);
+    let arbitrum = all(chain).map(TestChainRpc::answering);
+    let out = run_as(
+        MAINNET_BOUNTY_CONTRACT,
+        mainnet_test_build(),
+        &job(&[(BASE, VAULT), (ARBITRUM_ONE, VAULT)]),
+        &[],
+        &[(BASE, &base), (ARBITRUM_ONE, &arbitrum)],
+    );
+    let result = result(&out);
+    assert!(result.passed(), "{result:?}");
+    assert!(asked(&base) > 0 && asked(&arbitrum) > 0);
+}
+
+/// R12.5: a mainnet build refuses a Sepolia chain: the contract there is unconfirmed and
+/// no RPC is asked, even though the stand-ins would pass it.
+#[test]
+fn r12_5_mainnet_build_refuses_a_sepolia_chain() {
+    let role = pause_role_under(pause_role::MAINNET_ROOT_PUBLIC_KEY, MAINNET_BOUNTY_CONTRACT);
+    let chain = Chain::at(HEAD)
+        .contract(VAULT, Some(&role))
+        .balance(&role, needed(2));
+    let rpcs = all(chain).map(TestChainRpc::answering);
+    let out = run_as(
+        MAINNET_BOUNTY_CONTRACT,
+        mainnet_test_build(),
+        &job(&[(CHAIN, VAULT), (ARBITRUM_SEPOLIA, VAULT)]),
+        &rpcs,
+        &[],
+    );
+    assert_eq!(
+        reasons(&result(&out)),
+        vec![
+            (0, PostingFailureReason::ChainUnconfirmed),
+            (1, PostingFailureReason::ChainUnconfirmed),
+        ]
+    );
+    assert_eq!(asked(&rpcs), 0);
+}
+
+/// R12.5: the reverse: a testnet build refuses Base and Arbitrum One.
+#[test]
+fn r12_5_testnet_build_refuses_a_mainnet_chain() {
+    let rpcs = all(granted(needed(2))).map(TestChainRpc::answering);
+    let out = run(
+        test_build(),
+        &job(&[(BASE, VAULT), (ARBITRUM_ONE, VAULT)]),
+        &rpcs,
+    );
+    assert_eq!(
+        reasons(&result(&out)),
+        vec![
+            (0, PostingFailureReason::ChainUnconfirmed),
+            (1, PostingFailureReason::ChainUnconfirmed),
+        ]
+    );
+    assert_eq!(asked(&rpcs), 0);
 }

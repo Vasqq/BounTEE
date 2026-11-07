@@ -15,21 +15,27 @@
 //! which reads the constant [`PINNED`] table compiled into the build. Nothing in the job
 //! input reaches it: [`confirm`] takes the chain ID and block, never a URL, and the job
 //! format (`bountee_formats::JudgeClaim`, `deny_unknown_fields`) has no field that could
-//! carry one. The test build (feature `test-stand-in-rpcs`, seam J only) swaps [`PINNED`]
-//! for the `BOUNTEE_TEST_RPCS` environment variable; the attested build is made without
-//! features, so that code is not in it, and an environment variable is never something a
-//! claim or a Protocol sets.
+//! carry one.
+//!
+//! Which table (R2.8, R12.5 inspection, ticket #43): [`PINNED`] is the table of the build's
+//! own network, a `.near` bounty contract's mainnet one and any other's testnet one, so the
+//! attested build has no RPCs for the other network's chains and refuses them with no
+//! verdict. Both builds refuse them through the one [`on_the_other_network`] check, so seam J
+//! runs the attested build's refusal. The test build (feature `test-stand-in-rpcs`, seam J
+//! only) then swaps [`PINNED`] for the `BOUNTEE_TEST_RPCS` environment variable; the
+//! attested build is made without features, so that code is not in it, and an environment
+//! variable is never something a claim or a Protocol sets.
 
 use bountee_formats::{Reason, RECENCY_LIMIT_SECS};
 use revm::primitives::B256;
 use serde_json::json;
 
-use crate::rpc;
+use crate::{rpc, sealed};
 
-/// The three independent RPCs pinned for each covered or proof chain, by chain ID (spec,
-/// judge RPCs; each answered from inside an OutLayer job: Base Sepolia's on Nov 4,
-/// Arbitrum Sepolia's on Nov 5). The mainnet chains' join here, picked the same way.
-pub const PINNED: &[(u64, [&str; 3])] = &[
+/// The three independent RPCs pinned for each testnet chain, by chain ID (spec, judge
+/// RPCs; each answered from inside an OutLayer job: Base Sepolia's on Nov 4, Arbitrum
+/// Sepolia's on Nov 5).
+const TESTNET: &[(u64, [&str; 3])] = &[
     (
         84532, // Base Sepolia
         [
@@ -47,6 +53,36 @@ pub const PINNED: &[(u64, [&str; 3])] = &[
         ],
     ),
 ];
+
+/// The three independent RPCs pinned for each mainnet chain, by chain ID, picked the same
+/// way (spec, judge RPCs; all six answered from inside a testnet OutLayer job on Nov 5).
+const MAINNET: &[(u64, [&str; 3])] = &[
+    (
+        8453, // Base
+        [
+            "https://mainnet.base.org",
+            "https://base-rpc.publicnode.com",
+            "https://base.gateway.tenderly.co",
+        ],
+    ),
+    (
+        42161, // Arbitrum One
+        [
+            "https://arb1.arbitrum.io/rpc",
+            "https://arbitrum-one-rpc.publicnode.com",
+            "https://arbitrum.gateway.tenderly.co",
+        ],
+    ),
+];
+
+/// The pinned table of this build's network, chosen by the bounty contract it answers to,
+/// as the posting check chooses the MPC root key: a build pins only its own network's
+/// chains, so a mainnet build never judges a Sepolia block, nor a testnet build a mainnet
+/// one.
+pub const PINNED: &[(u64, [&str; 3])] = if sealed::ON_MAINNET { MAINNET } else { TESTNET };
+
+/// The other network's table: chains no build of this network may read.
+const ELSEWHERE: &[(u64, [&str; 3])] = if sealed::ON_MAINNET { TESTNET } else { MAINNET };
 
 /// Why a block can't be confirmed either way: the job fails with no verdict (R2.6).
 #[derive(Debug)]
@@ -105,10 +141,19 @@ fn decide(claim: B256, answers: &[B256]) -> Result<Result<(), Reason>, Unconfirm
     Err(Unconfirmed::TooFewOrDisagreeing)
 }
 
+/// The network rule, shared by both builds so seam J runs the attested build's refusal:
+/// the other network's chains get no RPCs, hence no verdict.
+fn on_the_other_network(chain_id: u64) -> bool {
+    ELSEWHERE.iter().any(|(id, _)| *id == chain_id)
+}
+
 /// The RPC addresses for `chain_id`: the pinned table, the only source in the attested
 /// build.
 #[cfg(not(feature = "test-stand-in-rpcs"))]
 pub fn rpcs_for(chain_id: u64) -> Option<Vec<String>> {
+    if on_the_other_network(chain_id) {
+        return None;
+    }
     PINNED
         .iter()
         .find(|(id, _)| *id == chain_id)
@@ -121,6 +166,9 @@ pub fn rpcs_for(chain_id: u64) -> Option<Vec<String>> {
 #[cfg(feature = "test-stand-in-rpcs")]
 pub fn rpcs_for(chain_id: u64) -> Option<Vec<String>> {
     let _ = PINNED;
+    if on_the_other_network(chain_id) {
+        return None;
+    }
     let urls = std::env::var(format!("BOUNTEE_TEST_RPCS_{chain_id}"))
         .or_else(|_| std::env::var("BOUNTEE_TEST_RPCS"))
         .ok()?;

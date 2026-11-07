@@ -27,7 +27,7 @@ use serde_json::{json, Value};
 
 use crate::confirm;
 use crate::rpc::{self, Reply};
-use crate::sealed::BOUNTY_CONTRACT;
+use crate::sealed::{BOUNTY_CONTRACT, ON_MAINNET};
 
 /// `pause()`'s selector, the whole calldata of every signed pause.
 const PAUSE_CALLDATA: &str = "0x8456cb59";
@@ -85,10 +85,10 @@ fn failed(contracts: &[CoveredContract], reason: PostingFailureReason) -> Postin
 /// The bounty's pause-role address under the MPC root key of the bounty contract's network.
 fn pause_role_address(job: &PostingCheck) -> Option<EvmAddress> {
     let contract = AccountId::parse(BOUNTY_CONTRACT).ok()?;
-    let root = if BOUNTY_CONTRACT.ends_with(".testnet") {
-        pause_role::TESTNET_ROOT_PUBLIC_KEY
-    } else {
+    let root = if ON_MAINNET {
         pause_role::MAINNET_ROOT_PUBLIC_KEY
+    } else {
+        pause_role::TESTNET_ROOT_PUBLIC_KEY
     };
     pause_role::address(root, &contract, &job.bounty).ok()
 }

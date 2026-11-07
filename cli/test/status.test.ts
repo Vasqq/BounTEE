@@ -2,7 +2,8 @@
 // gives a receipt (D24), driven through `bountee status --watch` and `bountee claim`.
 //
 // A local stand-in plays NEAR's RPC (the bounty contract's views, transactions), two EVM
-// chains' RPCs (pause receipts) and OutLayer's attestation API. The test moves the stand-in's
+// chains' RPCs (pause receipts), OutLayer's attestation API and FastNEAR's explorer (who signed
+// each transaction). The test moves the stand-in's
 // claim on one step at a time, and only once the tool has printed the stage before it: a
 // tool that printed its progress only at the end would never see the next step, and the
 // test would time out.
@@ -10,8 +11,9 @@
 // Seams (written before the first test): T here catches D23's stages, their order and that
 // each shows while the claim is at it, and D24's receipt (the payout found from the
 // `bounty_paid` event, the attestation filed under the claim's transaction, every pause's
-// transaction); R14.5 (each stage a JSON line, the result JSON). It misses the real
-// services' answers: `status-testnet.test.ts` reads a real paid claim. The verified-pause
+// transaction; a payout someone else signed, found through the explorer; events counted only
+// from the bounty contract and its USDC); R14.5 (each stage a JSON line, the result JSON). It
+// misses the real services' answers: `status-testnet.test.ts` reads a real paid claim. The verified-pause
 // record is the contract's `pause_verifications` view (ticket #21), played here per chain.
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -28,6 +30,12 @@ const CONTRACT = "bounty.example.testnet";
 const WHITEHAT = "alice.testnet";
 const BOUNTY = { protocol: "protocol.testnet", name: "vault" };
 const CLAIM_TX = "9Ld3WhcY2ZVDS6fZyZW4o7Nc9Y5dPhWv4tyUfEhVvBVa";
+/** A `retry-payout` someone other than the Whitehat sent: anyone may. */
+const RETRY_TX = "4fTqkTzAAg5mUqqtJ8WCBvBRSm7LCmrvA9dKqMpFwy6P";
+const RETRIER = "bob.testnet";
+/** Another account's contract, logging the bounty contract's and USDC's events as its own. */
+const FORGED_TX = "8kzGq2bW6v3pQ4m1N7xTc5Lr9yHdF2aJsE6uKwB3nVtZ";
+const FORGER = "mallory.testnet";
 const PAUSES = [
   { chain_id: 84532, contract: "0x" + "aa".repeat(20), nonce: 0, tx: "0x02", tx_hash: "0x" + "a1".repeat(32) },
   { chain_id: 421614, contract: "0x" + "bb".repeat(20), nonce: 0, tx: "0x02", tx_hash: "0x" + "b2".repeat(32) },
@@ -45,6 +53,8 @@ let world: {
   receipts: Record<string, { status: string; blockNumber: string }>;
   /** `claim` showed "sealed" before it filed: the claim, once filed, goes straight to judging. */
   sealedBeforeFiling?: boolean;
+  /** The claim's own transaction didn't pay; RETRY_TX did. */
+  paidByRetry?: boolean;
 };
 
 function reset() {
@@ -119,13 +129,35 @@ function claimTxStatus() {
     receipts_outcome: [
       outcome("R1", CONTRACT, [log("claim_submitted", { claim_id: 0, bounty: BOUNTY, whitehat: WHITEHAT })]),
       outcome("R2", CONTRACT, [log("claim_judged", { claim_id: 0, verdict: PAYS })]),
-      outcome("PAYOUT", "usdc.testnet", [
-        `EVENT_JSON:${JSON.stringify({ standard: "nep141", version: "1.0.0", event: "ft_transfer", data: [{ old_owner_id: CONTRACT, new_owner_id: WHITEHAT, amount: "100000000" }] })}`,
-      ]),
-      outcome("R4", CONTRACT, [log("bounty_paid", { bounty: BOUNTY, claim_id: 0, amount: "100000000" })]),
+      ...(world.paidByRetry ? [] : payoutOutcomes("PAYOUT")),
     ],
   };
 }
+const payoutOutcomes = (id: string) => [
+  outcome(id, "usdc.testnet", [
+    `EVENT_JSON:${JSON.stringify({ standard: "nep141", version: "1.0.0", event: "ft_transfer", data: [{ old_owner_id: CONTRACT, new_owner_id: WHITEHAT, amount: "100000000" }] })}`,
+  ]),
+  outcome(`${id}-event`, CONTRACT, [log("bounty_paid", { bounty: BOUNTY, claim_id: 0, amount: "100000000" })]),
+];
+function retryTxStatus() {
+  return {
+    status: { SuccessValue: "" },
+    transaction: { hash: RETRY_TX, signer_id: RETRIER, receiver_id: CONTRACT },
+    transaction_outcome: outcome(RETRY_TX, RETRIER, []),
+    receipts_outcome: payoutOutcomes("RETRY-PAYOUT"),
+  };
+}
+function forgedTxStatus() {
+  const forged = payoutOutcomes("FORGED").map((r) => ({ ...r, outcome: { ...r.outcome, executor_id: FORGER } }));
+  return {
+    status: { SuccessValue: "" },
+    transaction: { hash: FORGED_TX, signer_id: FORGER, receiver_id: FORGER },
+    transaction_outcome: outcome(FORGED_TX, FORGER, []),
+    receipts_outcome: forged,
+  };
+}
+/** Who signed each transaction: NEAR RPC finds one only when asked with its signer. */
+const SIGNERS: Record<string, string> = { [CLAIM_TX]: WHITEHAT, [RETRY_TX]: RETRIER, [FORGED_TX]: FORGER };
 
 const VIEWS: Record<string, (args: any) => unknown> = {
   claim: ({ claim_id }) => (claim_id === 0 ? world.claim : null),
@@ -161,6 +193,11 @@ const server = createServer(async (req, res) => {
   if (url === `/outlayer/attestations/by-tx/${CLAIM_TX}`) {
     return send(res, { task_id: 4242, request_id: 99, transaction_hash: CLAIM_TX, wasm_hash: JUDGE_HASH, input_hash: "11", output_hash: "22", worker_measurement: "33", timestamp: 1, tdx_quote: "AAAA" });
   }
+  if (url === "/txapi/v0/transactions") {
+    // FastNEAR's explorer: who signed each transaction asked about.
+    const hashes: string[] = JSON.parse(body).tx_hashes;
+    return send(res, { transactions: hashes.map((h) => (SIGNERS[h] ? { transaction: { hash: h, signer_id: SIGNERS[h] }, receipts: [] } : null)) });
+  }
   if (url === "/outlayer/secrets/pubkey") {
     // Any X25519 key will do: nothing here opens what the tool seals.
     const { generateKeyPairSync } = await import("node:crypto");
@@ -186,7 +223,11 @@ const server = createServer(async (req, res) => {
     world.claim = { ...newClaim(), state: world.sealedBeforeFiling ? "judging" : "storing" };
     return reply(claimTxStatus());
   } else if (call.method === "EXPERIMENTAL_tx_status" || call.method === "tx") {
-    if (call.params.tx_hash === CLAIM_TX) return reply(claimTxStatus());
+    if (call.params.sender_account_id === SIGNERS[call.params.tx_hash]) {
+      if (call.params.tx_hash === CLAIM_TX) return reply(claimTxStatus());
+      if (call.params.tx_hash === RETRY_TX) return reply(retryTxStatus());
+      if (call.params.tx_hash === FORGED_TX) return reply(forgedTxStatus());
+    }
   }
   unhandled.push(`${url} ${call.method} ${JSON.stringify(call.params).slice(0, 120)}`);
   res.statusCode = 400;
@@ -264,7 +305,7 @@ test("D23 D24 R14.5: status --watch shows each stage while the claim is at it, t
   const r = await follow([
     "status", "0", "--contract", CONTRACT, "--watch", "--interval", "0.05", "--timeout", "60",
     "--near-rpc", `${base}/near`, "--rpc", `84532=${base}/evm,421614=${base}/evm`,
-    "--outlayer-api", `${base}/outlayer`, "--tx", CLAIM_TX, "--json",
+    "--outlayer-api", `${base}/outlayer`, "--tx-api", `${base}/txapi`, "--tx", CLAIM_TX, "--json",
   ]);
   expect(r.code, `${r.stderr}\n${unhandled.join("\n")}`).toBe(0);
   expect(r.shown).toStrictEqual(EXPECTED);
@@ -284,7 +325,7 @@ test("D23 D24 R14.5: claim shows its own progress live after filing, then gives 
     [
       "claim", "--contract", CONTRACT, "--bounty", `${BOUNTY.protocol}/${BOUNTY.name}`, "--as", WHITEHAT,
       "--exploit", join(dir, "exploit.json"), "--evidence", join(dir, "evidence.json"),
-      "--rpc", `${base}/near`, "--outlayer-api", `${base}/outlayer`, "--chain-rpc", `84532=${base}/evm,421614=${base}/evm`,
+      "--rpc", `${base}/near`, "--outlayer-api", `${base}/outlayer`, "--tx-api", `${base}/txapi`, "--chain-rpc", `84532=${base}/evm,421614=${base}/evm`,
       "--no-broadcast", "--interval", "0.05", "--json",
     ],
     { BOUNTEE_CREDENTIALS_DIR: dir },
@@ -298,4 +339,26 @@ test("D23 D24 R14.5: claim shows its own progress live after filing, then gives 
   // "Sealed" showed before the claim was filed: filing can take as long as the verdict.
   expect(world.sealedBeforeFiling).toBe(true);
   expectReceipt(out);
+}, 60_000);
+
+test("D24: a payout someone else sent with retry-payout is the receipt's payout", async () => {
+  Object.assign(world, { claim: { ...newClaim(), state: "judged", verdict: PAYS }, paidByRetry: true });
+  Object.assign(world.bounty, { state: "paid", winning_claim: 0, signed_pauses: PAUSES });
+  const r = await follow([
+    "status", "0", "--contract", CONTRACT, "--near-rpc", `${base}/near`, "--rpc", `84532=${base}/evm,421614=${base}/evm`,
+    "--outlayer-api", `${base}/outlayer`, "--tx-api", `${base}/txapi`, "--tx", `${CLAIM_TX},${RETRY_TX}`, "--json",
+  ]);
+  expect(r.code, `${r.stderr}\n${unhandled.join("\n")}`).toBe(0);
+  expect(JSON.parse(r.stdout).receipt.payout).toMatchObject({ tx_hash: RETRY_TX, receipt_id: "RETRY-PAYOUT" });
+}, 60_000);
+
+test("D24: a payout's events count only from the bounty contract and its USDC, not another account's logs", async () => {
+  Object.assign(world, { claim: { ...newClaim(), state: "judged", verdict: PAYS }, paidByRetry: true });
+  Object.assign(world.bounty, { state: "paid", winning_claim: 0, signed_pauses: PAUSES });
+  const r = await follow([
+    "status", "0", "--contract", CONTRACT, "--near-rpc", `${base}/near`, "--rpc", `84532=${base}/evm,421614=${base}/evm`,
+    "--outlayer-api", `${base}/outlayer`, "--tx-api", `${base}/txapi`, "--tx", `${FORGED_TX},${CLAIM_TX},${RETRY_TX}`, "--json",
+  ]);
+  expect(r.code, `${r.stderr}\n${unhandled.join("\n")}`).toBe(0);
+  expect(JSON.parse(r.stdout).receipt.payout).toMatchObject({ tx_hash: RETRY_TX, receipt_id: "RETRY-PAYOUT" });
 }, 60_000);

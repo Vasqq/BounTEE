@@ -44,10 +44,11 @@
 // Whitehat runs with their own key for each.
 import { readFileSync } from "node:fs";
 import { actions } from "near-api-js";
+import { BARE_FLAGS } from "./usage.ts";
 import { parseBlockRef, parseExploit, parseAccountProof, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
 import { parseBountyId } from "./bounties.ts";
 import { parseRpcFlags } from "./broadcast.ts";
-import { claimCost, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
+import { claimCost, claimInputBytes, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
 import { proofsMatchingClaim, type ProofsSource } from "./claim-proofs.ts";
 import { KEYSTORE_API, NEAR_RPC, type Network } from "./endpoints.ts";
 import { formatNear, Near, parseNetwork } from "./near.ts";
@@ -81,9 +82,8 @@ function required(args: string[], name: string): string {
 
 /** The first argument that is neither a flag nor a flag's value. */
 function positional(args: string[]): string | undefined {
-  const bare = new Set(["--json", "--watch", "--dry-run", "--no-wait", "--no-broadcast", "--no-verify"]);
   for (let i = 0; i < args.length; i++) {
-    if (bare.has(args[i]!)) continue;
+    if (BARE_FLAGS.has(args[i]!)) continue;
     if (args[i]!.startsWith("--")) { i++; continue; }
     return args[i];
   }
@@ -158,7 +158,7 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
       job: flag(args, "job"),
       rpc: flag(args, "proof-rpc"),
       test: script
-        ? { script, bounty: bountyText!, sig: flag(args, "sig"), rpc: flag(args, "proof-rpc"), contract, nearRpc: near.url }
+        ? { script, bounty: bountyText!, sig: flag(args, "sig"), rpc: flag(args, "proof-rpc"), contract, near }
         : undefined,
     });
     ({ exploit, block, header, proofs } = prepared.replay);
@@ -187,7 +187,7 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
 
   const proofsJson = JSON.stringify(proofs);
   const fees = await near.view(contract, "fees");
-  const cost = claimCost(fees, proofsJson.length + header.length + JSON.stringify(block).length + 4096, sealed.length);
+  const cost = claimCost(fees, claimInputBytes(proofsJson.length, header.length, JSON.stringify(block).length), sealed.length);
   const added = await ensureClaimBalance(near, contract, whitehat, cost);
   if (added > 0n) out.topped_up_near = formatNear(added);
 
@@ -233,7 +233,7 @@ async function retryClaim(args: string[], c: Context & { given?: BountyId }, onS
   const out: ClaimResult = { bounty_contract: c.contract, retried: true, claim_id: claimId, block: filed.block };
   const fees = await c.near.view(c.contract, "fees");
   // The new job's input is the claim's own; no secret is stored again.
-  const cost = claimCost(fees, proofs.length + filed.header.length + JSON.stringify(filed.block).length + 4096, 0);
+  const cost = claimCost(fees, claimInputBytes(proofs.length, filed.header.length, JSON.stringify(filed.block).length), 0);
   const added = await ensureClaimBalance(c.near, c.contract, c.whitehat, cost);
   if (added > 0n) out.topped_up_near = formatNear(added);
 
@@ -272,6 +272,7 @@ async function seeThrough(
     near: c.near,
     rpcs: chainRpcs,
     outlayerApi: flag(args, "outlayer-api"),
+    txApi: flag(args, "tx-api"),
     txs,
   };
   let failed = false;

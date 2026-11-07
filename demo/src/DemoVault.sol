@@ -7,21 +7,15 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
 }
 
-/// BounTEE demo vault. Holds test USDC on behalf of depositors. It carries a deliberate,
-/// well-known vulnerability for the security bounty demo: a fund-moving function
-/// (`executeStrategy`) that is meant to be operator-only but is MISSING its access check,
-/// modelled on the DEPUSDT/LEVUSDC hack of June 2023. Anyone can call it and move the vault's
-/// entire token balance to any address.
+/// A USDC vault. Depositors deposit and withdraw; the operator deploys idle funds into a
+/// strategy.
 ///
-/// The vault has a pause role that can ONLY pause (there is no unpause and no fund-moving power
-/// for the pauser; R8.2). Every function on the exploit's path refuses to run while paused, so
-/// replaying the exploit after a pause fails (R7.5). Pausing is terminal by design: once paused
-/// the vault stays paused, matching the demo's "a signed pause stops the live exploit" story.
+/// The pauser can only pause: there is no unpause, and the pauser has no other power. Once
+/// paused, the vault stays paused and every state-changing function refuses to run.
 contract DemoVault {
     IERC20 public immutable token;
 
-    /// Operator is the intended caller of `executeStrategy`. The bug is that the function never
-    /// checks it, so the role is decorative — exactly the DEPUSDT/LEVUSDC mistake.
+    /// Deploys idle funds into a strategy.
     address public immutable operator;
 
     /// The pause role. It can call `pause()` and nothing else.
@@ -67,15 +61,13 @@ contract DemoVault {
         emit Withdraw(msg.sender, amount);
     }
 
-    /// VULNERABLE: intended to let the operator deploy idle funds into a strategy, but it is
-    /// missing `require(msg.sender == operator)`. Anyone can move the vault's whole balance to
-    /// any address. This is the exploit's path, so it is also gated by `whenNotPaused` (R7.5).
+    /// Moves idle funds to a strategy.
     function executeStrategy(address to, uint256 amount) external whenNotPaused {
         require(token.transfer(to, amount), "transfer failed");
         emit StrategyExecuted(msg.sender, to, amount);
     }
 
-    /// Pause role, pause-only (R8.2). No unpause exists and the pauser has no other power.
+    /// Pause-only. No unpause exists.
     function pause() external {
         if (msg.sender != pauser) revert NotPauser();
         paused = true;
