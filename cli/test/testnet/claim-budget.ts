@@ -23,6 +23,44 @@ export interface Read {
   slots: number;
 }
 
+/** An account a demo claim's replay reads, by what it is to the run. */
+export type Role =
+  | "sender" // the claim's fresh account
+  | "coinbase" // the block's coinbase
+  | "vault" // the demo PositionVault
+  | "usdc" // its token: the demo's MockUSDC on testnet, Circle's USDC on mainnet
+  | "usdc_implementation" // Circle's USDC implementation, behind its proxy
+  | "uniswap_router" // Uniswap V2's router, where the mainnet cheat buys its USDC
+  | "uniswap_pair" // the WETH/USDC pair it buys from
+  | "weth"; // WETH
+
+/**
+ * How many storage slots each demo replay proves, per account, on each network: the cheat
+ * (demo/script/HonestUser.s.sol: deposit then redeem, after buying Circle's USDC on Uniswap V2
+ * on mainnet) and the winning exploit on the PositionVault. A contract any claim deploys is
+ * absent at the claim's block, so it is not proved; the judge reads its USDC balance as the
+ * attacker's (R4.8), which counts among USDC's slots.
+ *
+ * Measured on Nov 8, 2026 (ticket #52). Testnet: `bountee test` of HonestUser.s.sol and of the
+ * sealed exploit against a fresh PositionVault instance on Base Sepolia, counting each saved
+ * job's proofs (cli/test/fresh-instance-testnet.test.ts checks these against a live replay).
+ * Mainnet (no mainnet transaction): both scripts run on a local anvil fork of Base with a
+ * PositionVault deployed and seeded there, counting the accounts and slots each transaction
+ * reads (call tree and SLOAD/SSTORE keys from the debug tracer), plus what the judge adds:
+ * the coinbase, and the USDC balance of any contract the claim created. The same count on a
+ * Base Sepolia fork gives the testnet numbers below.
+ */
+export const DEMO_READS: Record<"testnet" | "mainnet", Record<"cheat" | "win", Partial<Record<Role, number>>>> = {
+  testnet: {
+    cheat: { sender: 0, coinbase: 0, vault: 3, usdc: 4 },
+    win: { sender: 0, coinbase: 0, vault: 3, usdc: 3 },
+  },
+  mainnet: {
+    cheat: { sender: 0, coinbase: 0, vault: 3, usdc_implementation: 0, usdc: 7, uniswap_router: 0, uniswap_pair: 6, weth: 2 },
+    win: { sender: 0, coinbase: 0, vault: 3, usdc_implementation: 0, usdc: 6 },
+  },
+};
+
 export interface ClaimPlan {
   kind: string;
   reads: Read[];
