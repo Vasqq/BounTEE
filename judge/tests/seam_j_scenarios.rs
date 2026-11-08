@@ -647,11 +647,46 @@ struct Books {
     positions: [bool; 3],
 }
 
+/// Which [`Action`] a drawn step asks for. [`honest_sequence`] turns a step the account
+/// can't take honestly into a [`StepKind::Mint`].
+#[derive(Debug, Clone, Copy)]
+enum StepKind {
+    Mint,
+    Approve,
+    Deposit,
+    Withdraw,
+    Transfer,
+    SendNative,
+    VaultApprove,
+    VaultDeposit,
+    VaultRedeem,
+    FundPosition,
+    DepositFrom,
+}
+
+/// Every step kind, so a drawn index picks one.
+const STEP_KINDS: [StepKind; 11] = [
+    StepKind::Mint,
+    StepKind::Approve,
+    StepKind::Deposit,
+    StepKind::Withdraw,
+    StepKind::Transfer,
+    StepKind::SendNative,
+    StepKind::VaultApprove,
+    StepKind::VaultDeposit,
+    StepKind::VaultRedeem,
+    StepKind::FundPosition,
+    StepKind::DepositFrom,
+];
+
 /// One step as drawn: which action, by whom, to whom, and a number the amount is taken
 /// from. The amount is clamped to what an honest account can do in [`honest_sequence`], so
 /// every drawn sequence is honest and none is filtered out.
-fn step() -> impl Strategy<Value = (u8, usize, usize, u128)> {
-    (0u8..11, 0usize..3, 0usize..3, any::<u64>()).prop_map(|(k, i, j, n)| (k, i, j, n as u128))
+type Step = (StepKind, usize, usize, u128);
+
+fn step() -> impl Strategy<Value = Step> {
+    (0usize..STEP_KINDS.len(), 0usize..3, 0usize..3, any::<u64>())
+        .prop_map(|(k, i, j, n)| (STEP_KINDS[k], i, j, n as u128))
 }
 
 /// Turn drawn steps into honest actions, tracking each account's USDC, approvals, deposit,
@@ -661,7 +696,7 @@ fn step() -> impl Strategy<Value = (u8, usize, usize, u128)> {
 /// fixture proves). A step the account can't take honestly (a deposit too small for a
 /// share, a position it doesn't have) becomes a mint of the drawn amount.
 fn honest_sequence(
-    steps: &[(u8, usize, usize, u128)],
+    steps: &[Step],
     positions: [bool; 3],
     seed: u128,
 ) -> (Vec<(usize, Action)>, Books) {
@@ -691,42 +726,42 @@ fn honest_sequence(
         // The least deposit that mints one share at the vault's price.
         let one_share = assets.div_ceil(total_shares);
         let action = match kind {
-            1 => {
+            StepKind::Approve => {
                 let a = up_to(n, 2_000_000 * DOLLAR);
                 allowance[i] = a;
                 Action::Approve(a)
             }
-            2 => {
+            StepKind::Deposit => {
                 let a = up_to(n, usdc[i].min(allowance[i]));
                 usdc[i] -= a;
                 allowance[i] -= a;
                 deposit[i] += a;
                 Action::Deposit(a)
             }
-            3 => {
+            StepKind::Withdraw => {
                 let a = up_to(n, deposit[i]);
                 deposit[i] -= a;
                 usdc[i] += a;
                 Action::Withdraw(a)
             }
-            4 => {
+            StepKind::Transfer => {
                 let a = up_to(n, usdc[i]);
                 usdc[i] -= a;
                 usdc[j] += a;
                 Action::Transfer(j, a)
             }
-            5 => {
+            StepKind::SendNative => {
                 let a = up_to(n, native[i]);
                 native[i] -= a;
                 native[j] += a;
                 Action::SendNative(j, a)
             }
-            6 => {
+            StepKind::VaultApprove => {
                 let a = up_to(n, 2_000_000 * DOLLAR);
                 vault_allowance[i] = a;
                 Action::VaultApprove(a)
             }
-            7 if usdc[i].min(vault_allowance[i]) >= one_share => {
+            StepKind::VaultDeposit if usdc[i].min(vault_allowance[i]) >= one_share => {
                 let a = one_share + up_to(n, usdc[i].min(vault_allowance[i]) - one_share);
                 let minted = a * total_shares / assets;
                 usdc[i] -= a;
@@ -735,7 +770,7 @@ fn honest_sequence(
                 (assets, total_shares) = (assets + a, total_shares + minted);
                 Action::VaultDeposit(a)
             }
-            8 => {
+            StepKind::VaultRedeem => {
                 let s = up_to(n, shares[i]);
                 let paid = s * assets / total_shares;
                 shares[i] -= s;
@@ -743,13 +778,13 @@ fn honest_sequence(
                 (assets, total_shares) = (assets - paid, total_shares - s);
                 Action::VaultRedeem(s)
             }
-            9 if has_position[i] => {
+            StepKind::FundPosition if has_position[i] => {
                 let a = up_to(n, usdc[i]);
                 usdc[i] -= a;
                 in_position[i] += a;
                 Action::FundPosition(a)
             }
-            10 if has_position[i] && in_position[i] >= one_share => {
+            StepKind::DepositFrom if has_position[i] && in_position[i] >= one_share => {
                 let a = in_position[i];
                 let minted = a * total_shares / assets;
                 in_position[i] = 0;
@@ -944,11 +979,11 @@ fn old_vault_drain(by: usize, to: &str, amount: u128) -> Value {
 fn r4_6_generated_sequence_with_the_drain_appended_pays() {
     let (actions, _) = honest_sequence(
         &[
-            (0, 0, 0, 500 * DOLLAR),
-            (1, 0, 0, 1_000 * DOLLAR),
-            (2, 0, 0, 400 * DOLLAR),
-            (3, 0, 0, 100 * DOLLAR),
-            (4, 0, 1, 50 * DOLLAR),
+            (StepKind::Mint, 0, 0, 500 * DOLLAR),
+            (StepKind::Approve, 0, 0, 1_000 * DOLLAR),
+            (StepKind::Deposit, 0, 0, 400 * DOLLAR),
+            (StepKind::Withdraw, 0, 0, 100 * DOLLAR),
+            (StepKind::Transfer, 0, 1, 50 * DOLLAR),
         ],
         [false; 3],
         ETHER,
@@ -979,13 +1014,13 @@ fn r4_6_generated_sequence_with_the_drain_appended_pays() {
 fn r4_6_r4_8_position_vault_sequence_with_the_old_drain_appended_pays() {
     let (actions, _) = honest_sequence(
         &[
-            (0, 0, 0, 1_000 * DOLLAR),
-            (6, 0, 0, 1_000 * DOLLAR),
-            (7, 0, 0, 300 * DOLLAR - 2), // the clamp starts at one share's worth, 2 micro-USDC
-            (8, 0, 0, 50 * DOLLAR),
-            (9, 0, 0, 200 * DOLLAR),
-            (10, 0, 0, 0),
-            (9, 0, 0, 40 * DOLLAR),
+            (StepKind::Mint, 0, 0, 1_000 * DOLLAR),
+            (StepKind::VaultApprove, 0, 0, 1_000 * DOLLAR),
+            (StepKind::VaultDeposit, 0, 0, 300 * DOLLAR - 2), // the clamp starts at one share's worth, 2 micro-USDC
+            (StepKind::VaultRedeem, 0, 0, 50 * DOLLAR),
+            (StepKind::FundPosition, 0, 0, 200 * DOLLAR),
+            (StepKind::DepositFrom, 0, 0, 0),
+            (StepKind::FundPosition, 0, 0, 40 * DOLLAR),
         ],
         [true, false, false],
         ETHER,
