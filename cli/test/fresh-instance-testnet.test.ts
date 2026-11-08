@@ -39,6 +39,7 @@ import { defaultRpc } from "../src/chains.ts";
 import { Near, events } from "../src/near.ts";
 import { DEMO_READS, type Role } from "./testnet/claim-budget.ts";
 import { DEMO_DEPLOY_GAS } from "./testnet/deploy.ts";
+import { sealedExploit } from "./testnet/sealed-exploit.ts";
 
 const RUN = process.env.BOUNTEE_FRESH_RUN === "1";
 const home = homedir();
@@ -57,13 +58,6 @@ const record = (k: string, v: unknown) => {
 const near = new Near("testnet");
 const cast = (...args: string[]) => execFileSync("cast", args, { encoding: "utf8" }).trim();
 const uint = (s: string) => BigInt(s.split(" ")[0]!);
-
-/** The sealed exploit's path, checked before anything is deployed or spent. */
-function sealedExploit(): string {
-  const path = process.env.SEALED_EXPLOIT;
-  if (!path || !existsSync(path)) throw new Error("sealed exploit not present");
-  return path;
-}
 
 function run(args: string[], env: Record<string, string> = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
