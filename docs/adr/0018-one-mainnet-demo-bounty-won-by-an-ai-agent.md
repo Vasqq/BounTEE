@@ -17,3 +17,5 @@ ADR-0017 makes every demonstrated proof a mainnet transaction. A bounty pays onc
 - Spend stays within ADR-0004's $50: about $23 for the deployment (the contract's locked storage and the judge's upload), about $6 for the bounty and about $1 for the NEAR Intents extras. The bounty amount and claim balance return to our own accounts. A redeployment costs another $23, so mainnet is deployed only from a commit whose full run, the agent's included, has passed on testnet.
 - Every mainnet transaction is listed and costed in one plan Liam approves before any of it runs (ADR-0004).
 - Amends ADR-0004 (one bounty, the spend above) and ADR-0011 (no Damn Vulnerable DeFi level is posted live).
+
+Amended by ADR-0019: the demo vault's bug is the Visor Finance class, which needs a purpose-built contract, after a drain bot emptied the first mainnet vaults seconds after funding.
