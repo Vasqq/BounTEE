@@ -6,6 +6,7 @@ import { useEffect, useMemo, type CSSProperties } from "react";
 import { listOf } from "@/lib/format.ts";
 import { useDemo, useVerify } from "@/lib/live.ts";
 import { VerifyRun } from "../Verify.tsx";
+import { Wordmark } from "../Wordmark.tsx";
 import { startLanding } from "./runtime.js";
 
 const DASH = "–";
@@ -30,10 +31,7 @@ export function Landing() {
 
       <header className="nav" id="nav">
         <div className="wrap">
-          <a className="mark" href="#top" aria-label="BounTEE, back to top">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2.5 21 7.5v9L12 21.5 3 16.5v-9z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M9.2 8.6v7.2M14.8 8.6v7.2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg>
-            BounTEE
-          </a>
+          <Wordmark href="#top" label="BounTEE, back to top" />
           <ul>
             <li><a href="#story">The demo</a></li>
             <li><a href="#who">Whitehats</a></li>

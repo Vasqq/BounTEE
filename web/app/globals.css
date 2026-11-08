@@ -60,7 +60,8 @@ h2 { font-size: clamp(36px, 4.4vw, 64px); }
 .nav.solid { background: rgba(18, 18, 19, 0.84); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .nav .wrap { display: flex; align-items: center; gap: 28px; }
 .mark { display: inline-flex; align-items: center; gap: 10px; font: 800 21px/1 var(--display); letter-spacing: -0.02em; text-decoration: none; }
-.mark svg { width: 24px; height: 24px; }
+.mark .mark-block { width: 25.4px; height: 22px; flex: none; }
+.mark .mark-word { width: 89.7px; height: 15.75px; flex: none; } /* cap height 15.4px, the brand set's nav size */
 .nav ul { display: flex; gap: 26px; margin-left: auto; }
 .nav ul a { text-decoration: none; color: var(--ink-2); font-size: var(--fs-ui); transition: color var(--t1) var(--ease); }
 .nav ul a:hover { color: var(--ink); }
