@@ -37,18 +37,16 @@ export type Role =
 /**
  * How many storage slots each demo replay proves, per account, on each network: the cheat
  * (demo/script/HonestUser.s.sol: deposit then redeem, after buying Circle's USDC on Uniswap V2
- * on mainnet) and the winning exploit on the PositionVault. A contract any claim deploys is
- * absent at the claim's block, so it is not proved; the judge reads its USDC balance as the
- * attacker's (R4.8), which counts among USDC's slots.
+ * on mainnet) and the winning exploit on the PositionVault.
  *
  * Measured on Nov 8, 2026 (ticket #52). Testnet: `bountee test` of HonestUser.s.sol and of the
  * sealed exploit against a fresh PositionVault instance on Base Sepolia, counting each saved
  * job's proofs (cli/test/fresh-instance-testnet.test.ts checks these against a live replay).
  * Mainnet (no mainnet transaction): both scripts run on a local anvil fork of Base with a
  * PositionVault deployed and seeded there, counting the accounts and slots each transaction
- * reads (call tree and SLOAD/SSTORE keys from the debug tracer), plus what the judge adds:
- * the coinbase, and the USDC balance of any contract the claim created. The same count on a
- * Base Sepolia fork gives the testnet numbers below.
+ * reads (call tree and SLOAD/SSTORE keys from the debug tracer), plus what the judge proves for
+ * every replay: the coinbase, and the attacker's holdings (R4.8).
+ * The same count on a Base Sepolia fork gives the testnet numbers below.
  */
 export const DEMO_READS: Record<"testnet" | "mainnet", Record<"cheat" | "win", Partial<Record<Role, number>>>> = {
   testnet: {
