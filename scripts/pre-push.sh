@@ -41,7 +41,9 @@ lines_of() { if [ -f "$1" ]; then grep -v '^[[:space:]]*$' "$1" || true; fi; }
 # The protected branch and the ref names it covers: the branch, and its namespace when its
 # name has one (a/b protects every refs/heads/a/...).
 protected_branch="$(lines_of "$branch_file" | head -n1 | tr -d '[:space:]')"
-[ -n "$protected_branch" ] || echo "pre-push: warning: no protected branch configured ($branch_file)" >&2
+# Fail closed: without its local config the guard can't tell what to protect, so it refuses.
+[ -n "$protected_branch" ] || fail "no protected branch configured ($branch_file); refusing the push"
+[ -s "$paths_file" ] || fail "no protected paths configured ($paths_file); refusing the push"
 protected_ref_exact=""
 protected_ref_prefix=""
 protected_tree=""
