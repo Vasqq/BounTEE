@@ -13,8 +13,9 @@ The evidence, gathered on a prototype before any mainnet spend: the bot's own on
 
 ## Consequences
 
-- The DEPUSDT/LEVUSDC bug stays as an offline judge scenario and in the historical replay; it is no longer the demo protocol's bug.
+- The missing-access-check vault stays as the judge's offline scenario 21; it is no longer the demo protocol's bug. The DEPUSDT/LEVUSDC historical replay is unaffected.
 - The vault is seeded by an ordinary deposit, so the Protocol holds shares; the pause role still only pauses, and a paused vault refuses the exploit (R7.5, R8.2).
-- Residual risk, stated as a limit: a bot that answers `owner()` with itself, `vault()` with its caller and a large balance could drain it. None has been seen. The vault is still funded minutes before the claims and holds 3 USDC.
+- Residual risk, stated as a limit: a bot that answers `owner()` with itself, `vault()` with its caller and a balance large enough to mint the vault's shares yet small enough not to overflow could drain it. None has been seen. The vaults are still funded minutes before the claims and hold 2 USDC on Base and 1 on Arbitrum.
+- The exploit stays sealed until the run: no script or test that performs it is pushed before the bounty is won and its disclosure delay has passed, so neither the agent nor anyone reading the repo can copy it, and "the agent found it" stays true.
 - The drained first attempt is part of the public record: 3 USDC and about $1 of gas lost, the drain transactions linked from the README.
 - Amends ADR-0018: the demo vault and its bug.
