@@ -10,10 +10,10 @@ interface IUSDC {
 }
 
 /// Seam E. ADR-0019's recorded analysis evidence (requirements.md method A), not a requirement
-/// test: the drain bot's real on-chain code (its
-/// EIP-7702 delegate on Arbitrum One) used as the position, on a fork. It is refused and the
-/// vault's USDC does not move. Skipped unless FORK_RPC is set; the bot's 7702 designator needs
-/// the Prague EVM, so run it under the `fork` Foundry profile:
+/// test: the drain bot's real on-chain code (its EIP-7702 delegate on Arbitrum One) used as the
+/// position, on a fork. It is refused and the vault's USDC does not move. Skipped unless
+/// FORK_RPC is set; the bot's 7702 designator needs the Prague EVM, so run it under the `fork`
+/// Foundry profile:
 ///   FORK_RPC=<arbitrum one rpc> FOUNDRY_PROFILE=fork forge test --match-contract PositionVaultBotFork
 contract PositionVaultBotForkTest is Test {
     address constant BOT = 0x4a00e700C0005610c9E0C0000040126E55007821;

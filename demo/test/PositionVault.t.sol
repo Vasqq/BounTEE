@@ -13,9 +13,9 @@ import {MockUSDC} from "../src/MockUSDC.sol";
 /// on-chain behaviour at the contract boundary — the pause role is pause-only and moves no
 /// funds (R8.2); a paused vault refuses deposit-from-position (R7.5), shown with the honest
 /// position; and honest deposit, redeem and deposit-from-position return no more than was put
-/// in (R4.6's premise, spec #48 user story 9). It misses the live chains, real USDC, and bots
-/// other than the one observed (stated limit). No other seam fits: these are pure EVM contract
-/// behaviours.
+/// in (spec #48 user stories 9 and 10; no requirement ID: R4.6 itself is proved at seam J). It
+/// misses the live chains, real USDC, and bots other than the one observed (stated limit). No
+/// other seam fits: these are pure EVM contract behaviours.
 ///
 /// What this stub is for: the drain bot seen on Base and Arbitrum (read-only eth_call against
 /// 0x4a00e700…7821 on Nov 7) answers `owner()` with its own address and any other call with 1.
@@ -52,8 +52,8 @@ contract PositionVaultTest is Test {
         vm.stopPrank();
     }
 
-    /// R4.6 (spec #48 user story 9): an honest depositor deposits and redeems and gets back no
-    /// more than they put in, the premise of R4.6's honest-action model at seam J.
+    /// Spec #48 user story 9 (no requirement ID; R4.6 is proved at seam J): an honest depositor
+    /// deposits and redeems and gets back no more than they put in.
     function test_honest_deposit_and_redeem_returns_no_more_than_deposited() public {
         usdc.mint(depositor, 1e6);
         vm.startPrank(depositor);
@@ -65,9 +65,9 @@ contract PositionVaultTest is Test {
         assertLe(usdc.balanceOf(depositor), 1e6);
     }
 
-    /// R4.6 (spec #48 user stories 9 and 10): depositing from an honest position the caller owns moves
-    /// the position's USDC into the vault, and redeeming the shares returns no more than was put
-    /// in, the premise of R4.6's honest-action model at seam J.
+    /// Spec #48 user stories 9 and 10 (no requirement ID; R4.6 is proved at seam J): depositing
+    /// from an honest position the caller owns moves the position's USDC into the vault, and
+    /// redeeming the shares returns no more than was put in.
     function test_honest_depositFrom_returns_no_more_than_put_in() public {
         HonestPosition position = new HonestPosition(address(usdc), depositor, address(vault));
         usdc.mint(address(position), 1e6);
@@ -127,7 +127,8 @@ contract PositionVaultTest is Test {
         assertEq(usdc.balanceOf(address(vault)), SEED, "funds safe");
     }
 
-    /// ADR-0019's recorded analysis evidence (requirements.md method A): the drain bot seen on Nov 7, replicated, is refused and moves nothing.
+    /// ADR-0019's recorded analysis evidence (requirements.md method A): the drain bot seen on
+    /// Nov 7, replicated, is refused and moves nothing.
     function test_observed_bot_stub_is_refused() public {
         ObservedBotStub bot = new ObservedBotStub();
         vm.expectRevert(bytes("position belongs to another vault"));
