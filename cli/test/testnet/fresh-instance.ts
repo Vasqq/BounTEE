@@ -38,7 +38,9 @@
 // deploys on every chain), CHAINS (comma-separated chain IDs, the proof chain first; default
 // 84532 on testnet, 8453,42161 on mainnet), RPC (the proof chain's RPC), CHAIN_RPCS
 // (<chain id>=<url>,... for any chain; every chain's default is in cli/src/chains.ts),
-// NEAR_RPC, PREFLIGHT_ONLY=1 to stop after step 0.
+// NEAR_RPC, EXPLOIT_PUBLIC_KEY (the rules' exploit key, x25519:<base58>, such as the one
+// `bountee open-exploit --public-key` derives from the Protocol's wallet; default: a new key,
+// written to <dir>/<name>-exploit-key.pem), PREFLIGHT_ONLY=1 to stop after step 0.
 import { execFileSync, spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -77,6 +79,15 @@ const MINIMUM_THEFT = process.env.MINIMUM_THEFT ?? (MAINNET ? "1000000" : "10000
 const DISCLOSURE_DELAY_DAYS = wholeNumber("DISCLOSURE_DELAY_DAYS", 1);
 if (DISCLOSURE_DELAY_DAYS < 1 || DISCLOSURE_DELAY_DAYS > 90) {
   throw new Error(`DISCLOSURE_DELAY_DAYS is ${DISCLOSURE_DELAY_DAYS}: a disclosure delay is 1-90 days (R1.4)`);
+}
+// A malformed exploit key would only be refused at posting, after the vaults are deployed.
+if (process.env.EXPLOIT_PUBLIC_KEY) {
+  const [curve, key] = process.env.EXPLOIT_PUBLIC_KEY.split(":");
+  let bytes = 0;
+  try {
+    bytes = base58.decode(key ?? "").length;
+  } catch {}
+  if (curve !== "x25519" || bytes !== 32) throw new Error(`EXPLOIT_PUBLIC_KEY is ${process.env.EXPLOIT_PUBLIC_KEY}: it must be x25519:<32 bytes, base58>`);
 }
 // The claims the run files, for the Whitehat's preflight: ADR-0018's run files two, the cheat
 // that scores zero and the winning claim. A run that files more (the Day-3 checkpoint's three)
@@ -291,10 +302,13 @@ const proof = chains[0]!;
 // ---- 4. Post the bounty ------------------------------------------------------------------------------
 
 const config = await near.view(CONTRACT, "config");
-const x25519 = generateKeyPairSync("x25519");
-const pub = Buffer.from(x25519.publicKey.export({ format: "jwk" }).x!, "base64url");
-const exploitKeyFile = join(dir, `${NAME}-exploit-key.pem`);
-writeFileSync(exploitKeyFile, x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+const exploitPublicKey = process.env.EXPLOIT_PUBLIC_KEY ?? newExploitKey();
+function newExploitKey(): string {
+  const x25519 = generateKeyPairSync("x25519");
+  const pub = Buffer.from(x25519.publicKey.export({ format: "jwk" }).x!, "base64url");
+  writeFileSync(join(dir, `${NAME}-exploit-key.pem`), x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+  return `x25519:${base58.encode(pub)}`;
+}
 const rules = {
   covered_contracts: chains.map((c) => ({ chain_id: c.chain_id, address: c.vault })),
   proof_chain: CHAIN,
@@ -308,7 +322,7 @@ const rules = {
   minimum_theft: MINIMUM_THEFT,
   end_date_ns: String(BigInt(Date.now() + 30 * 86_400_000) * 1_000_000n),
   disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
-  exploit_public_key: `x25519:${base58.encode(pub)}`,
+  exploit_public_key: exploitPublicKey,
   judge_build_hash: config.judge_build_hash,
 };
 const rulesFile = join(dir, `${NAME}-rules.json`);
