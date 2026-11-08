@@ -9,7 +9,8 @@ interface IUSDC {
     function balanceOf(address) external view returns (uint256);
 }
 
-/// Seam E, ADR-0019 evidence (not a requirement test): the drain bot's real on-chain code (its
+/// Seam E. ADR-0019's recorded analysis evidence (requirements.md method A), not a requirement
+/// test: the drain bot's real on-chain code (its
 /// EIP-7702 delegate on Arbitrum One) used as the position, on a fork. It is refused and the
 /// vault's USDC does not move. Skipped unless FORK_RPC is set; the bot's 7702 designator needs
 /// the Prague EVM, so run it under the `fork` Foundry profile:

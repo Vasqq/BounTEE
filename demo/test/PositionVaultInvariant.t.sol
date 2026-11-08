@@ -7,11 +7,11 @@ import {HonestPosition} from "../src/HonestPosition.sol";
 import {MockUSDC} from "../src/MockUSDC.sol";
 import {ObservedBotStub} from "./PositionVault.t.sol";
 
-/// Seam E, ADR-0019 evidence (not a requirement test): a fuzzing stand-in for the scanner and
-/// fuzzer bots. Random actors with some USDC call the vault in random order, passing as a
-/// position any of: their own address, the vault, the token, the observed drain bot's stub, and
-/// an honest position one of them owns. None writes a purpose-built, non-cooperating position.
-/// The protocol's seed and each actor's own USDC must survive: no actor profits beyond rounding.
+/// Seam E. ADR-0019's recorded analysis evidence (requirements.md method A), not a requirement
+/// test: a fuzzing stand-in for the scanner and fuzzer bots. Random actors with some USDC call
+/// the vault in random order, passing as a position any of: their own address, the vault, the
+/// token, the observed drain bot's stub, and an honest position one of them owns. The invariant:
+/// no actor ends with more than it started with, beyond rounding.
 contract Handler is Test {
     PositionVault vault;
     MockUSDC usdc;

@@ -8,13 +8,9 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
 }
 
-/// A real position contract for the demo vault: it holds its owner's USDC and is attached to
-/// one vault. Its owner funds it by sending USDC to it, then calls the vault's
-/// deposit-from-position to move that USDC into the vault and receive shares.
-///
-/// It answers the position interface truthfully: `withdrawable()` is its actual USDC balance,
-/// and `pushTo` moves real USDC and only to the vault it belongs to. This is the honest use the
-/// deposit-from-position feature exists for.
+/// A position for the demo vault: it holds its owner's USDC for one vault. Its owner funds it by
+/// sending USDC to it, then calls the vault's deposit-from-position to move that USDC into the
+/// vault and receive shares.
 contract HonestPosition is IPosition {
     IERC20 public immutable token;
     address public immutable owner;
@@ -37,8 +33,8 @@ contract HonestPosition is IPosition {
         return token.balanceOf(address(this));
     }
 
-    /// Release `amount` of `token_` to `to`. Only the vault may call it, and only for this
-    /// position's own token; the USDC really moves.
+    /// Send `amount` of `token_` to `to`. Only the vault may call it, and only for this
+    /// position's own token.
     function pushTo(address token_, address to, uint256 amount) external {
         if (msg.sender != vault) revert NotVault();
         if (token_ != address(token)) revert WrongToken();
