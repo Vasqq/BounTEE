@@ -130,7 +130,7 @@ This document uses SHALL and SHALL NOT for every requirement. A SHOULD or MAY ca
 | 18 | A winning claim | Every covered contract on every chain is paused | R7.1 |
 | 19 | A claim block the independent RPCs don't confirm, or older than the recency limit | INVALID | R2.8 |
 | 20 | A proof that doesn't match the claim's block | INVALID | R4.10, R4.5 |
-| 21 | The demo protocol's missing access check (modelled on the DEPUSDT/LEVUSDC hack of June 2023) | PAYS | R4.10 |
+| 21 | A missing access check (modelled on the DEPUSDT/LEVUSDC hack of June 2023) | PAYS | R4.10 |
 | 22 | Damn Vulnerable DeFi v4 Truster, unmodified, its pool covered | PAYS | R4.10 |
 | 23 | Damn Vulnerable DeFi v4 Side Entrance, unmodified, its pool covered | PAYS | R4.10 |
 | 24 | Damn Vulnerable DeFi v4 Puppet, unmodified, its lending pool covered and its Uniswap pool a dependency | PAYS | R4.10 |
