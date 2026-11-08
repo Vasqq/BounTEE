@@ -5,7 +5,8 @@
 //! Seams, written down before the first test:
 //! - J (this file): the compiled wasm32-wasip2 judge under wasmtime, fed replay jobs built
 //!   from `fixtures/scenarios/`: one anvil block (`state.json`) holding the demo protocol
-//!   (demo/src, unchanged) beside one small contract per scenario
+//!   (demo/src, unchanged: the old vault, and the position vault deployed last) beside one
+//!   small contract per scenario
 //!   (`scenarios/chain/src/Scenarios.sol`), the exploits as Foundry dry runs
 //!   (`scenarios/exploits/*.json`), and a later block after an owner's patch
 //!   (`state-later.json`). Each test picks the bounty's rules (covered contracts, listed
@@ -597,81 +598,175 @@ fn r3_11_malformed_scenario_exploits_are_invalid() {
 
 // ---- R4.6: randomized honest action sequences ---------------------------------------------
 
-/// The demo protocol's honest actions, by one of three fresh accounts.
+/// The demo protocol's honest actions, by one of three fresh accounts: the old vault
+/// (`demo`, kept as scenario 21's) and the position vault (`positionVault`), which mints
+/// shares at the vault's price and redeems them for their part of its USDC.
 #[derive(Debug, Clone)]
 enum Action {
     /// Mint test USDC to oneself (the demo's MockUSDC mint is open; HonestUser does this).
     Mint(u128),
-    /// Approve the demo vault.
+    /// Approve the old vault.
     Approve(u128),
-    /// Deposit in the demo vault, at most the balance and the approval.
+    /// Deposit in the old vault, at most the balance and the approval.
     Deposit(u128),
-    /// Withdraw, at most what one has deposited.
+    /// Withdraw from the old vault, at most what one has deposited.
     Withdraw(u128),
     /// Send test USDC to another fresh account (or oneself).
     Transfer(usize, u128),
     /// Send native coin to another fresh account (or oneself).
     SendNative(usize, u128),
+    /// Create one's own honest position for the position vault (the demo's HonestPosition),
+    /// as one's first transaction.
+    CreatePosition,
+    /// Approve the position vault.
+    VaultApprove(u128),
+    /// Deposit in the position vault: within the balance and the approval, and enough for
+    /// at least one share (the vault refuses a deposit that mints none).
+    VaultDeposit(u128),
+    /// Redeem at most the shares one holds.
+    VaultRedeem(u128),
+    /// Send test USDC to one's own position.
+    FundPosition(u128),
+    /// Deposit everything one's position holds, when that mints at least one share.
+    DepositFrom,
+}
+
+/// The position vault at the claim's block, as `Scenarios.s.sol:Setup` leaves it: a
+/// 10,000 USDC deposit for 10,000 USDC of shares, then 5,000 USDC more, so a share is
+/// worth 1.5 USDC and deposits and redemptions round.
+const VAULT_ASSETS: u128 = 15_000 * DOLLAR;
+const VAULT_SHARES: u128 = 10_000 * DOLLAR;
+
+/// What an honest sequence leaves in the two vaults, by the model's books.
+struct Books {
+    /// The old vault's USDC.
+    demo: u128,
+    /// The position vault's USDC.
+    vault: u128,
+    /// Which fresh accounts created a position.
+    positions: [bool; 3],
 }
 
 /// One step as drawn: which action, by whom, to whom, and a number the amount is taken
 /// from. The amount is clamped to what an honest account can do in [`honest_sequence`], so
 /// every drawn sequence is honest and none is filtered out.
 fn step() -> impl Strategy<Value = (u8, usize, usize, u128)> {
-    (0u8..6, 0usize..3, 0usize..3, any::<u64>()).prop_map(|(k, i, j, n)| (k, i, j, n as u128))
+    (0u8..11, 0usize..3, 0usize..3, any::<u64>()).prop_map(|(k, i, j, n)| (k, i, j, n as u128))
 }
 
-/// Turn drawn steps into honest actions, tracking each account's USDC, approval, deposit
-/// and native coin as the demo contracts would.
-fn honest_sequence(steps: &[(u8, usize, usize, u128)], seed: u128) -> Vec<(usize, Action)> {
+/// Turn drawn steps into honest actions, tracking each account's USDC, approvals, deposit,
+/// shares, position and native coin, and the position vault's USDC and shares, as the
+/// demo contracts would, so no transaction reverts. An account whose flag in `positions`
+/// is set creates its position as its first transaction (so at nonce 0, the address the
+/// fixture proves). A step the account can't take honestly (a deposit too small for a
+/// share, a position it doesn't have) becomes a mint of the drawn amount.
+fn honest_sequence(
+    steps: &[(u8, usize, usize, u128)],
+    positions: [bool; 3],
+    seed: u128,
+) -> (Vec<(usize, Action)>, Books) {
     let mut usdc = [0u128; 3];
     let mut allowance = [0u128; 3];
     let mut deposit = [0u128; 3];
     let mut native = [seed; 3];
+    let mut vault_allowance = [0u128; 3];
+    let mut shares = [0u128; 3];
+    let mut has_position = [false; 3];
+    let mut in_position = [0u128; 3];
+    let mut sent = [false; 3];
+    let (mut assets, mut total_shares) = (VAULT_ASSETS, VAULT_SHARES);
     let up_to = |n: u128, max: u128| n % (max + 1);
-    steps
-        .iter()
-        .map(|&(kind, i, j, n)| {
-            let action = match kind {
-                0 => {
-                    let a = up_to(n, 1_000_000 * DOLLAR);
-                    usdc[i] += a;
-                    Action::Mint(a)
-                }
-                1 => {
-                    let a = up_to(n, 2_000_000 * DOLLAR);
-                    allowance[i] = a;
-                    Action::Approve(a)
-                }
-                2 => {
-                    let a = up_to(n, usdc[i].min(allowance[i]));
-                    usdc[i] -= a;
-                    allowance[i] -= a;
-                    deposit[i] += a;
-                    Action::Deposit(a)
-                }
-                3 => {
-                    let a = up_to(n, deposit[i]);
-                    deposit[i] -= a;
-                    usdc[i] += a;
-                    Action::Withdraw(a)
-                }
-                4 => {
-                    let a = up_to(n, usdc[i]);
-                    usdc[i] -= a;
-                    usdc[j] += a;
-                    Action::Transfer(j, a)
-                }
-                _ => {
-                    let a = up_to(n, native[i]);
-                    native[i] -= a;
-                    native[j] += a;
-                    Action::SendNative(j, a)
-                }
-            };
-            (i, action)
-        })
-        .collect()
+    let mut out = Vec::new();
+    for &(kind, i, j, n) in steps {
+        if !sent[i] && positions[i] {
+            has_position[i] = true;
+            out.push((i, Action::CreatePosition));
+        }
+        sent[i] = true;
+        let mint = |usdc: &mut [u128; 3]| {
+            let a = up_to(n, 1_000_000 * DOLLAR);
+            usdc[i] += a;
+            Action::Mint(a)
+        };
+        // The least deposit that mints one share at the vault's price.
+        let one_share = assets.div_ceil(total_shares);
+        let action = match kind {
+            1 => {
+                let a = up_to(n, 2_000_000 * DOLLAR);
+                allowance[i] = a;
+                Action::Approve(a)
+            }
+            2 => {
+                let a = up_to(n, usdc[i].min(allowance[i]));
+                usdc[i] -= a;
+                allowance[i] -= a;
+                deposit[i] += a;
+                Action::Deposit(a)
+            }
+            3 => {
+                let a = up_to(n, deposit[i]);
+                deposit[i] -= a;
+                usdc[i] += a;
+                Action::Withdraw(a)
+            }
+            4 => {
+                let a = up_to(n, usdc[i]);
+                usdc[i] -= a;
+                usdc[j] += a;
+                Action::Transfer(j, a)
+            }
+            5 => {
+                let a = up_to(n, native[i]);
+                native[i] -= a;
+                native[j] += a;
+                Action::SendNative(j, a)
+            }
+            6 => {
+                let a = up_to(n, 2_000_000 * DOLLAR);
+                vault_allowance[i] = a;
+                Action::VaultApprove(a)
+            }
+            7 if usdc[i].min(vault_allowance[i]) >= one_share => {
+                let a = one_share + up_to(n, usdc[i].min(vault_allowance[i]) - one_share);
+                let minted = a * total_shares / assets;
+                usdc[i] -= a;
+                vault_allowance[i] -= a;
+                shares[i] += minted;
+                (assets, total_shares) = (assets + a, total_shares + minted);
+                Action::VaultDeposit(a)
+            }
+            8 => {
+                let s = up_to(n, shares[i]);
+                let paid = s * assets / total_shares;
+                shares[i] -= s;
+                usdc[i] += paid;
+                (assets, total_shares) = (assets - paid, total_shares - s);
+                Action::VaultRedeem(s)
+            }
+            9 if has_position[i] => {
+                let a = up_to(n, usdc[i]);
+                usdc[i] -= a;
+                in_position[i] += a;
+                Action::FundPosition(a)
+            }
+            10 if has_position[i] && in_position[i] >= one_share => {
+                let a = in_position[i];
+                let minted = a * total_shares / assets;
+                in_position[i] = 0;
+                shares[i] += minted;
+                (assets, total_shares) = (assets + a, total_shares + minted);
+                Action::DepositFrom
+            }
+            _ => mint(&mut usdc),
+        };
+        out.push((i, action));
+    }
+    let books = Books {
+        demo: 10_000 * DOLLAR + deposit.iter().sum::<u128>(),
+        vault: assets,
+        positions: has_position,
+    };
+    (out, books)
 }
 
 fn calldata(signature: &str, args: &[[u8; 32]]) -> String {
@@ -716,19 +811,42 @@ fn honest_accounts() -> Vec<String> {
     out
 }
 
+/// Fresh account `i`'s honest position: the creation transaction `honestCoverAll` sends as
+/// that account's first (the demo's HonestPosition, compiled by make-scenarios.ts, owned
+/// by the account and attached to the position vault), and the address it lands at.
+fn position_of(i: usize) -> (Value, String) {
+    let who = &honest_accounts()[i];
+    let create = fixture("exploits/honestCoverAll.json")["transactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tx| tx["from"] == json!(who) && tx["to"].is_null())
+        .unwrap_or_else(|| panic!("{who} creates its position"))
+        .clone();
+    let address = format!("{:#x}", who.parse::<revm::primitives::Address>().unwrap().create(0));
+    (create, address)
+}
+
 fn exploit_of(actions: &[(usize, Action)]) -> Value {
     let who = honest_accounts();
-    let (usdc, demo) = (address("usdc"), address("demo"));
+    let (usdc, demo, vault) = (address("usdc"), address("demo"), address("positionVault"));
     let txs: Vec<Value> = actions
         .iter()
         .map(|(i, action)| {
+            let (position_create, position) = position_of(*i);
             let (to, value, input) = match action {
+                Action::CreatePosition => return position_create,
                 Action::Mint(a) => (&usdc, 0, calldata("mint(address,uint256)", &[word_a(&who[*i]), word_u(*a)])),
                 Action::Approve(a) => (&usdc, 0, calldata("approve(address,uint256)", &[word_a(&demo), word_u(*a)])),
                 Action::Deposit(a) => (&demo, 0, calldata("deposit(uint256)", &[word_u(*a)])),
                 Action::Withdraw(a) => (&demo, 0, calldata("withdraw(uint256)", &[word_u(*a)])),
                 Action::Transfer(j, a) => (&usdc, 0, calldata("transfer(address,uint256)", &[word_a(&who[*j]), word_u(*a)])),
                 Action::SendNative(j, a) => (&who[*j], *a, "0x".to_owned()),
+                Action::VaultApprove(a) => (&usdc, 0, calldata("approve(address,uint256)", &[word_a(&vault), word_u(*a)])),
+                Action::VaultDeposit(a) => (&vault, 0, calldata("deposit(uint256)", &[word_u(*a)])),
+                Action::VaultRedeem(s) => (&vault, 0, calldata("redeem(uint256)", &[word_u(*s)])),
+                Action::FundPosition(a) => (&usdc, 0, calldata("transfer(address,uint256)", &[word_a(&position), word_u(*a)])),
+                Action::DepositFrom => (&vault, 0, calldata("depositFrom(address)", &[word_a(&position)])),
             };
             json!({ "from": who[*i], "to": to, "value": value.to_string(), "input": input, "gas": 300000 })
         })
@@ -736,36 +854,95 @@ fn exploit_of(actions: &[(usize, Action)]) -> Value {
     json!({ "transactions": txs })
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig { cases: 48, failure_persistence: None, ..ProptestConfig::default() })]
+/// Which of the two vaults a generated bounty covers.
+const COVERED: [&[&str]; 3] = [&["demo"], &["positionVault"], &["demo", "positionVault"]];
 
-    /// R4.6: every sequence of the demo protocol's honest actions by fresh accounts —
-    /// minting test USDC, approving, depositing, withdrawing no more than deposited,
-    /// passing USDC and native coin between themselves — scores zero, at any posting
-    /// prices, with the minimum theft at one value unit (so any score above zero would
-    /// PAY). An honest sequence never takes from the covered vault.
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 64, failure_persistence: None, ..ProptestConfig::default() })]
+
+    /// R4.6, R4.8: every sequence of the demo protocol's honest actions by fresh accounts —
+    /// minting test USDC, approving, depositing in and withdrawing from the old vault,
+    /// depositing in and redeeming from the position vault at its rounded share price,
+    /// creating an honest position, funding it and depositing from it, passing USDC and
+    /// native coin between themselves — scores zero, with either vault or both covered, at
+    /// any posting prices, with the minimum theft at one value unit (so any score above
+    /// zero would PAY). USDC left in a position counts as its creator's. An honest
+    /// sequence never takes from a covered vault.
     #[test]
     fn r4_6_randomized_honest_action_sequences_score_zero(
-        steps in proptest::collection::vec(step(), 1..16),
+        steps in proptest::collection::vec(step(), 1..24),
+        positions in any::<[bool; 3]>(),
+        covered in 0usize..3,
         usdc_price in 1u128..=u64::MAX as u128,
         native_price in 0u128..=u64::MAX as u128,
     ) {
         let seed: u128 = fixture("rules.json")["seed"]["native"].as_str().unwrap().parse().unwrap();
-        let actions = honest_sequence(&steps, seed);
-        let bounty = Bounty { covered: &["demo"], listed: &[("usdc", usdc_price), ("native", native_price)] };
+        let (actions, _) = honest_sequence(&steps, positions, seed);
+        let bounty = Bounty { covered: COVERED[covered], listed: &[("usdc", usdc_price), ("native", native_price)] };
         let j = job_at("state.json", exploit_of(&actions), &bounty);
         prop_assert_eq!(reason_of(&j), ZERO, "{:?}", actions);
+    }
+
+    /// R4.6's generator makes runnable exploits, so its ZEROs aren't reverts: every
+    /// generated sequence, followed by the old vault's drain of all it holds to one of the
+    /// fresh accounts that sent a transaction or to a position one created (R4.8: an
+    /// address that only receives is not the attacker's), scores exactly what the model's
+    /// books say the two covered vaults lost: the old vault's 10,000 USDC less what the
+    /// sequence left in the position vault. A transaction the model thinks succeeds but
+    /// reverts, or a share amount it rounds differently, moves that score.
+    #[test]
+    fn r4_6_r4_8_generated_sequences_with_the_old_drain_appended_score_the_books(
+        steps in proptest::collection::vec(step(), 1..24),
+        positions in any::<[bool; 3]>(),
+        by in 0usize..3,
+        to in 0usize..6,
+    ) {
+        let seed: u128 = fixture("rules.json")["seed"]["native"].as_str().unwrap().parse().unwrap();
+        let (actions, books) = honest_sequence(&steps, positions, seed);
+        let who = honest_accounts();
+        let sent = |k: usize| k == by || actions.iter().any(|(i, _)| *i == k);
+        let to = if to >= 3 && books.positions[to - 3] {
+            position_of(to - 3).1
+        } else if sent(to % 3) {
+            who[to % 3].clone()
+        } else {
+            who[by].clone()
+        };
+        let mut exploit = exploit_of(&actions);
+        exploit["transactions"].as_array_mut().unwrap().push(old_vault_drain(by, &to, books.demo));
+        let bounty = Bounty { covered: &["demo", "positionVault"], listed: &[("usdc", 1)] };
+        let j = job_at("state.json", exploit, &bounty);
+        // Every USDC the attacker gains comes from its own mints or the covered vaults, so
+        // the gain is never below the loss, and the score is the loss.
+        let loss = (10_000 * DOLLAR + VAULT_ASSETS).checked_sub(books.vault).unwrap_or(0);
+        if loss == 0 {
+            prop_assert_eq!(reason_of(&j), ZERO, "{:?}", actions);
+        } else {
+            prop_assert_eq!(reason_of(&with_minimum(j.clone(), loss)), PAYS, "{:?}", actions);
+            prop_assert_eq!(reason_of(&with_minimum(j, loss + 1)), ZERO, "{:?}", actions);
+        }
     }
 }
 
 // ---- Control: the generated exploits run ----------------------------------------------------
 
+/// The old vault's drain (scenario 21) of `amount` USDC, sent by fresh account `by` to `to`.
+fn old_vault_drain(by: usize, to: &str, amount: u128) -> Value {
+    json!({
+        "from": honest_accounts()[by],
+        "to": address("demo"),
+        "value": "0",
+        "input": calldata("executeStrategy(address,uint256)", &[word_a(to), word_u(amount)]),
+        "gas": 300000,
+    })
+}
+
 /// R4.6's generator makes runnable exploits, so its ZEROs aren't reverts: an honest
 /// sequence (mint 500, approve 1,000, deposit 400, withdraw 100, pass 50 on) followed by
-/// the demo drain, from the same fresh accounts, scores exactly what the vault lost.
+/// the old vault's drain, from the same fresh accounts, scores exactly what the vault lost.
 #[test]
 fn r4_6_generated_sequence_with_the_drain_appended_pays() {
-    let actions = honest_sequence(
+    let (actions, _) = honest_sequence(
         &[
             (0, 0, 0, 500 * DOLLAR),
             (1, 0, 0, 1_000 * DOLLAR),
@@ -773,17 +950,15 @@ fn r4_6_generated_sequence_with_the_drain_appended_pays() {
             (3, 0, 0, 100 * DOLLAR),
             (4, 0, 1, 50 * DOLLAR),
         ],
+        [false; 3],
         ETHER,
     );
     let mut exploit = exploit_of(&actions);
     let who = honest_accounts();
-    exploit["transactions"].as_array_mut().unwrap().push(json!({
-        "from": who[1],
-        "to": address("demo"),
-        "value": "0",
-        "input": calldata("executeStrategy(address,uint256)", &[word_a(&who[1]), word_u(10_000 * DOLLAR)]),
-        "gas": 300000,
-    }));
+    exploit["transactions"]
+        .as_array_mut()
+        .unwrap()
+        .push(old_vault_drain(1, &who[1], 10_000 * DOLLAR));
     let bounty = Bounty {
         covered: &["demo"],
         listed: USDC_AND_NATIVE,
@@ -792,4 +967,44 @@ fn r4_6_generated_sequence_with_the_drain_appended_pays() {
     // attacker holds 10,200 USDC more, so the score is the loss.
     let j = job_at("state.json", exploit, &bounty);
     assert_score(j, 9_700 * DOLLAR * USDC);
+}
+
+/// R4.6, R4.8: the generator's position-vault actions run too. A generated sequence by one
+/// fresh account (create its position, mint 1,000 USDC, approve the position vault for
+/// 1,000, deposit 300, redeem 50 shares, fund the position with 200, deposit from it, fund
+/// it with 40 more), then the old vault's drain sent to that position, scores exactly the
+/// two covered vaults' net loss. The proceeds count only because the position, created by
+/// a fresh account, is the attacker's.
+#[test]
+fn r4_6_r4_8_position_vault_sequence_with_the_old_drain_appended_pays() {
+    let (actions, _) = honest_sequence(
+        &[
+            (0, 0, 0, 1_000 * DOLLAR),
+            (6, 0, 0, 1_000 * DOLLAR),
+            (7, 0, 0, 300 * DOLLAR - 2), // the clamp starts at one share's worth, 2 micro-USDC
+            (8, 0, 0, 50 * DOLLAR),
+            (9, 0, 0, 200 * DOLLAR),
+            (10, 0, 0, 0),
+            (9, 0, 0, 40 * DOLLAR),
+        ],
+        [true, false, false],
+        ETHER,
+    );
+    let mut exploit = exploit_of(&actions);
+    let (_, position) = position_of(0);
+    exploit["transactions"]
+        .as_array_mut()
+        .unwrap()
+        .push(old_vault_drain(0, &position, 10_000 * DOLLAR));
+    let bounty = Bounty {
+        covered: &["demo", "positionVault"],
+        listed: USDC_AND_NATIVE,
+    };
+    // Worked by hand, at 1.5 USDC a share: the deposit of 300 mints 200 shares; redeeming
+    // 50 of them pays 50 × 15,300 / 10,200 = 75; the position's 200 go in. The position
+    // vault ends 425 USDC up and the old vault 10,000 down, so the covered contracts lose
+    // 9,575. The attacker ends with 575 of its 1,000 minted plus the 10,000 drained
+    // (40 + 10,000 of it in the position), so the gain is 10,575 and the score the loss.
+    let j = job_at("state.json", exploit, &bounty);
+    assert_score(j, 9_575 * DOLLAR * USDC);
 }
