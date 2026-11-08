@@ -19,3 +19,5 @@ The evidence, gathered on a prototype before any mainnet spend: the bot's own on
 - The exploit stays sealed until the run: no script or test that performs it is pushed before the bounty is won and its disclosure delay has passed, so neither the agent nor anyone reading the repo can copy it, and "the agent found it" stays true.
 - The drained first attempt is part of the public record: 3 USDC and about $1 of gas lost, the drain transactions linked from the README.
 - Amends ADR-0018: the demo vault and its bug.
+
+Amended by ADR-0020: the vault holds 2 USDC on each chain.

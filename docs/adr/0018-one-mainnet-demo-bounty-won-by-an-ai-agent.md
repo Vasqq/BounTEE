@@ -19,3 +19,5 @@ ADR-0017 makes every demonstrated proof a mainnet transaction. A bounty pays onc
 - Amends ADR-0004 (one bounty, the spend above) and ADR-0011 (no Damn Vulnerable DeFi level is posted live).
 
 Amended by ADR-0019: the demo vault's bug is the Visor Finance class, which needs a purpose-built contract, after a drain bot emptied the first mainnet vaults seconds after funding.
+
+Amended by ADR-0020: on a second mainnet deployment, the cheat claim is proven on Base, the winning claim on either chain, and the vault holds 2 USDC on each.
