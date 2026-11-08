@@ -11,8 +11,14 @@
 //   -> `claim` waits for each chain's safe head and asks NEAR's MPC network to verify each
 //      chain's pause (R7.10 on Arbitrum Sepolia, live for the first time)
 //
+// Seams (#53): T only, on PositionVault instances (ADR-0019). Catches two chains' posting check,
+// pauses and their verification on the new vault; misses mainnet (#35). A testnet run is a
+// rehearsal, never evidence (requirements.md, ADR-0017).
+//
 // Runs only with BOUNTEE_T20_RUN=1 (it spends testnet NEAR, Base Sepolia ETH and Arbitrum
-// Sepolia ETH, and waits up to ~30 minutes for the safe heads). Needs BOUNTEE_DAY3 naming a
+// Sepolia ETH, and waits up to ~30 minutes for the safe heads). Needs SEALED_EXPLOIT, the
+// absolute path of the sealed exploit script (never in this repo); without it each test stops
+// with "sealed exploit not present" before deploying or spending. Needs BOUNTEE_DAY3 naming a
 // deployment whose judge pins Arbitrum Sepolia's RPCs (`testnet/deploy-system.ts`),
 // WHITEHAT=<account with ~1.2 NEAR>, the Protocol's key, and the deployer (same key on both
 // chains) in ~/.bountee-testnet/base-sepolia-deployer.env. INSTANCE=<file> reuses an unclaimed
@@ -25,13 +31,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { Near } from "../src/near.ts";
 import { defaultRpc } from "../src/chains.ts";
+import { sealedExploit } from "./testnet/sealed-exploit.ts";
 
 const RUN = process.env.BOUNTEE_T20_RUN === "1";
 const BASE = 84532;
 const ARBITRUM = 421614;
 const home = homedir();
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
-const repo = fileURLToPath(new URL("../../", import.meta.url));
 const freshInstance = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
 const evidenceFile = join(home, ".bountee-testnet", "t20-evidence.json");
 const evidence: Record<string, unknown> = {};
@@ -46,6 +52,7 @@ const rpc = (chain: number) => defaultRpc(chain)!;
 const paused = (chain: number, vault: string) => cast("call", vault, "paused()(bool)", "--rpc-url", rpc(chain));
 const usdcOf = (chain: number, c: { evm_usdc: string; vault: string }) =>
   cast("call", c.evm_usdc, "balanceOf(address)(uint256)", c.vault, "--rpc-url", rpc(chain)).split(" ")[0];
+const sharesOf = (chain: number, vault: string) => cast("call", vault, "totalShares()(uint256)", "--rpc-url", rpc(chain)).split(" ")[0];
 
 function run(cmd: string, args: string[], env: Record<string, string> = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
@@ -67,6 +74,7 @@ describe.runIf(RUN)("#20: one winning claim pauses the vault on Base Sepolia and
   const on = (chain: number) => instance.chains.find((c: any) => c.chain_id === chain);
 
   test("R12.5, D1: a bounty covering both chains passes the enclave's posting check and goes live", async () => {
+    sealedExploit();
     expect(whitehat, "set WHITEHAT").not.toBe("");
     if (process.env.INSTANCE) {
       instance = JSON.parse(readFileSync(process.env.INSTANCE, "utf8"));
@@ -94,9 +102,10 @@ describe.runIf(RUN)("#20: one winning claim pauses the vault on Base Sepolia and
   }, 900_000);
 
   test("D1, R7.4, R7.10: one claim judged on Base's state pauses both vaults; each chain's pause is verified", async () => {
+    const exploit = sealedExploit();
     const id = { protocol: instance.protocol, name: instance.name };
-    const arbUsdcBefore = usdcOf(ARBITRUM, on(ARBITRUM));
-    const r = await run(process.execPath, [entry, "claim", join(repo, "demo/script/Exploit.s.sol"), "--bounty", instance.bounty, "--contract", contract, "--as", whitehat, "--verify-wait", "3600", "--timeout", "3600", "--json"], { VAULT: on(BASE).vault });
+    const arbBefore = { usdc: usdcOf(ARBITRUM, on(ARBITRUM)), shares: sharesOf(ARBITRUM, on(ARBITRUM).vault) };
+    const r = await run(process.execPath, [entry, "claim", exploit, "--bounty", instance.bounty, "--contract", contract, "--as", whitehat, "--verify-wait", "3600", "--timeout", "3600", "--json"], { VAULT: on(BASE).vault });
     const out = JSON.parse(r.stdout || "{}");
     record("claim", { code: r.code, claim_id: out.claim_id, tx: out.tx_hash, verdict: out.verdict, local_verdict: out.local_verdict, paid: out.paid, broadcast: out.broadcast, verification: out.verification, stderr: r.stderr.slice(-2000) });
 
@@ -105,7 +114,8 @@ describe.runIf(RUN)("#20: one winning claim pauses the vault on Base Sepolia and
     expect(out.local_verdict).toStrictEqual({ outcome: "PAYS", reason: "minimum_theft_reached" });
     expect(out.verdict).toStrictEqual(out.local_verdict);
     expect(out.paid).toBe(true);
-    expect(usdcOf(ARBITRUM, on(ARBITRUM))).toBe(arbUsdcBefore);
+    expect(usdcOf(ARBITRUM, on(ARBITRUM))).toBe(arbBefore.usdc);
+    expect(sharesOf(ARBITRUM, on(ARBITRUM).vault)).toBe(arbBefore.shares);
 
     // R7.4, D1: a pause for every covered contract on both chains, broadcast, and both read paused.
     const bounty = await near.view(contract, "bounty", { id });

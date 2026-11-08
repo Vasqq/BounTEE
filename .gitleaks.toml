@@ -1,0 +1,14 @@
+# The judge's scenario fixtures commit EVM state proofs: each storage entry's "key" is a 32-byte
+# storage-slot hash, which gitleaks' generic-api-key rule mistakes for a secret. Only that rule,
+# only that match shape, only in those fixture files is allowed; everything else is scanned.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "EVM storage-slot keys in the judge's chain-state fixtures"
+condition = "AND"
+paths = ['''(^|/)judge/tests/fixtures/scenarios/state(-later)?\.json$''']
+regexTarget = "match"
+regexes = ['''^key": "0x[0-9a-f]{64}"?$''']

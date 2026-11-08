@@ -2,7 +2,9 @@
 pragma solidity 0.8.28;
 
 import {DemoVault} from "demo/DemoVault.sol";
+import {HonestPosition} from "demo/HonestPosition.sol";
 import {MockUSDC} from "demo/MockUSDC.sol";
+import {PositionVault} from "demo/PositionVault.sol";
 import {
     BankDrainer,
     BuggyToken,
@@ -40,10 +42,18 @@ abstract contract Base {
 /// owned contract). The claim's block is the last block of this setup.
 contract Setup is Base {
     function run() external {
-        address treasury = vm.envAddress("TREASURY");
         vm.startBroadcast(vm.envUint("DEPLOYER_KEY"));
         address me = vm.addr(vm.envUint("DEPLOYER_KEY"));
-        MockUSDC usdc = new MockUSDC();
+        MockUSDC usdc = scenarios(me);
+        deployPositionVault(usdc, me);
+        vm.stopBroadcast();
+    }
+
+    /// The demo protocol's old vault and the R4.10 scenario contracts, in their original
+    /// order (so their addresses are as before).
+    function scenarios(address me) internal returns (MockUSDC usdc) {
+        address treasury = vm.envAddress("TREASURY");
+        usdc = new MockUSDC();
         IToken u = IToken(address(usdc));
         // The demo protocol: an existing depositor holds 10,000 USDC in the vault.
         DemoVault demo = new DemoVault(address(usdc), me, me);
@@ -93,7 +103,16 @@ contract Setup is Base {
         early.patch();
         PatchableVault late = new PatchableVault(u);
         usdc.transfer(address(late), 5_000e6);
-        vm.stopBroadcast();
+    }
+
+    /// The position vault (the demo protocol since ADR-0019), deployed last so no other
+    /// contract's address moves: seeded by a 10,000 USDC deposit, as demo/script/Deploy
+    /// does, then 5,000 USDC more, so a share is worth 1.5 USDC and deposits round.
+    function deployPositionVault(MockUSDC usdc, address me) internal {
+        PositionVault positionVault = new PositionVault(address(usdc), me);
+        usdc.approve(address(positionVault), 10_000e6);
+        positionVault.deposit(10_000e6);
+        usdc.transfer(address(positionVault), 5_000e6);
     }
 }
 
@@ -298,15 +317,24 @@ contract Exploits is Base {
     }
 
     /// R4.6: every honest action of the demo protocol, by each of three fresh accounts, so
-    /// the proofs cover every account and slot any sequence of them reads.
+    /// the proofs cover every account and slot any sequence of them reads. Each account's
+    /// first transaction creates its honest position (so at nonce 0), whose creation the
+    /// seam J tests reuse.
     function honestCoverAll() external {
         DemoVault demo = DemoVault(vm.envAddress("DEMO"));
+        PositionVault vault = PositionVault(vm.envAddress("POSITION_VAULT"));
         uint256[3] memory keys = [uint256(0xa11), 0xa12, 0xa13];
         address[3] memory who;
         for (uint256 i = 0; i < 3; i++) who[i] = freshFrom(keys[i]);
         for (uint256 i = 0; i < 3; i++) {
             vm.startBroadcast(keys[i]);
+            HonestPosition position = new HonestPosition(address(usdc()), who[i], address(vault));
             usdc().mint(who[i], 1_000e6);
+            usdc().approve(address(vault), 1_000e6);
+            uint256 minted = vault.deposit(100e6);
+            vault.redeem(minted);
+            usdc().transfer(address(position), 100e6);
+            vault.depositFrom(position);
             usdc().approve(address(demo), 1_000e6);
             demo.deposit(100e6);
             demo.withdraw(100e6);

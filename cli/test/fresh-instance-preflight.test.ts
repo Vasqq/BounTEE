@@ -18,6 +18,10 @@
 //   claim proves, OutLayer's hold from fees(), and the peak with holds refunded between claims.
 //   The real sizes are a recorded analysis: run against Base mainnet the cheat budgets 289 KB,
 //   matching the ~289 KB a real cheat replay proved (ticket #35's prep notes).
+//   Ticket #52 moves the run to the PositionVault: the cheat is HonestUser.s.sol's deposit then
+//   redeem (still after buying Circle's USDC on Uniswap V2: Circle's USDC has no public mint),
+//   and the read lists are re-measured on the new vault's replays (claim-budget.ts). This
+//   test needs no exploit: the win's read list is committed as numbers.
 //   Misses: the real mainnet balances and gas prices (read when #35 runs it), and every step
 //   after the preflight (each spends; rehearsed on testnet, #33).
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -210,12 +214,16 @@ test("D21: the Whitehat's budget follows each claim's input on the proof chain: 
   world.node = 500;
   const r = await preflight();
   const [cheat, win] = r.out.run.claim_budget;
-  // The cheat proves the accounts its purchase reads, on Base: the router, pair, WETH, and
-  // Circle's USDC and its implementation; the win reads none of Uniswap's.
+  // The cheat (HonestUser.s.sol on the PositionVault: buy, approve, deposit, redeem) proves
+  // the accounts its purchase reads, on Base: the router, pair, WETH, and Circle's USDC and
+  // its implementation, with 7 of USDC's slots; the win reads none of Uniswap's, and 6 of
+  // USDC's slots. The slot counts are ticket #52's measurement of the new vault's replays
+  // (claim-budget.ts, DEMO_READS), independent of the code that budgets them.
   const proved = requests.filter((q) => q.method === "eth_getProof").map((q) => `${q.where} ${q.detail}`);
-  for (const [address, slots] of [[ROUTER, 0], [PAIR, 6], [WETH, 2], [BASE_USDC, 8], [USDC_IMPL, 0], [BASE_USDC, 4], [COINBASE, 0]] as const) {
+  for (const [address, slots] of [[ROUTER, 0], [PAIR, 6], [WETH, 2], [BASE_USDC, 7], [USDC_IMPL, 0], [BASE_USDC, 6], [COINBASE, 0]] as const) {
     expect(proved).toContain(`chain 8453 ${address} ${slots}`);
   }
+  expect(proved.filter((q) => q.startsWith(`chain 8453 ${BASE_USDC} `))).toHaveLength(2);
   expect(proved.every((q) => q.startsWith("chain 8453 "))).toBe(true);
   expect(cheat.input_bytes).toBeGreaterThan(win.input_bytes);
   // OutLayer holds the storage price for every input byte above the free 32 KiB (fees()).

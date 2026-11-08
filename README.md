@@ -40,6 +40,8 @@ Each step below is a command and what it prints. They replay recorded jobs (the 
 
 **1. A real exploit of the demo vault pays.** Fresh accounts walk away with the vault's USDC.
 
+Steps 1 and 2 replay jobs recorded on the earlier demo vault (`demo/src/DemoVault.sol`). The live demo bounty now covers the position vault (`demo/src/PositionVault.sol`); its jobs replace these once the mainnet run records them (#35).
+
 ```console
 $ bountee test --job demo/fixtures/exploit.json
 verdict: PAYS (minimum_theft_reached)

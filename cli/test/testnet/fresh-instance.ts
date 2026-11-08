@@ -1,16 +1,18 @@
 // A fresh demo instance and its bounty posted (D21): every winning run closes its bounty and
-// pauses its vault, so each run uses a new one. NETWORK picks the network (#43): testnet (the
-// default) deploys on Base Sepolia (and, with CHAINS, more chains) with a mock USDC and
-// posts on NEAR testnet; mainnet deploys on Base and Arbitrum One with Circle's USDC (2 into
-// the proof chain's vault, 1 into each other, ADR-0018) and posts on NEAR mainnet.
+// pauses its vault, so each run uses a new one. The demo vault is a PositionVault (ADR-0019).
+// NETWORK picks the network (#43): testnet (the default) deploys on Base Sepolia (and, with
+// CHAINS, more chains) with a mock USDC and posts on NEAR testnet; mainnet deploys on Base and
+// Arbitrum One with Circle's USDC (2 into the proof chain's vault, 1 into each other,
+// ADR-0018) and posts on NEAR mainnet.
 //
 // 0. Reports every balance the run needs, and stops before spending anything, naming what
 //    to top up, if any would run dry (spec, Testing Decisions).
 // 1. Reads the new bounty's pause-role address from the bounty contract (`pause_role`), and
 //    checks it against the formats' own derivation (D25). One address serves every chain.
-// 2. On each chain, deploys a new DemoVault (demo/script/Deploy.s.sol, --broadcast), with a
-//    new MockUSDC minted into it on testnet or real USDC sent from the deployer on mainnet,
-//    granting the pause role to that address.
+// 2. On each chain, deploys a new PositionVault (demo/script/Deploy.s.sol, --broadcast),
+//    granting the pause role to that address, and seeds it by the deployer's own deposit:
+//    a new MockUSDC minted to the deployer on testnet, Circle's USDC the deployer holds on
+//    mainnet, approved to the vault and deposited for shares (ADR-0019).
 // 3. On each chain, funds the pause-role address with the pause gas the posting check asks
 //    for (R7.6): the gas its signed pause may burn at its fee limit (200,000 gas at 1 gwei =
 //    0.0002 ETH), plus Base's L1 data fee allowance (0.00001 ETH); the formats'
@@ -36,7 +38,9 @@
 // deploys on every chain), CHAINS (comma-separated chain IDs, the proof chain first; default
 // 84532 on testnet, 8453,42161 on mainnet), RPC (the proof chain's RPC), CHAIN_RPCS
 // (<chain id>=<url>,... for any chain; every chain's default is in cli/src/chains.ts),
-// NEAR_RPC, PREFLIGHT_ONLY=1 to stop after step 0.
+// NEAR_RPC, EXPLOIT_PUBLIC_KEY (the rules' exploit key, x25519:<base58>, such as the one
+// `bountee open-exploit --public-key` derives from the Protocol's wallet; default: a new key,
+// written to <dir>/<name>-exploit-key.pem), PREFLIGHT_ONLY=1 to stop after step 0.
 import { execFileSync, spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -48,9 +52,9 @@ import { PAUSE_GAS_PER_PAUSE, pauseRole } from "@bountee/formats";
 import { parseRpcFlags } from "../../src/broadcast.ts";
 import { CHAINS, defaultRpc, proofRpcs } from "../../src/chains.ts";
 import { rpc } from "../../src/proofs.ts";
-import { budgetClaims, whitehatNeed, type ClaimBudget, type ClaimPlan, type Read } from "./claim-budget.ts";
+import { DEMO_READS, budgetClaims, whitehatNeed, type ClaimBudget, type ClaimPlan, type Read, type Role } from "./claim-budget.ts";
 import { formatNear, milliNear } from "../../src/near.ts";
-import { MPC_ROOT, near, network as NETWORK, need, stopIfShort, wholeNumber, type Need } from "./deploy.ts";
+import { DEMO_DEPLOY_GAS, MPC_ROOT, near, network as NETWORK, need, stopIfShort, wholeNumber, type Need } from "./deploy.ts";
 import { keystoreEnv, redact } from "./evm-key.ts";
 
 const home = homedir();
@@ -75,6 +79,15 @@ const MINIMUM_THEFT = process.env.MINIMUM_THEFT ?? (MAINNET ? "1000000" : "10000
 const DISCLOSURE_DELAY_DAYS = wholeNumber("DISCLOSURE_DELAY_DAYS", 1);
 if (DISCLOSURE_DELAY_DAYS < 1 || DISCLOSURE_DELAY_DAYS > 90) {
   throw new Error(`DISCLOSURE_DELAY_DAYS is ${DISCLOSURE_DELAY_DAYS}: a disclosure delay is 1-90 days (R1.4)`);
+}
+// A malformed exploit key would only be refused at posting, after the vaults are deployed.
+if (process.env.EXPLOIT_PUBLIC_KEY) {
+  const [curve, key] = process.env.EXPLOIT_PUBLIC_KEY.split(":");
+  let bytes = 0;
+  try {
+    bytes = base58.decode(key ?? "").length;
+  } catch {}
+  if (curve !== "x25519" || bytes !== 32) throw new Error(`EXPLOIT_PUBLIC_KEY is ${process.env.EXPLOIT_PUBLIC_KEY}: it must be x25519:<32 bytes, base58>`);
 }
 // The claims the run files, for the Whitehat's preflight: ADR-0018's run files two, the cheat
 // that scores zero and the winning claim. A run that files more (the Day-3 checkpoint's three)
@@ -141,12 +154,12 @@ const fees = await near.view(CONTRACT, "fees");
 // Base charges on top: its pool refuses a pause whose sender holds exactly gas x max fee (Day-3
 // run, Nov 5: "have 200000000000000 want 200000000001544"). The posting check asks for this.
 const pauseGasWei = PAUSE_GAS_PER_PAUSE;
-// Deploy.s.sol plus the pause-gas transfer, ~3.2M gas: at 3x today's price (floor 0.05 gwei),
-// plus 0.00005 ETH of slack.
+// Deploy.s.sol plus the pause-gas transfer (DEMO_DEPLOY_GAS): at 3x today's price (floor
+// 0.05 gwei), plus 0.00005 ETH of slack.
 const deployWei = (rpc: string) => {
   const gasPrice = BigInt(cast("gas-price", "--rpc-url", rpc));
   const deployPrice = 3n * gasPrice > 50_000_000n ? 3n * gasPrice : 50_000_000n;
-  return 4_000_000n * deployPrice + 50_000_000_000_000n;
+  return DEMO_DEPLOY_GAS * deployPrice + 50_000_000_000_000n;
 };
 const WHITEHAT = process.env.WHITEHAT;
 const ftBalance = async (who: string) => BigInt(await near.view<string>(USDC, "ft_balance_of", { account_id: who }));
@@ -161,36 +174,41 @@ const UNISWAP_V2_ROUTER = "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24";
 const IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
 
 /**
- * The run's claims and what each replay reads (the accounts and slot counts the Day-3 run's jobs
- * and #35's mainnet cheat proved): the cheat (demo/script/HonestUser.s.sol) first, then the
- * winning exploit (Exploit.s.sol) for every other claim; a one-claim run files only the win.
+ * The run's claims and what each replay reads (claim-budget.ts's DEMO_READS, measured on the
+ * PositionVault's replays): the cheat (demo/script/HonestUser.s.sol) first, then the winning
+ * exploit for every other claim; a one-claim run files only the win. A contract the run deploys
+ * (the vault, and the mock USDC on testnet) is budgeted from its compiled code.
  */
 async function claimPlans(): Promise<ClaimPlan[]> {
   const call = (to: string, sig: string, ...args: string[]) => cast("call", to, sig, ...args, "--rpc-url", proofRpc).split(" ")[0]!.toLowerCase();
   const runtime = (name: string) => foundry("forge", ["inspect", name, "deployedBytecode"], { cwd: demoDir });
   const head = await rpc<{ miner: string }>(proofRpc, "eth_getBlockByNumber", ["latest", false]);
-  const sender: Read = { name: "fresh sender", slots: 0 };
-  const coinbase: Read = { name: "block's coinbase", address: head.miner, slots: 0 };
-  const vault: Read = { name: "DemoVault", code: runtime("DemoVault"), slots: 0 };
-  let cheat: Read[];
-  let win: Read[];
+  const accounts: Partial<Record<Role, Omit<Read, "slots">>> = {
+    sender: { name: "fresh sender" },
+    coinbase: { name: "block's coinbase", address: head.miner },
+    vault: { name: "PositionVault", code: runtime("PositionVault") },
+  };
   if (MAINNET) {
     const usdc = circleUsdc(CHAIN);
     const impl = `0x${BigInt(cast("storage", usdc, IMPLEMENTATION_SLOT, "--rpc-url", proofRpc)).toString(16).padStart(40, "0")}`;
     if (/^0x0+$/.test(impl)) throw new Error(`${usdc} names no implementation at ${IMPLEMENTATION_SLOT}`);
     const weth = call(UNISWAP_V2_ROUTER, "WETH()(address)");
     const pair = call(call(UNISWAP_V2_ROUTER, "factory()(address)"), "getPair(address,address)(address)", weth, usdc);
-    const token = [{ name: "USDC implementation", address: impl, slots: 0 }];
-    cheat = [sender, coinbase, vault, ...token, { name: "USDC", address: usdc, slots: 8 },
-      { name: "Uniswap V2 router", address: UNISWAP_V2_ROUTER, slots: 0 }, { name: "WETH/USDC pair", address: pair, slots: 6 }, { name: "WETH", address: weth, slots: 2 }];
-    win = [sender, coinbase, vault, ...token, { name: "USDC", address: usdc, slots: 4 }];
+    Object.assign(accounts, {
+      usdc_implementation: { name: "USDC implementation", address: impl },
+      usdc: { name: "USDC", address: usdc },
+      uniswap_router: { name: "Uniswap V2 router", address: UNISWAP_V2_ROUTER },
+      uniswap_pair: { name: "WETH/USDC pair", address: pair },
+      weth: { name: "WETH", address: weth },
+    });
   } else {
-    const mock = runtime("MockUSDC");
-    cheat = [sender, coinbase, vault, { name: "MockUSDC", code: mock, slots: 4 }];
-    win = [sender, coinbase, vault, { name: "MockUSDC", code: mock, slots: 2 }];
+    accounts.usdc = { name: "MockUSDC", code: runtime("MockUSDC") };
   }
+  const reads = (kind: "cheat" | "win"): Read[] =>
+    Object.entries(DEMO_READS[NETWORK][kind]).map(([role, slots]) => ({ ...accounts[role as Role]!, slots: slots! }));
+  const win = reads("win");
   const wins = Array.from({ length: Math.max(0, CLAIMS - 1) }, () => ({ kind: "win", reads: win }));
-  return CLAIMS === 0 ? [] : CLAIMS === 1 ? [{ kind: "win", reads: win }] : [{ kind: "cheat", reads: cheat }, ...wins];
+  return CLAIMS === 0 ? [] : CLAIMS === 1 ? [{ kind: "win", reads: win }] : [{ kind: "cheat", reads: reads("cheat") }, ...wins];
 }
 
 const needs: Need[] = [];
@@ -229,7 +247,7 @@ const role = await near.view<{ path: string; address: string }>(CONTRACT, "pause
 const derived = pauseRole.address(MPC_ROOT[NETWORK], CONTRACT, id);
 if (role.address !== derived) throw new Error(`pause_role says ${role.address}, the formats derive ${derived}`);
 
-// ---- 2. Demo vault ---------------------------------------------------------------------------------
+// ---- 2. PositionVault -----------------------------------------------------------------------------
 
 interface ChainInstance {
   chain_id: number;
@@ -260,7 +278,7 @@ for (const chain of CHAIN_IDS) {
   const runLog = JSON.parse(readFileSync(join(root, `demo/broadcast/Deploy.s.sol/${chain}/run-latest.json`), "utf8"));
   const deployTxs: string[] = runLog.receipts.map((r: { transactionHash: string }) => r.transactionHash);
   if (cast("call", vault, "pauser()(address)", "--rpc-url", rpc).toLowerCase() !== role.address) {
-    throw new Error(`the vault's pauser on chain ${chain} isn't ${role.address}`);
+    throw new Error(`the PositionVault's pauser on chain ${chain} isn't ${role.address}`);
   }
 
   // ---- 3. Pause gas --------------------------------------------------------------------------------
@@ -284,10 +302,13 @@ const proof = chains[0]!;
 // ---- 4. Post the bounty ------------------------------------------------------------------------------
 
 const config = await near.view(CONTRACT, "config");
-const x25519 = generateKeyPairSync("x25519");
-const pub = Buffer.from(x25519.publicKey.export({ format: "jwk" }).x!, "base64url");
-const exploitKeyFile = join(dir, `${NAME}-exploit-key.pem`);
-writeFileSync(exploitKeyFile, x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+const exploitPublicKey = process.env.EXPLOIT_PUBLIC_KEY ?? newExploitKey();
+function newExploitKey(): string {
+  const x25519 = generateKeyPairSync("x25519");
+  const pub = Buffer.from(x25519.publicKey.export({ format: "jwk" }).x!, "base64url");
+  writeFileSync(join(dir, `${NAME}-exploit-key.pem`), x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+  return `x25519:${base58.encode(pub)}`;
+}
 const rules = {
   covered_contracts: chains.map((c) => ({ chain_id: c.chain_id, address: c.vault })),
   proof_chain: CHAIN,
@@ -301,7 +322,7 @@ const rules = {
   minimum_theft: MINIMUM_THEFT,
   end_date_ns: String(BigInt(Date.now() + 30 * 86_400_000) * 1_000_000n),
   disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
-  exploit_public_key: `x25519:${base58.encode(pub)}`,
+  exploit_public_key: exploitPublicKey,
   judge_build_hash: config.judge_build_hash,
 };
 const rulesFile = join(dir, `${NAME}-rules.json`);
