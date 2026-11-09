@@ -23,10 +23,14 @@
 //   5. Write every recorded account (code, balance, nonce) and slot back onto the fork with its
 //      current value, which puts it in the fork's own state; dump that.
 //   On each chain, before the claims, the drain bot's fork test runs against this vault.
-//   6. Load the dump into a plain anvil with the chain's ID and check its blocks' state roots are
-//      real: non-zero, and the root `eth_getProof` proves against.
-// It also records the deploy gas: measured on Base's fork; on Arbitrum One the fork's figure plus
-// the L1 part anvil leaves out, from the real RPC's NodeInterface (`gasEstimateL1Component`).
+//   6. Load the dump into a plain anvil with the chain's ID and hardfork and check its blocks'
+//      state roots are real: non-zero, and the root `eth_getProof` proves against.
+// Rebuilding the copy changes it, so #59's claim rehearsal (mainnet-state-claims.test.ts) is
+// rerun on each rebuild: it is what shows the claims replay on the copy.
+// It also records the deploy gas against the preflight's budget (DEMO_DEPLOY_GAS): measured on
+// Base's fork; on Arbitrum One the fork's figure plus the L1 part anvil leaves out, from the real
+// RPC's NodeInterface (`gasEstimateL1Component`), cross-checked by the real RPC's own
+// `eth_estimateGas` for the vault's creation.
 //
 // Needs anvil, forge and cast, and SEALED_EXPLOIT (the sealed exploit script's path, never in
 // this repo) for Base's claim reads. Spends nothing: every transaction runs on a local fork.
@@ -40,6 +44,7 @@ import { gunzipSync } from "node:zlib";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { PAUSE_GAS_PER_PAUSE, pauseRole, type BountyId } from "@bountee/formats";
 import { rpc } from "../../src/proofs.ts";
+import { DEMO_DEPLOY_GAS } from "../testnet/deploy.ts";
 import { sealedExploit } from "../testnet/sealed-exploit.ts";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -71,9 +76,16 @@ const CHAINS: ChainPlan[] = [
   { id: 42161, name: "Arbitrum One", rpc: process.env.ARBITRUM_RPC ?? "https://arb1.arbitrum.io/rpc", usdc: "0xaf88d065e77c8cc2239327c5edb3a432268e5831", balanceSlot: 9n, seed: 1_000_000n, claims: false },
 ];
 
+/** The pinned judge's build hash on the mainnet bounty contract (`config().judge_build_hash`). */
+const PINNED_JUDGE = "0x5b3ba1891e81419a5fc398364e36c699a40c2ec7bce675588f06cad72171002d";
+/** Base and Arbitrum One's EVM today (Isthmus and ArbOS 40 both run Prague's opcodes). */
+const HARDFORK = "prague";
+/** Blocks mined on a loaded state before use: `bountee test` judges a block three behind the head, and the first is the dumped fork block, whose root is zero. */
+const MINED_ON_LOAD = 5;
+
 const hex = (n: bigint) => `0x${n.toString(16)}`;
 const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
-const port = () =>
+export const port = () =>
   new Promise<number>((ok) => {
     const s = createServer().listen(0, "127.0.0.1", () => {
       const p = (s.address() as { port: number }).port;
@@ -81,7 +93,7 @@ const port = () =>
     });
   });
 
-async function anvil(args: string[]): Promise<{ url: string; proc: ChildProcess }> {
+export async function anvil(args: string[]): Promise<{ url: string; proc: ChildProcess }> {
   const p = await port();
   const proc = spawn("anvil", [...args, "--port", String(p), "--silent"], { stdio: "ignore" });
   const url = `http://127.0.0.1:${p}`;
@@ -200,6 +212,14 @@ async function build(chain: ChainPlan, role: string) {
     // The pause-gas transfer the fresh-instance script sends: a plain transfer.
     const transferGas = 21_000n;
     const l1Gas = chain.id === 42161 ? deployTxs.reduce((sum, t) => sum + arbitrumL1Gas(chain.rpc, t), 0n) : 0n;
+    // A cross-check of the fork's figure on Arbitrum One itself: the vault's creation needs no
+    // state, so the real RPC estimates it (L1 part included); the approve and deposit need the
+    // vault, which only the fork has.
+    const createEstimate = chain.id === 42161
+      ? BigInt(await rpc<string>(chain.rpc, "eth_estimateGas", [{ from: deployer, data: deployTxs[0]!.input }]))
+      : null;
+    const deployTotal = deployed.reduce((a, r) => a + r.gasUsed, 0n) + transferGas + l1Gas;
+    if (deployTotal > DEMO_DEPLOY_GAS) throw new Error(`${chain.name}: deploying takes ${deployTotal} gas, over the ${DEMO_DEPLOY_GAS} the preflight budgets`);
 
     if (chain.claims) {
       const snapshot = await rpc<string>(fork.url, "evm_snapshot", []);
@@ -222,7 +242,10 @@ async function build(chain: ChainPlan, role: string) {
     const state = JSON.parse((raw[0] === 0x1f ? gunzipSync(raw) : raw).toString("utf8"));
     const file = join(OUT, `${chain.id}-state.json`);
     writeFileSync(file, JSON.stringify(state));
-    return { vault, forkBlock, file, accounts: reads.size, deployGas: deployed.reduce((a, r) => a + r.gasUsed, 0n) + transferGas, l1Gas };
+    return {
+      vault, forkBlock, file, accounts: reads.size, deployGas: deployed.reduce((a, r) => a + r.gasUsed, 0n) + transferGas, l1Gas,
+      createGas: deployed[0]!.gasUsed, createEstimate,
+    };
   } finally {
     fork.proc.kill();
   }
@@ -230,8 +253,8 @@ async function build(chain: ChainPlan, role: string) {
 
 /** Loads a state file into a plain anvil and checks its blocks carry the state root `eth_getProof` proves against. */
 export async function loadState(file: string, chainId: number): Promise<{ url: string; proc: ChildProcess; stateRoot: string }> {
-  const chain = await anvil(["--load-state", file, "--chain-id", String(chainId)]);
-  await rpc(chain.url, "anvil_mine", [hex(3n)]);
+  const chain = await anvil(["--load-state", file, "--chain-id", String(chainId), "--hardfork", HARDFORK]);
+  await rpc(chain.url, "anvil_mine", [hex(BigInt(MINED_ON_LOAD))]);
   const block = await rpc<{ stateRoot: string }>(chain.url, "eth_getBlockByNumber", ["latest", false]);
   return { ...chain, stateRoot: block.stateRoot };
 }
@@ -253,13 +276,30 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         chain_id: chain.id, name: chain.name, state: b.file, vault: b.vault, usdc: chain.usdc, seed: chain.seed.toString(),
         fork_block: b.forkBlock, accounts: b.accounts, state_root: loaded.stateRoot, drain_bot: "refused, vault USDC unchanged",
         deploy_gas: b.deployGas.toString(), arbitrum_l1_gas: b.l1Gas.toString(), deploy_gas_with_l1: (b.deployGas + b.l1Gas).toString(),
+        deploy_gas_budget: DEMO_DEPLOY_GAS.toString(),
+        ...(b.createEstimate === null ? {} : { vault_create_gas_on_fork: b.createGas.toString(), vault_create_estimate_on_arbitrum_one: b.createEstimate.toString() }),
       });
       console.error(`${chain.name}: vault ${b.vault}, ${b.accounts} accounts copied, root ${loaded.stateRoot}, deploy gas ${b.deployGas + b.l1Gas}`);
     } finally {
       loaded.proc.kill();
     }
   }
-  const manifest = { bounty: BOUNTY, contract: CONTRACT, pause_role: role, built_at: new Date().toISOString(), chains };
+  // The demo bounty's mainnet rules (ADR-0018), for the posting check and the claims.
+  const base = chains.find((c) => c.chain_id === 8453)!;
+  const rules = {
+    covered_contracts: chains.map((c) => ({ chain_id: c.chain_id, address: c.vault })),
+    proof_chain: 8453,
+    recency_limit_secs: 300,
+    listed_tokens: [{ token: base.usdc, price: "1" }, { token: "native", price: "0" }],
+    seed: { native: SEED_NATIVE.toString(), tokens: [] },
+    bounty_amount: "10000000",
+    minimum_theft: "1000000",
+    end_date_ns: String(BigInt(Date.now() + 30 * 86_400_000) * 1_000_000n),
+    disclosure_delay_days: 1,
+    exploit_public_key: "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
+    judge_build_hash: PINNED_JUDGE,
+  };
+  const manifest = { bounty: BOUNTY, contract: CONTRACT, pause_role: role, built_at: new Date().toISOString(), rules, chains };
   writeFileSync(join(OUT, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(JSON.stringify(manifest));
 }

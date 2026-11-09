@@ -1,8 +1,14 @@
-// Seam T on a local copy of mainnet, ticket #59: the new vault's two mainnet claims, rehearsed
-// before any mainnet spend with the very judge build the mainnet bounty contract pins, so
-// neither fails while the mainnet vaults sit funded (R3.10, R4.11 rehearsals).
+// Ticket #59: the new vault's two mainnet claims, rehearsed before any mainnet spend with the very
+// judge build the mainnet bounty contract pins, so neither fails while the mainnet vaults sit
+// funded (R3.10, R4.11 rehearsals).
 //
-// Seams (written before the first test): T, `bountee test` against a plain anvil loaded with
+// Where this sits (outside the five seams, so recorded here, as CLAUDE.md asks): seam T's
+// interface, the command-line tool's `bountee test`, driven as seam T drives it, but on a local
+// copy of mainnet instead of testnet, because what it checks (Circle's USDC, Uniswap V2, the
+// mainnet judge build) exists only on mainnet, where nothing may be spent before #35's run. The
+// result is a recorded analysis (requirements.md's method A), not mainnet evidence.
+//
+// Seams (written before the first test): `bountee test` against a plain anvil loaded with
 // `mainnet-state/build.ts`'s copy of Base (Circle's USDC, Uniswap V2, the vault the deploy
 // script deployed and seeded with 2 USDC), judged by the pinned mainnet build (sha256
 // 5b3ba189…), under the demo bounty's mainnet rules.
@@ -22,12 +28,12 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { defaultRpc, proofRpcs } from "../src/chains.ts";
 import { fetchProof, rpc } from "../src/proofs.ts";
+import { loadState } from "./mainnet-state/build.ts";
 import { DEMO_READS, type Role } from "./testnet/claim-budget.ts";
 import { sealedExploit } from "./testnet/sealed-exploit.ts";
 
@@ -35,19 +41,10 @@ const MANIFEST = process.env.BOUNTEE_MAINNET_STATE;
 const RUN = !!MANIFEST;
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const repo = fileURLToPath(new URL("../../", import.meta.url));
-const PINNED = "5b3ba1891e81419a5fc398364e36c699a40c2ec7bce675588f06cad72171002d";
 const UNISWAP_V2_ROUTER = "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24";
 /** Circle's FiatTokenProxy keeps its implementation at ZeppelinOS's slot. */
 const IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
-const RECENCY_LIMIT_SECS = 300;
 
-const port = () =>
-  new Promise<number>((ok) => {
-    const s = createServer().listen(0, "127.0.0.1", () => {
-      const p = (s.address() as { port: number }).port;
-      s.close(() => ok(p));
-    });
-  });
 const cast = (...args: string[]) => spawnSync("cast", args, { encoding: "utf8" }).stdout.trim().split(" ")[0]!.toLowerCase();
 
 describe.skipIf(!RUN)("the new vault's mainnet claims on a local copy of Base (#59)", () => {
@@ -68,38 +65,14 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on a local copy of Base (#
   beforeAll(async () => {
     judge = process.env.BOUNTEE_MAINNET_JUDGE ?? "";
     // The enclave's program and nothing else: the reproducible build whose sha256 the mainnet contract pins.
-    expect(createHash("sha256").update(readFileSync(judge)).digest("hex")).toBe(PINNED);
-    const p = await port();
-    url = `http://127.0.0.1:${p}`;
-    anvil = spawn("anvil", ["--load-state", base.state, "--chain-id", "8453", "--port", String(p), "--silent"], { stdio: "ignore" });
-    for (let i = 0; ; i++) {
-      try {
-        await rpc(url, "eth_chainId", []);
-        break;
-      } catch {
-        if (i > 300) throw new Error("anvil didn't start");
-        await new Promise((r) => setTimeout(r, 100));
-      }
-    }
-    // `bountee test` judges a block a few behind the head; the loaded state's first block is the
-    // fork's, whose state root is zero, so the claims name a later one.
-    await rpc(url, "anvil_mine", ["0x5"]);
+    expect(`0x${createHash("sha256").update(readFileSync(judge)).digest("hex")}`).toBe(manifest.rules.judge_build_hash);
+    const loaded = await loadState(base.state, 8453);
+    anvil = loaded.proc;
+    url = loaded.url;
+    // The head, whose state root is real (the loaded state's first block, the fork's, has none).
     block = Number(BigInt(await rpc<string>(url, "eth_blockNumber", [])));
     rulesFile = join(dir, "rules.json");
-    // The demo bounty's mainnet rules (ADR-0018).
-    writeFileSync(rulesFile, JSON.stringify({
-      covered_contracts: manifest.chains.map((c: any) => ({ chain_id: c.chain_id, address: c.vault })),
-      proof_chain: 8453,
-      recency_limit_secs: RECENCY_LIMIT_SECS,
-      listed_tokens: [{ token: base.usdc, price: "1" }, { token: "native", price: "0" }],
-      seed: { native: "1000000000000000000", tokens: [] },
-      bounty_amount: "10000000",
-      minimum_theft: "1000000",
-      end_date_ns: "1794268800000000000",
-      disclosure_delay_days: 1,
-      exploit_public_key: "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
-      judge_build_hash: `0x${PINNED}`,
-    }));
+    writeFileSync(rulesFile, JSON.stringify(manifest.rules));
   }, 120_000);
 
   afterAll(() => anvil?.kill());
@@ -168,8 +141,8 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on a local copy of Base (#
       const reads = await provenReads(job);
       expect(reads).toEqual(DEMO_READS.mainnet[kind]);
       const timings = await timeProofs(job);
-      for (const t of timings) expect(t.ms).toBeLessThan(RECENCY_LIMIT_SECS * 1000);
-      record(kind, { verdict: result.verdict, block, proven_reads: reads, proof_fetch_ms_on_base_mainnet: timings, recency_limit_secs: RECENCY_LIMIT_SECS });
+      for (const t of timings) expect(t.ms).toBeLessThan(manifest.rules.recency_limit_secs * 1000);
+      record(kind, { verdict: result.verdict, block, proven_reads: reads, proof_fetch_ms_on_base_mainnet: timings, recency_limit_secs: manifest.rules.recency_limit_secs });
     }, 600_000);
   }
 });

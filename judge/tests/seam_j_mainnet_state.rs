@@ -1,9 +1,16 @@
-//! Seam J, ticket #58: the enclave's posting check, run before any mainnet spend on a local
-//! copy of the demo's mainnet state, the vaults as `demo/script/Deploy.s.sol` deploys them on
-//! Base and Arbitrum One (R7.6, R12.1, R12.2, R12.5).
+//! Ticket #58: the enclave's posting check, run before any mainnet spend on a local copy of the
+//! demo's mainnet state, the vaults as `demo/script/Deploy.s.sol` deploys them on Base and
+//! Arbitrum One (R7.6, R12.1, R12.2).
+//!
+//! Where this sits (outside the five seams, so recorded here, as CLAUDE.md asks): seam J's
+//! interface, the compiled judge fed a job, driven as `seam_j_posting_check.rs` drives it, but
+//! against a local copy of mainnet built from live chains rather than committed fixtures,
+//! because what it checks (Circle's USDC and the deploy script's vault on Base and Arbitrum One,
+//! under the mainnet derivation) exists only on mainnet, where nothing may be spent before #35's
+//! run. The result is a recorded analysis (requirements.md's method A), not mainnet evidence.
 //!
 //! Seams, written down before the first test:
-//! - J (this file): the judge's mainnet test build (pinned to `bounty.bountee.near`, under the
+//! - The judge's mainnet test build (pinned to `bounty.bountee.near`, under the
 //!   mainnet MPC root key, with its test stand-in RPCs) fed the demo bounty's `posting_check`
 //!   job, its RPCs for 8453 and 42161 pointed at plain anvils loaded with
 //!   `cli/test/mainnet-state/build.ts`'s state files (Circle's USDC, the vault deployed and
@@ -11,11 +18,11 @@
 //!   Catches: the posting check passing on the real vault code, Circle's real USDC and the
 //!   pause-role address the mainnet derivation gives, on both chains, before the mainnet
 //!   posting spends anything. Misses: the pinned mainnet RPCs themselves and OutLayer (the
-//!   mainnet posting), and agreement between different RPCs (one local chain answers as all
-//!   three). A recorded analysis on a local copy, not mainnet evidence.
+//!   mainnet posting), and agreement between different RPCs (R12.5: one local chain answers as
+//!   all three; `seam_j_posting_check.rs` covers it).
 //!
-//! Runs only with BOUNTEE_MAINNET_STATE set to the harness's `manifest.json`; needs anvil and
-//! wasmtime.
+//! Ignored by default: run with BOUNTEE_MAINNET_STATE set to the harness's `manifest.json` and
+//! `cargo test --test seam_j_mainnet_state -- --ignored`; needs anvil and wasmtime.
 
 mod common;
 
@@ -52,6 +59,8 @@ fn load(state: &str, chain_id: u64) -> LoadedChain {
             state,
             "--chain-id",
             &chain_id.to_string(),
+            "--hardfork",
+            "prague",
             "--port",
             &port.to_string(),
             "--silent",
@@ -69,8 +78,9 @@ fn load(state: &str, chain_id: u64) -> LoadedChain {
         );
         std::thread::sleep(Duration::from_millis(100));
     }
-    // The posting check reads one block below the head.
-    let mine = json!({ "jsonrpc": "2.0", "id": 1, "method": "anvil_mine", "params": ["0x3"] });
+    // The posting check reads below the head, and the loaded state's first block (the dumped
+    // fork's) has no state root: mine past it, as the harness does.
+    let mine = json!({ "jsonrpc": "2.0", "id": 1, "method": "anvil_mine", "params": ["0x5"] });
     let status = Command::new("curl")
         .args([
             "-sf",
@@ -87,15 +97,14 @@ fn load(state: &str, chain_id: u64) -> LoadedChain {
     LoadedChain { url, process }
 }
 
-/// R12.1, R12.2, R12.5, R7.6: the demo bounty's posting check passes on the local copy of
-/// mainnet: on Base and on Arbitrum One the pause-role address can pause the deployed vault and
-/// holds its pause gas.
+/// R7.6, R12.1, R12.2: the demo bounty's posting check passes on the local copy of mainnet: on
+/// Base and on Arbitrum One the pause-role address can pause the deployed vault and holds its
+/// pause gas.
 #[test]
-fn r12_1_r12_5_the_demo_posting_check_passes_on_the_mainnet_state_copy() {
-    let Ok(manifest) = std::env::var("BOUNTEE_MAINNET_STATE") else {
-        eprintln!("skipped: BOUNTEE_MAINNET_STATE is unset (build it with cli/test/mainnet-state/build.ts)");
-        return;
-    };
+#[ignore = "needs BOUNTEE_MAINNET_STATE, the copy cli/test/mainnet-state/build.ts builds"]
+fn r7_6_r12_1_r12_2_the_demo_posting_check_passes_on_the_mainnet_state_copy() {
+    let manifest = std::env::var("BOUNTEE_MAINNET_STATE")
+        .expect("BOUNTEE_MAINNET_STATE names the harness's manifest.json");
     let manifest: Value =
         serde_json::from_str(&std::fs::read_to_string(&manifest).unwrap()).unwrap();
     assert_eq!(manifest["contract"], MAINNET_BOUNTY_CONTRACT);
@@ -107,21 +116,8 @@ fn r12_1_r12_5_the_demo_posting_check_passes_on_the_mainnet_state_copy() {
             (id, load(c["state"].as_str().unwrap(), id))
         })
         .collect();
-    let base = chains.iter().find(|c| c["chain_id"] == 8453).unwrap();
-    // The demo bounty's mainnet rules (ADR-0018): 10 USDC, a 1 USDC minimum theft, both vaults.
-    let rules = json!({
-        "covered_contracts": chains.iter().map(|c| json!({ "chain_id": c["chain_id"], "address": c["vault"] })).collect::<Vec<_>>(),
-        "proof_chain": 8453,
-        "recency_limit_secs": 300,
-        "listed_tokens": [{ "token": base["usdc"], "price": "1" }, { "token": "native", "price": "0" }],
-        "seed": { "native": "1000000000000000000", "tokens": [] },
-        "bounty_amount": "10000000",
-        "minimum_theft": "1000000",
-        "end_date_ns": "1794268800000000000",
-        "disclosure_delay_days": 1,
-        "exploit_public_key": "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
-        "judge_build_hash": "0x5b3ba1891e81419a5fc398364e36c699a40c2ec7bce675588f06cad72171002d"
-    });
+    // The demo bounty's mainnet rules (ADR-0018), as the harness wrote them.
+    let rules = &manifest["rules"];
     let check = |bounty: &Value| -> PostingCheckResult {
         let job = json!({ "posting_check": { "bounty": bounty, "rules": rules } });
         let mut command = Command::new("wasmtime");
