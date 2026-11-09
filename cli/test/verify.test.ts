@@ -5,10 +5,13 @@
 // tool against local stand-ins for NEAR's RPC (the bounty contract's views, the account's code
 // hash, OutLayer's register contract, transactions and blocks), FastNEAR's explorer API (the
 // contract's transactions: an indexer, which may lie), an EVM RPC (pause receipts) and
-// OutLayer's attestation API. Deployment "day3b" is the Day-3 run's real record: claim 7's
+// OutLayer's attestation API. Deployment 1 is the #67 testnet gate's real record
+// (fixtures/verify/rehearsal-win-*.json, written by record-claim.ts): the winning claim, proven
+// on Arbitrum Sepolia on a bounty covering Base Sepolia too (a chained block, ADR-0020), its
 // views, its transaction as the explorer lists it and as NEAR's archival RPC gives it
-// (`EXPERIMENTAL_tx_status`, with the block its job was requested in), and OutLayer's
-// attestation (an Intel-signed TDX quote), as read from testnet on Nov 5. Deployment "bounty.bountee.testnet" is the judge's
+// (`EXPERIMENTAL_tx_status`, with the block its job was requested in), OutLayer's attestation
+// (an Intel-signed TDX quote) and both chains' pause receipts, as read from testnet on Nov 9.
+// Deployment "bounty.bountee.testnet" is the judge's
 // committed fixture, with a publication the compiled judge's `publish` action wrote. The
 // rebuilt artefacts are passed in (`--judge-wasm`, `--contract-wasm`), so no Docker build runs
 // here; the live test (verify-testnet.test.ts) runs the real rebuild. Catches: R15.1 per layer,
@@ -37,20 +40,28 @@ const dir = mkdtempSync(join(tmpdir(), "bountee-verify-"));
 const sha256 = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 const codeHash = (b: Buffer) => base58.encode(createHash("sha256").update(b).digest());
 
-// ---- Deployment 1: the Day-3 run's record (claim 7 on day3b, PAYS, paid, pause landed) ----
-const day3 = fixture("claim7-views.json");
+// ---- Deployment 1: the #67 gate's record (the win proven on Arbitrum Sepolia, paid, both chains' pauses landed) ----
+const day3 = fixture("rehearsal-win-views.json");
 const DAY3 = day3.contract as string;
 const DAY3_BOUNTY = day3.bounty.id;
-const tx7 = fixture("claim7-tx.json");
-const rpc7 = fixture("claim7-rpc.json");
-const attestation7 = fixture("claim7-attestation.json");
-const PAUSE = day3.bounty.signed_pauses[0];
+const CLAIM = day3.claim_id as number;
+const tx7 = fixture("rehearsal-win-tx.json");
+const rpc7 = fixture("rehearsal-win-rpc.json");
+const attestation7 = fixture("rehearsal-win-attestation.json");
+const [REQUEST_BLOCK, REQUEST_HEIGHT] = Object.entries(rpc7.blocks as Record<string, { height: number }>).map(([b, { height }]) => [b, height] as const)[0]!;
+const BASE = 84532;
+const ARBITRUM = 421614;
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const pauseOn = (chain: number) => day3.bounty.signed_pauses.find((p: any) => p.chain_id === chain);
+// The variants below change the pause on the claim's chain; Base's stays as recorded.
+const PAUSE = pauseOn(ARBITRUM);
+const BASE_PAUSE = pauseOn(BASE);
 const MEASUREMENTS = {
   mrtd: "7fe60787222bd394cb516abca2435f22f035ab2cc9c0a4b4b3b148e46297f3d931a237b72f359052c6e657d8c1409173",
   rtmr0: "573aadb4d478839c803c4b1d3e03dd748976b63a89622f377e32a54dd60546e88ec2097f595ceafc324f48a0d0d31db6",
   rtmr1: "e7b3ffa0e72b50557d85f7ecd8dc98a4ffc3dd6f82d01f122ef522d61361abeac310d70d2877e56be9c9408d9bcc320c",
   rtmr2: "764489f277a8540189761e72b4238ba36d4d647e11bd958d8ab5522af2a4867b0ff63e06b0c4967f1857236244040a5d",
-  rtmr3: "d513a9461c8c95bc23a0edc76dece52b65944f4063a3806b1a70b03502de7554a402813bdbd099f057a60f3496f3c231",
+  rtmr3: "b1773e4dd9db7e54c2564f15913872cb6a8acd6ce6d4e28dc4008c6b90f6dfec43eae5021d3055a1917fe7360d73dcc9",
 };
 
 // ---- Deployment 2: the judge's committed fixture, published (default judge build's contract) ----
@@ -167,13 +178,14 @@ beforeAll(async () => {
   fakeContract = join(dir, "contract.wasm");
   writeFileSync(fakeContract, Buffer.from("the bounty contract's rebuilt wasm"));
 
-  // OutLayer's register contract approves the Day-3 worker's measurements (when the test says so).
+  // OutLayer's register contract approves the recorded worker's measurements (when the test says so).
   views["worker.outlayer.testnet"] = {
     is_measurements_approved: (a) => measurementsApproved && JSON.stringify(a.measurements) === JSON.stringify(MEASUREMENTS),
   };
 
-  // Deployment 1, the Day-3 record. Variants of the bounty share claim 7 but differ in their pause.
-  const bountyNamed = (name: string, pause = PAUSE) => ({ ...day3.bounty, id: { ...DAY3_BOUNTY, name }, signed_pauses: [pause] });
+  // Deployment 1, the gate's record. Variants of the bounty share the winning claim but differ
+  // in the pause on the claim's chain (Arbitrum Sepolia).
+  const bountyNamed = (name: string, pause = PAUSE) => ({ ...day3.bounty, id: { ...DAY3_BOUNTY, name }, signed_pauses: [BASE_PAUSE, pause] });
   const pauses: Record<string, any> = {
     [DAY3_BOUNTY.name]: PAUSE,
     "unverified": { ...PAUSE, tx_hash: `0x${"11".repeat(32)}` },
@@ -182,10 +194,13 @@ beforeAll(async () => {
   };
   views[DAY3] = {
     bounty: (a) => (pauses[a.id.name] ? bountyNamed(a.id.name, pauses[a.id.name]) : null),
-    claim: (a) => (a.claim_id === 7 ? day3.claim : null),
+    claim: (a) => (a.claim_id === CLAIM ? day3.claim : null),
     config: () => day3.config,
-    pause_verifications: (a) => [{ chain_id: 84532, verified: true, verified_pauses: a.id.name === "unverified" ? [] : [pauses[a.id.name].tx_hash] }],
-    published_exploit: () => ({ claim_id: 7, state: "delayed", publishable_from_ns: "1796442141731000000", proofs: null, published: null }),
+    pause_verifications: (a) => [
+      { chain_id: BASE, verified: true, verified_pauses: [BASE_PAUSE.tx_hash] },
+      { chain_id: ARBITRUM, verified: true, verified_pauses: a.id.name === "unverified" ? [] : [pauses[a.id.name].tx_hash] },
+    ],
+    published_exploit: () => ({ claim_id: CLAIM, state: "delayed", publishable_from_ns: "1796442141731000000", proofs: null, published: null }),
   };
   codeHashes[DAY3] = codeHash(readFileSync(fakeContract));
   histories[DAY3] = ["SomeOtherTx111111111111111111111111111111111", tx7.transaction.hash];
@@ -194,9 +209,9 @@ beforeAll(async () => {
   Object.assign(blocks, rpc7.blocks);
   transactions["SomeOtherTx111111111111111111111111111111111"] = { transaction: { hash: "SomeOtherTx111111111111111111111111111111111" }, receipts: [] };
   attestations[tx7.transaction.hash] = attestation7;
-  receipts[PAUSE.tx_hash] = { status: "0x1", blockNumber: "0x341c4b9", to: PAUSE.contract };
-  receipts[pauses.unverified.tx_hash] = { status: "0x1", blockNumber: "0x341c4ba", to: PAUSE.contract };
-  receipts[pauses.reverted.tx_hash] = { status: "0x0", blockNumber: "0x341c4bb", to: PAUSE.contract };
+  Object.assign(receipts, rpc7.evm_receipts);
+  receipts[pauses.unverified.tx_hash] = { ...rpc7.evm_receipts[PAUSE.tx_hash], blockNumber: "0x1" };
+  receipts[pauses.reverted.tx_hash] = { ...rpc7.evm_receipts[PAUSE.tx_hash], status: "0x0" };
 
   // Deployment 2, the judge's fixture: rules pin the judge this checkout builds; published.
   const pinned = { ...rules, judge_build_hash: `0x${sha256(readFileSync(judge))}` };
@@ -231,7 +246,7 @@ afterAll(() => server.close());
 function verify(bounty: string, contract: string, extra: string[] = []): Promise<{ code: number | null; stdout: string; stderr: string; result: any }> {
   const home = mkdtempSync(join(tmpdir(), "bountee-verify-home-"));
   const args = [
-    entry, "verify", bounty, "--contract", contract, "--near-rpc", `${base}/near`, "--rpc", `84532=${base}/evm`,
+    entry, "verify", bounty, "--contract", contract, "--near-rpc", `${base}/near`, "--rpc", `${BASE}=${base}/evm,${ARBITRUM}=${base}/evm`,
     "--outlayer-api", base, "--tx-api", base, "--judge-wasm", judge, "--contract-wasm", fakeContract, ...extra, "--json",
   ];
   return new Promise((resolve) => {
@@ -244,26 +259,34 @@ function verify(bounty: string, contract: string, extra: string[] = []): Promise
   });
 }
 
-const statuses = (r: any) => Object.fromEntries(r.checks.map((c: any) => [c.check, c.status]));
-const check = (r: any, name: string) => r.checks.find((c: any) => c.check === name);
+/** Each check's status; a pause's checks keyed by their chain, as `pause_landed@84532`. */
+const statuses = (r: any) => Object.fromEntries(r.checks.map((c: any) => [c.chain_id ? `${c.check}@${c.chain_id}` : c.check, c.status]));
+const check = (r: any, name: string, chain?: number) => r.checks.find((c: any) => c.check === name && (chain === undefined || c.chain_id === chain));
 
-test("R15.1, R15.2, R14.5: verify checks every layer of a paid bounty with no keys or funds", async () => {
+test("R15.1, R15.2, R14.5, D1: verify checks every layer of a win proven on the second chain, with no keys or funds", async () => {
   const r = await verify(`${DAY3_BOUNTY.protocol}/${DAY3_BOUNTY.name}`, DAY3);
-  expect(r.result, r.stderr).toMatchObject({ contract: DAY3, bounty: DAY3_BOUNTY, state: "paid", winning_claim: 7 });
+  expect(r.result, r.stderr).toMatchObject({ contract: DAY3, bounty: DAY3_BOUNTY, state: "paid", winning_claim: CLAIM });
+  // The attestation's input hash binds the claim's block, chain included (ADR-0020).
+  expect(day3.claim.block.chain_id).toBe(ARBITRUM);
   expect(statuses(r.result)).toEqual({
     contract_code: "pass",
-    // The bounty pins the Day-3 build (c4222111…); this checkout's judge is another.
+    // The bounty pins the gate deployment's build; this checkout's judge (pinned to no
+    // contract) is another.
     judge_build: "fail",
     attestation: "pass",
     payout: "pass",
-    pause_landed: "pass",
-    pause_verified: "pass",
+    [`pause_landed@${BASE}`]: "pass",
+    [`pause_landed@${ARBITRUM}`]: "pass",
+    [`pause_verified@${BASE}`]: "pass",
+    [`pause_verified@${ARBITRUM}`]: "pass",
     rerun: "not_yet_published",
   });
-  expect(check(r.result, "judge_build").detail).toMatch(/pins judge c4222111c3523dae.*the rebuild gives [0-9a-f]{64}/);
-  expect(check(r.result, "attestation")).toMatchObject({ task_id: 20742, request_id: 9405, transaction_hash: tx7.transaction.hash, measurements: MEASUREMENTS });
+  expect(check(r.result, "judge_build").detail).toMatch(new RegExp(`pins judge ${day3.config.judge_build_hash.slice(2, 18)}.*the rebuild gives [0-9a-f]{64}`));
+  expect(check(r.result, "attestation")).toMatchObject({ task_id: attestation7.task_id, request_id: attestation7.request_id, transaction_hash: tx7.transaction.hash, measurements: MEASUREMENTS });
   expect(check(r.result, "payout")).toMatchObject({ tx_hash: tx7.transaction.hash });
-  expect(check(r.result, "pause_landed")).toMatchObject({ chain_id: 84532, tx_hash: PAUSE.tx_hash, block: 0x341c4b9 });
+  for (const p of [BASE_PAUSE, PAUSE]) {
+    expect(check(r.result, "pause_landed", p.chain_id)).toMatchObject({ tx_hash: p.tx_hash, block: Number(rpc7.evm_receipts[p.tx_hash].blockNumber) });
+  }
   expect(check(r.result, "rerun").detail).toMatch(/not yet published/);
   expect(r.result.passed).toBe(false);
   expect(r.code).toBe(1);
@@ -272,12 +295,14 @@ test("R15.1, R15.2, R14.5: verify checks every layer of a paid bounty with no ke
 
 test("R15.1: a pause not yet verified or landed is 'not yet'; a reverted one fails", async () => {
   const unverified = (await verify(`${DAY3_BOUNTY.protocol}/unverified`, DAY3)).result;
-  expect(statuses(unverified)).toMatchObject({ pause_landed: "pass", pause_verified: "not_yet" });
+  // Each chain's pause is checked on its own: Base's, as recorded, still passes.
+  const base = { [`pause_landed@${BASE}`]: "pass", [`pause_verified@${BASE}`]: "pass" };
+  expect(statuses(unverified)).toMatchObject({ ...base, [`pause_landed@${ARBITRUM}`]: "pass", [`pause_verified@${ARBITRUM}`]: "not_yet" });
   const unlanded = (await verify(`${DAY3_BOUNTY.protocol}/unlanded`, DAY3)).result;
-  expect(statuses(unlanded)).toMatchObject({ pause_landed: "not_yet" });
+  expect(statuses(unlanded)).toMatchObject({ ...base, [`pause_landed@${ARBITRUM}`]: "not_yet" });
   const reverted = (await verify(`${DAY3_BOUNTY.protocol}/reverted`, DAY3)).result;
-  expect(statuses(reverted)).toMatchObject({ pause_landed: "fail" });
-  expect(check(reverted, "pause_landed").detail).toMatch(/reverted/);
+  expect(statuses(reverted)).toMatchObject({ ...base, [`pause_landed@${ARBITRUM}`]: "fail" });
+  expect(check(reverted, "pause_landed", ARBITRUM).detail).toMatch(/reverted/);
   expect(sent).toEqual([]);
 }, 120_000);
 
@@ -356,7 +381,7 @@ test("R15.1: a lying explorer can't make the payout or the attestation pass: NEA
   nearTxs[hash] = failed;
   const unpaid = (await verify(bounty, DAY3)).result;
   nearTxs[hash] = truth;
-  expect(check(unpaid, "payout")).toMatchObject({ status: "fail", detail: expect.stringMatching(/no .* transfer of 100000000 .* succeeded/) });
+  expect(check(unpaid, "payout")).toMatchObject({ status: "fail", detail: expect.stringMatching(new RegExp(`no .* transfer of ${day3.bounty.rules.bounty_amount} .* succeeded`)) });
 
   // It lists the real transaction, with the job requested by the bounty contract where NEAR
   // says another account requested it.
@@ -406,9 +431,9 @@ test("R15.1: the attestation's TD is not in debug mode, its QE is Intel's, and i
     [tamperQuote((q) => q.writeUInt8(q.readUInt8(TD_ATTRIBUTES) | 1, TD_ATTRIBUTES)), /debug mode/],
     [tamperQuote((q) => q.writeUInt8(q.readUInt8(QE_REPORT + 128) ^ 0xff, QE_REPORT + 128)), /Quoting Enclave isn't Intel's TDX QE/],
     [tamperQuote((q) => q.writeUInt16LE(1, QE_REPORT + 256)), /Quoting Enclave isn't Intel's TDX QE/],
-    [(a) => ({ ...a, caller_account_id: DAY3 }), /report_data differs.*caller day3b\.bountee-spike2\.testnet, not the transaction's signer bts1-white-1104\.testnet/],
-    [(a) => ({ ...a, block_height: a.block_height + 1 }), /report_data differs.*NEAR block 276289449, but job 9405 was requested in block 276289448/],
-    [(a) => ({ ...a, input_hash: "cd".repeat(32) }), /report_data differs.*input isn't claim 7's job input/],
+    [(a) => ({ ...a, caller_account_id: DAY3 }), new RegExp(`report_data differs.*caller ${esc(DAY3)}, not the transaction's signer ${esc(tx7.transaction.signer_id)}`)],
+    [(a) => ({ ...a, block_height: a.block_height + 1 }), new RegExp(`report_data differs.*NEAR block ${REQUEST_HEIGHT + 1}, but job ${attestation7.request_id} was requested in block ${REQUEST_HEIGHT}`)],
+    [(a) => ({ ...a, input_hash: "cd".repeat(32) }), new RegExp(`report_data differs.*input isn't claim ${CLAIM}'s job input`)],
   ];
   for (const [tamper, why] of quoteCases) {
     attestations[hash] = tamper(attestation7);
@@ -417,17 +442,16 @@ test("R15.1: the attestation's TD is not in debug mode, its QE is Intel's, and i
   attestations[hash] = attestation7;
 
   // An untampered attestation, but NEAR says the request ran in another block.
-  const [block] = Object.keys(rpc7.blocks);
-  blocks[block!] = { height: 276289000 };
-  await failsWith(/NEAR block 276289448, but job 9405 was requested in block 276289000/);
-  blocks[block!] = rpc7.blocks[block!];
+  blocks[REQUEST_BLOCK] = { height: REQUEST_HEIGHT - 448 };
+  await failsWith(new RegExp(`NEAR block ${REQUEST_HEIGHT}, but job ${attestation7.request_id} was requested in block ${REQUEST_HEIGHT - 448}`));
+  blocks[REQUEST_BLOCK] = rpc7.blocks[REQUEST_BLOCK];
 
   // An untampered attestation, but the claim's recorded data isn't the job's input.
   const claim = day3.claim;
-  day3.claim = { ...claim, submitted_at_ns: "1793850608584544985" };
-  await failsWith(/input isn't claim 7's job input/);
+  day3.claim = { ...claim, submitted_at_ns: String(BigInt(claim.submitted_at_ns) + 1n) };
+  await failsWith(new RegExp(`input isn't claim ${CLAIM}'s job input`));
   day3.claim = { ...claim, proofs_sha256: `0x${"ee".repeat(32)}` };
-  await failsWith(/the job's input carries other proofs than claim 7's/);
+  await failsWith(new RegExp(`the job's input carries other proofs than claim ${CLAIM}'s`));
   day3.claim = claim;
   expect(sent).toEqual([]);
 }, 300_000);
