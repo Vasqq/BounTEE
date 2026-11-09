@@ -2,7 +2,7 @@
 // bounties a contract holds, and one bounty's rules, covered contracts and trusted parties.
 // Read-only: no keys, no funds.
 import { parseBountyId as bountyIdOf, type BountyId, type Rules } from "@bountee/formats";
-import { CHAINS } from "./chains.ts";
+import { CHAINS, chainLabel } from "./chains.ts";
 import type { Near } from "./near.ts";
 
 export interface BountySummary {
@@ -103,6 +103,28 @@ export function parseBountyId(text: string): BountyId {
 /** Every chain a covered contract is on, each once, in the rules' order: each can be a claim's proof chain (D1). */
 export function coveredChains(rules: Rules): number[] {
   return [...new Set(rules.covered_contracts.map((c) => c.chain_id))];
+}
+
+/**
+ * The chain a claim is proven on, its proof chain (D1, D26): the covered chain `named`
+ * (`--chain`), or the bounty's one covered chain when none is named. Refused, listing the
+ * covered chains, when the bounty covers several and none is named, or `named` isn't covered;
+ * `test` and `claim` ask it before any EVM RPC call or fee. The claim's block carries it.
+ */
+export function proofChain(rules: Rules, named?: number): number {
+  const covered = coveredChains(rules);
+  if (named === undefined) {
+    if (covered.length === 1) return covered[0]!;
+    throw new Error(`the bounty covers ${covered.length} chains, ${covered.map(chainLabel).join(", ")}: name the one your exploit is proven on with --chain`);
+  }
+  refuseUncovered(rules, named);
+  return named;
+}
+
+/** Refuse, listing the covered chains, a claim on `chain` when the bounty covers no contract there (D1, D26). */
+export function refuseUncovered(rules: Rules, chain: number): void {
+  const covered = coveredChains(rules);
+  if (!covered.includes(chain)) throw new Error(`the bounty covers no contract on ${chainLabel(chain)}: it covers ${covered.map(chainLabel).join(", ")}`);
 }
 
 export async function showBounty(near: Near, contract: string, id: BountyId): Promise<BountyDetail> {

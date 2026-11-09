@@ -375,6 +375,29 @@ test("R7.10: verify-pause attaches nothing for the winning Whitehat or the posti
   expect(await verifyAs(WHITEHAT)).toBe(VERIFY_FEE); // the winner, once the prepaid attempts are used
 }, 60_000);
 
+test("D26: verify-pause --chain reads a chain's name as test and claim do, and refuses one it doesn't know before any RPC", async () => {
+  Object.assign(world.claim, { state: "judged", verdict: PAYS });
+  Object.assign(world.bounty, { state: "paid", winning_claim: 3, signed_pauses: [PAUSE] });
+  const verify = (chain: string) => bountee(["verify-pause", BOUNTY_TEXT, "--as", WHITEHAT, "--chain", chain, "--rpc", `84532=${base}/evm`, "--wait", "5", ...NEAR()]);
+  const named = await verify("Base-Sepolia");
+  expect(named.code, named.stderr).toBe(0);
+  expect(named.out.chains.map((c: any) => [c.chain_id, c.verified])).toStrictEqual([[PAUSE.chain_id, true]]);
+  expect(sent.at(-1)).toMatchObject({ method: "verify_pause", args: { id: BOUNTY, chain_id: PAUSE.chain_id } });
+
+  // Another chain, by name: this bounty's pause on Base Sepolia is left alone.
+  sent.length = 0;
+  const other = await verify("arbitrum-sepolia");
+  expect(other.code, other.stderr).toBe(0);
+  expect(other.out.chains).toStrictEqual([]);
+  expect(sent).toStrictEqual([]);
+
+  requests = 0;
+  const unknown = await verify("polygon");
+  expect(unknown.code).toBe(1);
+  expect(JSON.parse(unknown.stderr.split("\n")[0]!).error).toMatch(/--chain takes a chain ID or one of base, arbitrum, arbitrum-one, base-sepolia, arbitrum-sepolia: got polygon/);
+  expect(requests).toBe(0);
+}, 60_000);
+
 // ---- claim --retry (R2.6) ------------------------------------------------------------------
 
 test("R2.6 R14.1: claim --retry sends retry_claim with the proofs exactly as filed, read back from the claim's transaction, and sees it to its verdict", async () => {

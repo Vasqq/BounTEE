@@ -14,6 +14,7 @@ import { balanceCommand, formatBalanceResult } from "./balance.ts";
 import { formatBounty, formatList, listBounties, parseBountyId, showBounty } from "./bounties.ts";
 import { formatBuildResult, reproducibleBuild } from "./build.ts";
 import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadcast.ts";
+import { parseChain } from "./chains.ts";
 import { claim, formatClaimResult } from "./claim.ts";
 import { initCommand } from "./init.ts";
 import { formatKeyAdd, formatKeyRevoke, keyAdd, keyRevoke } from "./keys.ts";
@@ -116,7 +117,8 @@ try {
     const { positional, flags } = params;
     if (flags.job !== undefined) {
       // A saved job (e.g. the demo's demo/fixtures/exploit.json), replayed offline (D19).
-      if (positional.length > 0 || flags.bounty !== undefined) fail(`test --job takes no script or --bounty\n${usage(command)}`, 2);
+      // A saved job is proven on the chain its block names (D1), so it takes no --chain either.
+      if (positional.length > 0 || flags.bounty !== undefined || flags.chain !== undefined) fail(`test --job takes no script, --bounty or --chain\n${usage(command)}`, 2);
       const result = replayJob({ job: flags.job, judge: flags.judge });
       print(result, formatReplayResult(result));
       process.exit(0);
@@ -132,6 +134,7 @@ try {
       block: flags.block === undefined ? undefined : Number(flags.block),
       judge: flags.judge,
       contract: flags.contract,
+      chain: flags.chain === undefined ? undefined : parseChain(flags.chain),
       near: nearConnection(flags),
     });
     print(result, formatTestResult(result));
@@ -159,7 +162,7 @@ try {
       bounty,
       signer: flags.as,
       rpcs: flags.rpc === undefined ? undefined : parseRpcFlags(flags.rpc.split(",")),
-      chains: flags.chain === undefined ? undefined : [Number(flags.chain)],
+      chains: flags.chain === undefined ? undefined : [parseChain(flags.chain)],
       waitSecs: flags.wait === undefined ? undefined : Number(flags.wait),
     });
     print(result, formatVerifyPauses(result));

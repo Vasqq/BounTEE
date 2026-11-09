@@ -10,7 +10,7 @@
 //! run. The result is a recorded analysis (requirements.md's method A), not mainnet evidence.
 //!
 //! Seams, written down before the first test:
-//! - The judge's mainnet test build (pinned to `bounty.bountee.near`, under the
+//! - The judge's mainnet test build (pinned to `bounty2.bountee.near`, under the
 //!   mainnet MPC root key, with its test stand-in RPCs) fed the demo bounty's `posting_check`
 //!   job, its RPCs for 8453 and 42161 pointed at plain anvils loaded with
 //!   `cli/test/mainnet-state/build.ts`'s state files (Circle's USDC, the vault deployed and
