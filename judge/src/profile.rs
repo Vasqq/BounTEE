@@ -31,8 +31,6 @@ pub struct Profile {
 /// no profile may have. From the Merge on, `mix_hash` carries `prevRandao`; accepting
 /// pre-Cancun headers lets a replay run against a historical pre-hack block (ticket #28).
 const SHANGHAI_FIELDS: usize = 17;
-/// Fields up to `parent_beacon_block_root` (Cancun); one more is Prague's `requests_hash`.
-const CANCUN_FIELDS: usize = 20;
 
 /// Every chain with no profile.
 const ETHEREUM_SHAPED: Profile = Profile {
@@ -79,7 +77,7 @@ impl Profile {
 
     /// The EVM rules to replay `header` under.
     pub fn spec(&self, header: &Header) -> SpecId {
-        self.spec.unwrap_or(if header.field_count > CANCUN_FIELDS {
+        self.spec.unwrap_or(if header.has_requests_hash {
             SpecId::PRAGUE
         } else {
             SpecId::CANCUN

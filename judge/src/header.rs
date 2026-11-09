@@ -16,8 +16,8 @@ pub struct Header {
     pub gas_limit: u64,
     pub timestamp: u64,
     pub mix_hash: B256,
-    /// How many fields the header has; the chain's profile says how many it needs (D29).
-    pub field_count: usize,
+    /// Whether the header carries EIP-7685's `requests_hash` (Prague and later).
+    pub has_requests_hash: bool,
 }
 
 /// The header's index of each field we read, in the yellow paper's order.
@@ -28,6 +28,8 @@ const NUMBER: usize = 8;
 const GAS_LIMIT: usize = 9;
 const TIMESTAMP: usize = 11;
 const MIX_HASH: usize = 13;
+/// Fields up to `parent_beacon_block_root` (Cancun); one more is Prague's `requests_hash`.
+const CANCUN_FIELDS: usize = 20;
 
 /// Decode `rlp` and check it hashes to `hash` and has as many fields as its chain's
 /// `profile` needs (D29); `None` if it doesn't or isn't a header.
@@ -66,7 +68,7 @@ pub fn verified(rlp: &[u8], hash: B256, profile: &Profile) -> Option<Header> {
         gas_limit: int(field(GAS_LIMIT)?)?,
         timestamp: int(field(TIMESTAMP)?)?,
         mix_hash: word(field(MIX_HASH)?)?,
-        field_count: fields.len(),
+        has_requests_hash: fields.len() > CANCUN_FIELDS,
     })
 }
 
