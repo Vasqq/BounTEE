@@ -1,16 +1,16 @@
-# The judge's chain-state fixtures commit EVM state proofs: each storage entry's "key" is a 32-byte
-# storage-slot hash, and a listed token is a 20-byte contract address, which gitleaks'
-# generic-api-key rule mistakes for secrets. Jobs saved by `bountee test --out` are compact JSON,
-# so the match may lack the space. Only that rule, only those match shapes, only in those fixture
-# files is allowed; everything else is scanned.
+# The committed jobs, rules and chain-state fixtures carry EVM state proofs: each storage entry's
+# "key" is a 32-byte storage-slot hash, and a listed token is a 20-byte contract address, which
+# gitleaks' generic-api-key rule mistakes for secrets. Jobs saved by `bountee test --out` are
+# compact JSON, so the match may lack the space. Only that rule, only those match shapes, only in
+# the JSON fixture folders is allowed; everything else is scanned.
 [extend]
 useDefault = true
 
 [[rules]]
 id = "generic-api-key"
 [[rules.allowlists]]
-description = "EVM storage-slot keys and token addresses in the judge's chain-state fixtures"
+description = "EVM storage-slot keys and token addresses in the committed JSON fixtures"
 condition = "AND"
-paths = ['''(^|/)judge/tests/fixtures/(scenarios/state(-later)?|arbitrum-sepolia/[^/]+)\.json$''']
+paths = ['''(^|/)(judge/tests/fixtures|demo/fixtures|cli/test/fixtures|formats/fixtures)/.+\.json$''']
 regexTarget = "match"
 regexes = ['''^key": ?"0x[0-9a-f]{64}"?$''', '''^token": ?"0x[0-9a-fA-F]{40}"?$''']
