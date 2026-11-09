@@ -3,7 +3,8 @@
 use alloy_rlp::Header as RlpHeader;
 use revm::primitives::{keccak256, Address, B256};
 
-/// The fields of an RLP-encoded Ethereum (or OP Stack) block header the judge uses.
+/// The fields of an RLP-encoded EVM block header the judge uses. Every header the judge
+/// accepts (Ethereum's, the OP Stack's, Arbitrum's) has them, at the same places.
 #[derive(Debug, Clone)]
 pub struct Header {
     pub parent_hash: B256,
@@ -13,8 +14,8 @@ pub struct Header {
     pub gas_limit: u64,
     pub timestamp: u64,
     pub mix_hash: B256,
-    /// Whether the header carries EIP-7685's `requests_hash` (Prague and later).
-    pub has_requests_hash: bool,
+    /// How many fields the header has; the chain's profile says how many it needs (D29).
+    pub fields: usize,
 }
 
 /// The header's index of each field we read, in the yellow paper's order.
@@ -25,17 +26,10 @@ const NUMBER: usize = 8;
 const GAS_LIMIT: usize = 9;
 const TIMESTAMP: usize = 11;
 const MIX_HASH: usize = 13;
-/// Fields up to `parent_beacon_block_root` (Cancun); one more is `requests_hash`.
-const CANCUN_FIELDS: usize = 20;
-/// Fields up to `withdrawals_root` (Shanghai/Shapella, EIP-4895): the oldest header era the
-/// judge accepts. From the Merge on, `mix_hash` carries `prevRandao`, so the field the block
-/// env reads as randomness is valid; a header with `requests_hash` is Prague, any other is
-/// judged under Cancun rules (the spec's default). Accepting pre-Cancun headers lets a replay
-/// run against a historical pre-hack block (ticket #28), not only recent state.
-const SHANGHAI_FIELDS: usize = 17;
 
-/// Decode `rlp` and check it hashes to `hash`; `None` if it doesn't or isn't a header.
-pub fn verified(rlp: &[u8], hash: B256) -> Option<Header> {
+/// Decode `rlp` and check it hashes to `hash` and has at least `min_fields` fields (its
+/// chain's profile's, D29); `None` if it doesn't or isn't a header.
+pub fn verified(rlp: &[u8], hash: B256, min_fields: usize) -> Option<Header> {
     if keccak256(rlp) != hash {
         return None;
     }
@@ -53,19 +47,22 @@ pub fn verified(rlp: &[u8], hash: B256) -> Option<Header> {
         fields.push(&buf[..item.payload_length]);
         buf = &buf[item.payload_length..];
     }
-    if fields.len() < SHANGHAI_FIELDS {
+    if fields.len() < min_fields {
         return None;
     }
+    // `get`, never indexing: a header too short to read is refused, never a panic.
+    let field = |i: usize| fields.get(i).copied();
     Some(Header {
-        parent_hash: word(fields[PARENT_HASH])?,
-        beneficiary: (fields[BENEFICIARY].len() == 20)
-            .then(|| Address::from_slice(fields[BENEFICIARY]))?,
-        state_root: word(fields[STATE_ROOT])?,
-        number: int(fields[NUMBER])?,
-        gas_limit: int(fields[GAS_LIMIT])?,
-        timestamp: int(fields[TIMESTAMP])?,
-        mix_hash: word(fields[MIX_HASH])?,
-        has_requests_hash: fields.len() > CANCUN_FIELDS,
+        parent_hash: word(field(PARENT_HASH)?)?,
+        beneficiary: field(BENEFICIARY)
+            .filter(|b| b.len() == 20)
+            .map(Address::from_slice)?,
+        state_root: word(field(STATE_ROOT)?)?,
+        number: int(field(NUMBER)?)?,
+        gas_limit: int(field(GAS_LIMIT)?)?,
+        timestamp: int(field(TIMESTAMP)?)?,
+        mix_hash: word(field(MIX_HASH)?)?,
+        fields: fields.len(),
     })
 }
 

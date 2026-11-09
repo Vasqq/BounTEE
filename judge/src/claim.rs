@@ -13,6 +13,7 @@ use revm::primitives::B256;
 
 use crate::confirm::{self, Unconfirmed};
 use crate::header;
+use crate::profile::Profile;
 use crate::replay::{self, hex};
 
 /// Why a claim job ended with no verdict (R2.6). Every cause ends the job the same way
@@ -66,8 +67,10 @@ fn run(
         .as_str()
         .parse()
         .map_err(|_| Reason::UnprovenState)?;
+    // D29: as many header fields as the proof chain's profile needs.
+    let min_fields = Profile::of(job.rules.proof_chain.get()).min_header_fields;
     let header = hex(job.header.as_str())
-        .and_then(|rlp| header::verified(&rlp, hash))
+        .and_then(|rlp| header::verified(&rlp, hash, min_fields))
         .filter(|h| h.number == job.block.number.get())
         .ok_or(Reason::UnprovenState)?;
 
