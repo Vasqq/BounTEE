@@ -96,18 +96,16 @@ const sameId = (a: BountyId, b: BountyId) => a.protocol === b.protocol && a.name
 /**
  * Refuse, before any EVM call or fee (D26), a saved job or evidence proven on `chain` (its
  * block's) when the bounty covers no contract there, when --chain is missing on a multi-chain
- * bounty, or when it names another chain (refused as uncovered if the bounty doesn't cover
- * it). A dry run, which files nothing, reads no `rules`, so only another chain is refused there.
+ * bounty, or when it names another chain. A dry run, which files nothing, reads no `rules`,
+ * so only the last is checked there.
  */
 function checkProvenOn(chain: number, named: number | undefined, rules: Rules | undefined): void {
-  if (rules) {
-    refuseUncovered(rules, chain);
-    // The Whitehat names the chain as for `test`: required on a multi-chain bounty (D26).
-    if (named === undefined) proofChain(rules);
-  }
-  if (named !== undefined && named !== chain) {
-    if (rules) refuseUncovered(rules, named);
-    throw new Error(`the claim is proven on ${chainLabel(chain)}, not ${chainLabel(named)}: test it again on ${chainLabel(named)}`);
+  if (rules) refuseUncovered(rules, chain);
+  if (named === chain) return;
+  // The Whitehat names the chain as for `test`: required on a multi-chain bounty (D26).
+  const chosen = rules ? proofChain(rules, named) : named;
+  if (chosen !== undefined && chosen !== chain) {
+    throw new Error(`the claim is proven on ${chainLabel(chain)}, not ${chainLabel(chosen)}: test it again on ${chainLabel(chosen)}`);
   }
 }
 

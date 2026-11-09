@@ -221,18 +221,19 @@ const route: Route = (where, method, p) => {
   return undefined;
 };
 
-let stand: Awaited<ReturnType<typeof standIns>>;
+let server: Awaited<ReturnType<typeof standIns>>;
 beforeAll(async () => {
-  stand = await standIns(route, { "/secrets/pubkey": () => ({ pubkey: keystorePub }) });
+  server = await standIns(route, { "/secrets/pubkey": () => ({ pubkey: keystorePub }) });
 });
-afterAll(() => stand.close());
+afterAll(() => server.close());
 
-/** Each request the stand-ins got: `near <method or view>`, `chain <id> <method>` or `http <path>` (OutLayer's keystore). */
-const asked = () => stand.requests.map((r) => `${r.where} ${r.where === "near" ? (r.detail ?? r.method) : r.method}`);
+/** Each request the stand-ins got: `near <method or view>`, `chain <id> <method>` or `outlayer <path>` (its keystore, the one plain HTTP endpoint). */
+const asked = () =>
+  server.requests.map((r) => (r.where === "near" ? `near ${r.detail ?? r.method}` : r.where === "http" ? `outlayer ${r.method}` : `${r.where} ${r.method}`));
 
 /** `bountee claim` as the Whitehat against the stand-ins, its proof RPC the stand-in chain `proofRpcChain`. */
 async function claim(args: string[], proofRpcChain: number) {
-  stand.requests.length = 0;
+  server.requests.length = 0;
   sent.length = 0;
   const dir = mkdtempSync(join(tmpdir(), "bountee-claim-"));
   const key = KeyPair.fromRandom("ed25519");
@@ -241,7 +242,7 @@ async function claim(args: string[], proofRpcChain: number) {
     [
       "claim", ...args,
       "--contract", CONTRACT, "--bounty", BOUNTY_TEXT, "--as", WHITEHAT,
-      "--rpc", `${stand.base}/near`, "--proof-rpc", `${stand.base}/${proofRpcChain}`, "--outlayer-api", stand.base, "--no-wait",
+      "--rpc", `${server.base}/near`, "--proof-rpc", `${server.base}/${proofRpcChain}`, "--outlayer-api", server.base, "--no-wait",
     ],
     { cwd: dir, env: { BOUNTEE_CREDENTIALS_DIR: dir } },
   );
@@ -294,7 +295,7 @@ test("D26 D1: claim of a job or evidence on a chain the bounty doesn't cover is 
     expect(r.code, given[0]).toBe(1);
     expect(r.error, given[0]).toMatch(/covers no contract on Arbitrum Sepolia \(421614\): it covers Base Sepolia \(84532\)/);
     expect(evmAsked(), given[0]).toEqual([]);
-    expect(asked(), given[0]).not.toContain("http /secrets/pubkey");
+    expect(asked(), given[0]).not.toContain("outlayer /secrets/pubkey");
     expect(sent, given[0]).toEqual([]);
   }
 }, 60_000);
@@ -329,7 +330,7 @@ test("D26 R2.8: claim of a job whose recency RPC holds another block at its numb
   expect(r.code).toBe(1);
   expect(r.error).toMatch(/no RPC holds block 327577406 of Arbitrum Sepolia \(421614\)/);
   expect(r.error).toMatch(/is 0x(0b){32}, not the claim's/);
-  expect(asked()).not.toContain("http /secrets/pubkey");
+  expect(asked()).not.toContain("outlayer /secrets/pubkey");
   expect(sent).toEqual([]);
 }, 60_000);
 
