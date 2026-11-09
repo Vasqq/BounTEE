@@ -284,7 +284,7 @@ impl Sandbox {
     }
 
     fn claim_args(&self, name: &str) -> Value {
-        self.claim_args_on(name, 84532)
+        self.claim_args_on(name, CLAIM_CHAIN)
     }
 
     /// A claim's arguments, its block on `chain`: the claim's proof chain (D1).
@@ -300,7 +300,7 @@ impl Sandbox {
 
     /// File a claim and wait for every receipt (the job's answer must already be scripted).
     async fn submit_claim(&self, by: &Account, name: &str) -> anyhow::Result<ExecutionFinalResult> {
-        self.submit_claim_on(by, name, 84532).await
+        self.submit_claim_on(by, name, CLAIM_CHAIN).await
     }
 
     /// File a claim proven on `chain` and wait for every receipt.
@@ -345,6 +345,10 @@ fn rules(s: &Sandbox, end_in_ns: u64, now_ns: u64) -> Value {
 }
 
 const DAY_NS: u64 = 86_400_000_000_000;
+
+/// The chain a test's claim is proven on unless it names another: Base Sepolia, the chain
+/// `rules` covers.
+const CLAIM_CHAIN: u64 = 84532;
 
 async fn now_ns(s: &Sandbox) -> anyhow::Result<u64> {
     Ok(s.worker.view_block().await?.timestamp())
@@ -1387,7 +1391,7 @@ impl Sandbox {
 
     /// A claim that scores PAYS, submitted without waiting for its receipts.
     async fn submit_pays(&self, name: &str) -> anyhow::Result<Pending> {
-        self.submit_pays_on(name, 84532).await
+        self.submit_pays_on(name, CLAIM_CHAIN).await
     }
 
     /// A claim proven on `chain` that scores PAYS, submitted without waiting for its receipts.
@@ -1405,7 +1409,7 @@ impl Sandbox {
     /// A claim by the Whitehat that scores PAYS, its pauses signed by the MPC stand-in with
     /// the bounty's own key, and paid. Returns the claim's ID.
     async fn pay_claim(&self, name: &str) -> anyhow::Result<u64> {
-        self.pay_claim_on(name, 84532).await
+        self.pay_claim_on(name, CLAIM_CHAIN).await
     }
 
     /// As `pay_claim`, the claim proven on `chain`.
@@ -1418,7 +1422,7 @@ impl Sandbox {
     /// A claim by the Whitehat that scores PAYS, its pauses signed by the MPC stand-in with
     /// the bounty's own key; the payout is started. Returns the claim's ID.
     async fn judge_pays(&self, name: &str) -> anyhow::Result<u64> {
-        self.judge_pays_on(name, 84532).await
+        self.judge_pays_on(name, CLAIM_CHAIN).await
     }
 
     /// As `judge_pays`, the claim proven on `chain`.
