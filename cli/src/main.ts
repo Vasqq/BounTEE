@@ -134,7 +134,7 @@ try {
       block: flags.block === undefined ? undefined : Number(flags.block),
       judge: flags.judge,
       contract: flags.contract,
-      chain: flags.chain === undefined ? undefined : parseChain(flags.chain),
+      chain: parseChain(flags.chain),
       near: nearConnection(flags),
     });
     print(result, formatTestResult(result));
@@ -156,13 +156,14 @@ try {
     if (!positional[0] || !flags.as) fail(`verify-pause needs a bounty id and --as\n${usage(command)}`, 2);
     const bounty = parseBountyId(positional[0]);
     const { near, contract } = nearFor(command, flags);
+    const chain = parseChain(flags.chain);
     const result = await verifyPauses({
       near,
       contract,
       bounty,
       signer: flags.as,
       rpcs: flags.rpc === undefined ? undefined : parseRpcFlags(flags.rpc.split(",")),
-      chains: flags.chain === undefined ? undefined : [parseChain(flags.chain)],
+      chains: chain === undefined ? undefined : [chain],
       waitSecs: flags.wait === undefined ? undefined : Number(flags.wait),
     });
     print(result, formatVerifyPauses(result));

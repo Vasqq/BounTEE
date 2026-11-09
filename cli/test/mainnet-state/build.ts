@@ -12,11 +12,11 @@
 // INVALID. A dump of a fork keeps only what transactions wrote, not what they read (a reverted
 // warm-up or an eth_call leaves nothing in it), so the copy is built explicitly:
 //   1. Fork the chain a few blocks behind its head.
-//   2. Give a local deployer the seed of Circle's USDC, and fund the bounty's pause-role address
-//      (the mainnet MPC derivation for demo.bountee.near/<name> on bounty.bountee.near).
-//   3. Deploy and seed the vault with demo/script/Deploy.s.sol's own transactions, each sent with
-//      its EIP-2930 access list recorded first (eth_createAccessList: every account and slot the
-//      EVM touches, read or written).
+//   2. Give a local deployer the vault's USDC (Circle's), and fund the bounty's pause-role
+//      address (the mainnet MPC derivation for demo.bountee.near/<name> on bounty.bountee.near).
+//   3. Deploy the vault and deposit its USDC with demo/script/Deploy.s.sol's own transactions,
+//      each sent with its EIP-2930 access list recorded first (eth_createAccessList: every
+//      account and slot the EVM touches, read or written).
 //   4. On Base, the chain the claims are proven on, record the same for the two claims (the
 //      cheat, HonestUser.s.sol, buying through Uniswap V2; and the sealed exploit,
 //      SEALED_EXPLOIT) from a fresh account holding the bounty's native seed, then roll them
@@ -45,7 +45,7 @@ import { gunzipSync } from "node:zlib";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { PAUSE_GAS_PER_PAUSE, pauseRole, type BountyId } from "@bountee/formats";
 import { rpc } from "../../src/proofs.ts";
-import { DEMO_DEPLOY_GAS } from "../testnet/deploy.ts";
+import { DEMO_DEPLOY_GAS, VAULT_USDC } from "../testnet/deploy.ts";
 import { sealedExploit } from "../testnet/sealed-exploit.ts";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -69,12 +69,11 @@ interface ChainPlan {
   usdc: string;
   /** Circle's FiatToken keeps balances in `balanceAndBlacklistStates`, slot 9. */
   balanceSlot: bigint;
-  seed: bigint;
   claims: boolean;
 }
 const CHAINS: ChainPlan[] = [
-  { id: 8453, name: "Base", rpc: process.env.BASE_RPC ?? "https://mainnet.base.org", usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", balanceSlot: 9n, seed: 2_000_000n, claims: true },
-  { id: 42161, name: "Arbitrum One", rpc: process.env.ARBITRUM_RPC ?? "https://arb1.arbitrum.io/rpc", usdc: "0xaf88d065e77c8cc2239327c5edb3a432268e5831", balanceSlot: 9n, seed: 2_000_000n, claims: false },
+  { id: 8453, name: "Base", rpc: process.env.BASE_RPC ?? "https://mainnet.base.org", usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", balanceSlot: 9n, claims: true },
+  { id: 42161, name: "Arbitrum One", rpc: process.env.ARBITRUM_RPC ?? "https://arb1.arbitrum.io/rpc", usdc: "0xaf88d065e77c8cc2239327c5edb3a432268e5831", balanceSlot: 9n, claims: false },
 ];
 
 /** The pinned judge's build hash on the mainnet bounty contract (`config().judge_build_hash`). */
@@ -194,13 +193,13 @@ async function build(chain: ChainPlan, role: string) {
     await rpc(fork.url, "anvil_setBalance", [deployer, hex(10n ** 18n)]);
     // The deployer's USDC: Circle's balance word for it, written straight into the fork.
     const balanceKey = `0x${Buffer.from(keccak_256(Buffer.from(word(BigInt(deployer)).slice(2) + word(chain.balanceSlot).slice(2), "hex"))).toString("hex")}`;
-    await rpc(fork.url, "anvil_setStorageAt", [chain.usdc, balanceKey, word(chain.seed)]);
+    await rpc(fork.url, "anvil_setStorageAt", [chain.usdc, balanceKey, word(VAULT_USDC)]);
     const held = BigInt(run("cast", ["call", chain.usdc, "balanceOf(address)(uint256)", deployer, "--rpc-url", fork.url], repo).trim().split(" ")[0]!);
-    if (held !== chain.seed) throw new Error(`${chain.name}: the deployer's USDC reads ${held}, not ${chain.seed}: Circle's balance slot moved`);
+    if (held !== VAULT_USDC) throw new Error(`${chain.name}: the deployer's USDC reads ${held}, not ${VAULT_USDC}: Circle's balance slot moved`);
     await rpc(fork.url, "anvil_setBalance", [role, hex(PAUSE_GAS_PER_PAUSE)]);
 
     const deployTxs = scriptTxs(join(demo, "script/Deploy.s.sol"), fork.url, chain.id, deployer, {
-      USDC: chain.usdc, SEED_USDC: chain.seed.toString(), PAUSE_ROLE: role,
+      USDC: chain.usdc, SEED_USDC: VAULT_USDC.toString(), PAUSE_ROLE: role,
     });
     const deployed = await sendRecording(fork.url, deployTxs, reads);
     // On mainnet Deploy.s.sol creates one contract, the vault, then approves and deposits.
@@ -279,7 +278,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         throw new Error(`${chain.name}: the loaded state's root ${loaded.stateRoot} isn't the one eth_getProof proves (${proven})`);
       }
       chains.push({
-        chain_id: chain.id, name: chain.name, state: b.file, vault: b.vault, usdc: chain.usdc, seed: chain.seed.toString(),
+        chain_id: chain.id, name: chain.name, state: b.file, vault: b.vault, usdc: chain.usdc, vault_usdc: VAULT_USDC.toString(),
         fork_block: b.forkBlock, accounts: b.accounts, state_root: loaded.stateRoot, drain_bot: "refused, vault USDC unchanged",
         deploy_gas: b.deployGas.toString(), arbitrum_l1_gas: b.l1Gas.toString(), deploy_gas_with_l1: (b.deployGas + b.l1Gas).toString(),
         deploy_gas_budget: DEMO_DEPLOY_GAS.toString(),

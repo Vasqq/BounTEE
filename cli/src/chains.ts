@@ -66,8 +66,12 @@ export const CHAINS: Record<number, Chain> = {
   },
 };
 
-/** A chain named on the command line (`--chain`): a known chain's name, in any case, or a chain ID. */
-export function parseChain(text: string): number {
+/**
+ * The chain `--chain` names (D26): a known chain's name, in any case, or a chain ID; undefined
+ * when the flag isn't given. Every command reads the flag through here.
+ */
+export function parseChain(text: string | undefined): number | undefined {
+  if (text === undefined) return undefined;
   const names = Object.entries(CHAINS).flatMap(([id, c]) => c.names.map((name) => [name, Number(id)] as const));
   const named = names.find(([name]) => name === text.toLowerCase());
   if (named) return named[1];

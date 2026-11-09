@@ -18,7 +18,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +25,7 @@ import { base58 } from "@scure/base";
 import { decodeSignedTransaction, KeyPair } from "near-api-js";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { proofRpcs } from "../src/chains.ts";
-import { NEAR_GAS_PRICE, NEAR_PROTOCOL_CONFIG } from "./testnet/stand-ins.ts";
+import { NEAR_GAS_PRICE, NEAR_PROTOCOL_CONFIG, nearView, standIns, type Route } from "./testnet/stand-ins.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const recorder = fileURLToPath(new URL("./fetch-recorder.mjs", import.meta.url));
@@ -164,8 +163,6 @@ const YOCTO = 10n ** 24n;
 const ARB_JOB = `${repo}judge/tests/fixtures/arbitrum-sepolia/drain.json`;
 const arbReplay = JSON.parse(readFileSync(ARB_JOB, "utf8")).replay;
 
-/** Each request the stand-ins got: `near <method or view>`, `chain <id> <method>` or `outlayer <path>`. */
-const asked: string[] = [];
 /** Each signed transaction sent to NEAR, decoded. */
 const sent: { method: string; args: any }[] = [];
 /** The bounty's rules, and how old the stand-in chain says a claimed block is, and its hash there (default the Arbitrum job's). */
@@ -173,15 +170,7 @@ let world: { rules: unknown; blockAgeSecs?: number; blockHash?: string };
 const keystore = generateKeyPairSync("x25519");
 const keystorePub = keystore.publicKey.export({ format: "der", type: "spki" }).subarray(12).toString("hex");
 
-const readBody = (req: IncomingMessage) =>
-  new Promise<string>((ok) => {
-    let body = "";
-    req.on("data", (d) => (body += d));
-    req.on("end", () => ok(body));
-  });
-
 const HASH = "11111111111111111111111111111111";
-const view = (value: unknown) => ({ result: [...Buffer.from(JSON.stringify(value))], logs: [], block_height: 1, block_hash: HASH });
 const VIEWS: Record<string, (args: any) => unknown> = {
   bounty: ({ id }) =>
     id.protocol === BOUNTY.protocol && id.name === BOUNTY.name ? { id: BOUNTY, rules: world.rules, state: "live", winning_claim: null, signed_pauses: [] } : null,
@@ -197,62 +186,54 @@ const outcome = (id: string, executor: string) => ({
   block_hash: HASH,
 });
 
-const server = createServer(async (req, res) => {
-  const body = await readBody(req);
-  res.setHeader("Content-Type", "application/json");
-  if (req.url === "/secrets/pubkey") {
-    asked.push("outlayer /secrets/pubkey");
-    return res.end(JSON.stringify({ pubkey: keystorePub }));
-  }
-  const call = JSON.parse(body);
-  const p = call.params;
-  const ok = (result: unknown) => res.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, result }));
-  if (req.url !== "/near") {
-    asked.push(`chain ${req.url!.slice(1)} ${call.method}`);
+/** NEAR's RPC and the EVM chains, as the stand-ins answer them. */
+const route: Route = (where, method, p) => {
+  if (where !== "near") {
     // The chain as it is now: the block the claim names is a few seconds old.
-    if (call.method === "eth_getBlockByNumber") return ok({ number: p[0], hash: world.blockHash ?? arbReplay.block.hash, timestamp: `0x${(Math.floor(Date.now() / 1000) - (world.blockAgeSecs ?? 5)).toString(16)}` });
-  } else {
-    asked.push(`near ${p?.method_name ?? p?.request_type ?? call.method}`);
-    if (call.method === "query" && p.request_type === "call_function" && VIEWS[p.method_name]) {
-      return ok(view(VIEWS[p.method_name]!(JSON.parse(Buffer.from(p.args_base64 ?? "", "base64").toString("utf8") || "{}"))));
-    }
-    if (call.method === "query" && p.request_type === "view_access_key") return ok({ nonce: 1, permission: "FullAccess", block_height: 1, block_hash: HASH });
-    if (call.method === "query" && p.request_type === "view_account") {
-      return ok({ amount: String(10n * YOCTO), locked: "0", code_hash: HASH, storage_usage: 1, block_height: 1, block_hash: HASH });
-    }
-    if (call.method === "EXPERIMENTAL_protocol_config") return ok(NEAR_PROTOCOL_CONFIG);
-    if (call.method === "gas_price") return ok(NEAR_GAS_PRICE);
-    if (call.method === "block") return ok({ header: { hash: HASH, height: 1, timestamp: 0 } });
-    if (call.method === "send_tx" || call.method === "broadcast_tx_commit") {
-      const bytes = Buffer.from(p.signed_tx_base64 ?? p[0], "base64");
-      const { transaction: tx } = decodeSignedTransaction(bytes);
-      const fc: any = (tx.actions[0] as any).functionCall;
-      sent.push({ method: fc.methodName, args: JSON.parse(Buffer.from(fc.args).toString("utf8")) });
-      const hash = base58.encode(createHash("sha256").update(bytes).digest());
-      // The contract files it as claim 7.
-      return ok({
-        status: { SuccessValue: Buffer.from("7").toString("base64") },
-        final_execution_status: "EXECUTED_OPTIMISTIC",
-        transaction: { hash, signer_id: tx.signerId, receiver_id: tx.receiverId },
-        transaction_outcome: outcome(hash, tx.signerId),
-        receipts_outcome: [outcome(`${hash}-r`, tx.receiverId)],
-      });
-    }
+    if (method === "eth_getBlockByNumber") return { number: p[0], hash: world.blockHash ?? arbReplay.block.hash, timestamp: `0x${(Math.floor(Date.now() / 1000) - (world.blockAgeSecs ?? 5)).toString(16)}` };
+    return undefined;
   }
-  res.statusCode = 400;
-  res.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, error: { message: "not in the stand-in" } }));
-});
+  if (method === "query" && p.request_type === "call_function" && VIEWS[p.method_name]) {
+    return nearView(VIEWS[p.method_name]!(JSON.parse(Buffer.from(p.args_base64 ?? "", "base64").toString("utf8") || "{}")));
+  }
+  if (method === "query" && p.request_type === "view_access_key") return { nonce: 1, permission: "FullAccess", block_height: 1, block_hash: HASH };
+  if (method === "query" && p.request_type === "view_account") {
+    return { amount: String(10n * YOCTO), locked: "0", code_hash: HASH, storage_usage: 1, block_height: 1, block_hash: HASH };
+  }
+  if (method === "EXPERIMENTAL_protocol_config") return NEAR_PROTOCOL_CONFIG;
+  if (method === "gas_price") return NEAR_GAS_PRICE;
+  if (method === "block") return { header: { hash: HASH, height: 1, timestamp: 0 } };
+  if (method === "send_tx" || method === "broadcast_tx_commit") {
+    const bytes = Buffer.from(p.signed_tx_base64 ?? p[0], "base64");
+    const { transaction: tx } = decodeSignedTransaction(bytes);
+    const fc: any = (tx.actions[0] as any).functionCall;
+    sent.push({ method: fc.methodName, args: JSON.parse(Buffer.from(fc.args).toString("utf8")) });
+    const hash = base58.encode(createHash("sha256").update(bytes).digest());
+    // The contract files it as claim 7.
+    return {
+      status: { SuccessValue: Buffer.from("7").toString("base64") },
+      final_execution_status: "EXECUTED_OPTIMISTIC",
+      transaction: { hash, signer_id: tx.signerId, receiver_id: tx.receiverId },
+      transaction_outcome: outcome(hash, tx.signerId),
+      receipts_outcome: [outcome(`${hash}-r`, tx.receiverId)],
+    };
+  }
+  return undefined;
+};
 
-let base = "";
+let server: Awaited<ReturnType<typeof standIns>>;
 beforeAll(async () => {
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  server = await standIns(route, { "/secrets/pubkey": () => ({ pubkey: keystorePub }) });
 });
 afterAll(() => server.close());
 
+/** Each request the stand-ins got: `near <method or view>`, `chain <id> <method>` or `outlayer <path>` (its keystore, the one plain HTTP endpoint). */
+const asked = () =>
+  server.requests.map((r) => (r.where === "near" ? `near ${r.detail ?? r.method}` : r.where === "http" ? `outlayer ${r.method}` : `${r.where} ${r.method}`));
+
 /** `bountee claim` as the Whitehat against the stand-ins, its proof RPC the stand-in chain `proofRpcChain`. */
 async function claim(args: string[], proofRpcChain: number) {
-  asked.length = 0;
+  server.requests.length = 0;
   sent.length = 0;
   const dir = mkdtempSync(join(tmpdir(), "bountee-claim-"));
   const key = KeyPair.fromRandom("ed25519");
@@ -261,13 +242,13 @@ async function claim(args: string[], proofRpcChain: number) {
     [
       "claim", ...args,
       "--contract", CONTRACT, "--bounty", BOUNTY_TEXT, "--as", WHITEHAT,
-      "--rpc", `${base}/near`, "--proof-rpc", `${base}/${proofRpcChain}`, "--outlayer-api", base, "--no-wait",
+      "--rpc", `${server.base}/near`, "--proof-rpc", `${server.base}/${proofRpcChain}`, "--outlayer-api", server.base, "--no-wait",
     ],
     { cwd: dir, env: { BOUNTEE_CREDENTIALS_DIR: dir } },
   );
 }
 
-const evmAsked = () => asked.filter((a) => a.startsWith("chain "));
+const evmAsked = () => asked().filter((a) => a.startsWith("chain "));
 
 // ---- claim: the chain is chosen before any EVM call or fee (D26) ------------------------------
 
@@ -278,7 +259,7 @@ test("D26: claim of a script on a two-chain bounty with no --chain is refused af
   expect(r.error).toMatch(/--chain/);
   expect(r.error).toMatch(LISTED);
   expect(evmAsked()).toEqual([]);
-  expect(asked.every((a) => a === "near bounty")).toBe(true);
+  expect(asked().every((a) => a === "near bounty")).toBe(true);
   expect(sent).toEqual([]);
 }, 60_000);
 
@@ -314,7 +295,7 @@ test("D26 D1: claim of a job or evidence on a chain the bounty doesn't cover is 
     expect(r.code, given[0]).toBe(1);
     expect(r.error, given[0]).toMatch(/covers no contract on Arbitrum Sepolia \(421614\): it covers Base Sepolia \(84532\)/);
     expect(evmAsked(), given[0]).toEqual([]);
-    expect(asked, given[0]).not.toContain("outlayer /secrets/pubkey");
+    expect(asked(), given[0]).not.toContain("outlayer /secrets/pubkey");
     expect(sent, given[0]).toEqual([]);
   }
 }, 60_000);
@@ -349,7 +330,7 @@ test("D26 R2.8: claim of a job whose recency RPC holds another block at its numb
   expect(r.code).toBe(1);
   expect(r.error).toMatch(/no RPC holds block 327577406 of Arbitrum Sepolia \(421614\)/);
   expect(r.error).toMatch(/is 0x(0b){32}, not the claim's/);
-  expect(asked).not.toContain("outlayer /secrets/pubkey");
+  expect(asked()).not.toContain("outlayer /secrets/pubkey");
   expect(sent).toEqual([]);
 }, 60_000);
 
@@ -359,7 +340,7 @@ test("D26: claim of a script with --chain, or of a saved job too old to file, ru
   // check that the proof RPC serves the chosen chain.
   const named = await claim([DRAIN, "--chain", "arbitrum-sepolia"], ARBITRUM_SEPOLIA);
   expect(named.code).toBe(1);
-  expect(named.error).toMatch(/no RPC answered for chain 421614/);
+  expect(named.error).toMatch(/no RPC answered for Arbitrum Sepolia \(421614\)/);
   expect(evmAsked()).toEqual([`chain ${ARBITRUM_SEPOLIA} eth_chainId`]);
   expect(sent).toEqual([]);
 
@@ -367,7 +348,7 @@ test("D26: claim of a script with --chain, or of a saved job too old to file, ru
   world.blockAgeSecs = 1000;
   const old = await claim([DRAIN, "--job", ARB_JOB, "--chain", "421614"], ARBITRUM_SEPOLIA);
   expect(old.code).toBe(1);
-  expect(old.error).toMatch(/no RPC answered for chain 421614/);
+  expect(old.error).toMatch(/no RPC answered for Arbitrum Sepolia \(421614\)/);
   expect(evmAsked()).toEqual([`chain ${ARBITRUM_SEPOLIA} eth_getBlockByNumber`, `chain ${ARBITRUM_SEPOLIA} eth_chainId`]);
   expect(sent).toEqual([]);
 }, 60_000);

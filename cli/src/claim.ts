@@ -101,6 +101,7 @@ const sameId = (a: BountyId, b: BountyId) => a.protocol === b.protocol && a.name
  */
 function checkProvenOn(chain: number, named: number | undefined, rules: Rules | undefined): void {
   if (rules) refuseUncovered(rules, chain);
+  if (named === chain) return;
   // The Whitehat names the chain as for `test`: required on a multi-chain bounty (D26).
   const chosen = rules ? proofChain(rules, named) : named;
   if (chosen !== undefined && chosen !== chain) {
@@ -160,8 +161,7 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
   const near = new Near(network, flag(args, "rpc") ?? NEAR_RPC[network]);
   if (flag(args, "retry") !== undefined) return retryClaim(args, { near, network, contract, whitehat, given }, onStage);
   const bounty = given!;
-  const chainText = flag(args, "chain");
-  const named = chainText === undefined ? undefined : parseChain(chainText);
+  const named = parseChain(flag(args, "chain"));
 
   // A dry run only seals, filing and spending nothing, so it reads no bounty: its rules, and so the covered chains, stay unread.
   let rules: Rules | undefined;

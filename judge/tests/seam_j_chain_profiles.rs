@@ -141,8 +141,13 @@ fn d29_a_chain_with_no_profile_still_wants_seventeen_header_fields() {
     assert_eq!(verdict.reason(), Reason::UnprovenState, "{verdict:?}");
 }
 
+/// No requirement states NEAR's transaction size limit: it is the spec's constraint on the
+/// judge's build, which uploads to FastFS in one transaction. What it guards is D2: the
+/// enclave gives the verdict `bountee test` gave only if it runs that same build, so the
+/// build must stay deployable. Osaka's rules, which Arbitrum's profiles turn on (D29), are
+/// what grew it.
 #[test]
-fn d29_the_attested_build_fits_in_one_near_transaction() {
+fn d2_the_attested_build_fits_in_one_near_transaction() {
     let size = std::fs::metadata(attested_build()).unwrap().len();
     assert!(
         size < NEAR_TRANSACTION_LIMIT,
