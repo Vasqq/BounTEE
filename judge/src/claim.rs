@@ -68,9 +68,9 @@ fn run(
         .parse()
         .map_err(|_| Reason::UnprovenState)?;
     // D29: as many header fields as the proof chain's profile needs.
-    let min_fields = Profile::of(job.rules.proof_chain.get()).min_header_fields;
+    let profile = Profile::of(job.rules.proof_chain.get());
     let header = hex(job.header.as_str())
-        .and_then(|rlp| header::verified(&rlp, hash, min_fields))
+        .and_then(|rlp| header::verified(&rlp, hash, profile))
         .filter(|h| h.number == job.block.number.get())
         .ok_or(Reason::UnprovenState)?;
 

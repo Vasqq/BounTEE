@@ -9,9 +9,10 @@
 //!   committed under `fixtures/arbitrum-sepolia/`. Every transaction in it carries the CLI's
 //!   gas, the block's gas limit (0x4000000000000 on Arbitrum), so the job only pays if the
 //!   judge clamps each transaction to the chain's cap rather than refusing it.
-//!   Catches: a real Arbitrum header refused or misread, the cap not applied, a profile
-//!   missing from the default or the mainnet build, a short header panicking rather than
-//!   INVALID, and the attested build outgrowing NEAR's transaction limit with Osaka on.
+//!   Catches: a real Arbitrum header refused or misread, the cap not applied, either
+//!   Arbitrum profile missing from the default or the mainnet build, a header with fewer
+//!   fields than its chain's profile accepted, a chain without a profile judged otherwise
+//!   than before, and the attested build outgrowing NEAR's transaction limit with Osaka on.
 //!   Misses: the real RPCs (the live run, recorded in the ticket's work, is seam T) and the
 //!   Arbitrum differences the replay doesn't emulate (its block-number opcode, system and
 //!   Stylus contracts; R15.7). Every existing scenario keeping its verdict is the rest of
@@ -28,7 +29,7 @@ use std::process::{Command, Stdio};
 use alloy_rlp::Header as RlpHeader;
 use bountee_formats::{from_json, Outcome, Reason, Verdict};
 use common::{attested_build, mainnet_test_build, repo_root};
-use revm::primitives::keccak256;
+use revm::primitives::{hex, keccak256};
 use serde_json::Value;
 
 /// NEAR's transaction size limit: the judge uploads to FastFS in one transaction (spec).
@@ -67,23 +68,38 @@ fn arbitrum_sepolia_drain() -> Value {
     serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap()
 }
 
+/// The job relabelled to `chain`: its proof chain and its covered contract's chain. A replay
+/// job asks no RPC, so only the profile the judge picks for `chain` changes.
+fn on_chain(mut job: Value, chain: u64) -> Value {
+    let rules = &mut job["replay"]["rules"];
+    rules["proof_chain"] = chain.into();
+    for covered in rules["covered_contracts"].as_array_mut().unwrap() {
+        covered["chain_id"] = chain.into();
+    }
+    job
+}
+
 #[test]
-fn d29_a_drain_on_a_real_arbitrum_sepolia_block_pays() {
+fn d29_r4_10_row_21_a_drain_on_a_real_arbitrum_sepolia_block_pays() {
     let verdict = run(attested_build(), &arbitrum_sepolia_drain());
     assert_eq!(verdict.outcome(), Outcome::Pays, "{verdict:?}");
 }
 
 #[test]
-fn d29_the_mainnet_build_judges_arbitrum_as_the_default_build_does() {
-    let verdict = run(mainnet_test_build(), &arbitrum_sepolia_drain());
-    assert_eq!(verdict.outcome(), Outcome::Pays, "{verdict:?}");
+fn d29_the_default_and_mainnet_builds_both_judge_an_arbitrum_one_job() {
+    // Arbitrum One's profile, in both networks' builds: its 16-field header would be
+    // refused under the default every chain without a profile gets.
+    let job = on_chain(arbitrum_sepolia_drain(), 42161);
+    for wasm in [attested_build(), mainnet_test_build()] {
+        let verdict = run(wasm, &job);
+        assert_eq!(verdict.outcome(), Outcome::Pays, "{wasm:?}: {verdict:?}");
+    }
 }
 
 /// The job with its header cut to its first `fields` fields, and its block hash set to the
 /// cut header's, so only the field count is wrong.
 fn with_header_fields(mut job: Value, fields: usize) -> Value {
-    let header = &job["replay"]["header"];
-    let rlp = hex::decode(header.as_str().unwrap()).unwrap();
+    let rlp = hex::decode(job["replay"]["header"].as_str().unwrap()).unwrap();
     let mut buf = rlp.as_slice();
     RlpHeader::decode(&mut buf).unwrap();
     let mut items: Vec<&[u8]> = Vec::new();
@@ -102,7 +118,7 @@ fn with_header_fields(mut job: Value, fields: usize) -> Value {
     .encode(&mut cut);
     cut.extend_from_slice(&body);
     job["replay"]["block"]["hash"] = format!("{:#x}", keccak256(&cut)).into();
-    job["replay"]["header"] = format!("0x{}", hex::encode(&cut)).into();
+    job["replay"]["header"] = hex::encode_prefixed(&cut).into();
     job
 }
 
@@ -114,22 +130,10 @@ fn d29_an_arbitrum_header_with_too_few_fields_is_invalid() {
 }
 
 #[test]
-fn d29_a_header_too_short_to_read_is_invalid_not_a_trap() {
-    let job = with_header_fields(arbitrum_sepolia_drain(), 9);
-    let verdict = run(attested_build(), &job);
-    assert_eq!(verdict.reason(), Reason::UnprovenState, "{verdict:?}");
-}
-
-#[test]
 fn d29_a_chain_with_no_profile_still_wants_seventeen_header_fields() {
-    // The Arbitrum job relabelled to Base Sepolia, which has no profile: its real 16-field
-    // header is refused, as every chain without a profile refused it before D29.
-    let mut job = arbitrum_sepolia_drain();
-    let rules = &mut job["replay"]["rules"];
-    rules["proof_chain"] = 84532.into();
-    for covered in rules["covered_contracts"].as_array_mut().unwrap() {
-        covered["chain_id"] = 84532.into();
-    }
+    // Relabelled to Base Sepolia, which has no profile: the real 16-field header is
+    // refused, as every chain without a profile refused it before D29.
+    let job = on_chain(arbitrum_sepolia_drain(), 84532);
     let verdict = run(attested_build(), &job);
     assert_eq!(verdict.reason(), Reason::UnprovenState, "{verdict:?}");
 }
@@ -141,17 +145,4 @@ fn d29_the_attested_build_fits_in_one_near_transaction() {
         size < NEAR_TRANSACTION_LIMIT,
         "the judge is {size} bytes, over NEAR's {NEAR_TRANSACTION_LIMIT}"
     );
-}
-
-mod hex {
-    pub fn decode(s: &str) -> Option<Vec<u8>> {
-        let digits = s.strip_prefix("0x")?;
-        (0..digits.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&digits[i..i + 2], 16).ok())
-            .collect()
-    }
-    pub fn encode(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
 }

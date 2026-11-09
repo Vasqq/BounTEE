@@ -3,6 +3,8 @@
 use alloy_rlp::Header as RlpHeader;
 use revm::primitives::{keccak256, Address, B256};
 
+use crate::profile::Profile;
+
 /// The fields of an RLP-encoded EVM block header the judge uses. Every header the judge
 /// accepts (Ethereum's, the OP Stack's, Arbitrum's) has them, at the same places.
 #[derive(Debug, Clone)]
@@ -15,7 +17,7 @@ pub struct Header {
     pub timestamp: u64,
     pub mix_hash: B256,
     /// How many fields the header has; the chain's profile says how many it needs (D29).
-    pub fields: usize,
+    pub field_count: usize,
 }
 
 /// The header's index of each field we read, in the yellow paper's order.
@@ -27,9 +29,9 @@ const GAS_LIMIT: usize = 9;
 const TIMESTAMP: usize = 11;
 const MIX_HASH: usize = 13;
 
-/// Decode `rlp` and check it hashes to `hash` and has at least `min_fields` fields (its
-/// chain's profile's, D29); `None` if it doesn't or isn't a header.
-pub fn verified(rlp: &[u8], hash: B256, min_fields: usize) -> Option<Header> {
+/// Decode `rlp` and check it hashes to `hash` and has as many fields as its chain's
+/// `profile` needs (D29); `None` if it doesn't or isn't a header.
+pub fn verified(rlp: &[u8], hash: B256, profile: &Profile) -> Option<Header> {
     if keccak256(rlp) != hash {
         return None;
     }
@@ -47,10 +49,12 @@ pub fn verified(rlp: &[u8], hash: B256, min_fields: usize) -> Option<Header> {
         fields.push(&buf[..item.payload_length]);
         buf = &buf[item.payload_length..];
     }
-    if fields.len() < min_fields {
+    if fields.len() < profile.min_header_fields() {
         return None;
     }
-    // `get`, never indexing: a header too short to read is refused, never a panic.
+    // `get`, never indexing: every profile today asks for more fields than are read here,
+    // but a header too short to read must stay INVALID, never a panic, whatever a profile
+    // asks for.
     let field = |i: usize| fields.get(i).copied();
     Some(Header {
         parent_hash: word(field(PARENT_HASH)?)?,
@@ -62,7 +66,7 @@ pub fn verified(rlp: &[u8], hash: B256, min_fields: usize) -> Option<Header> {
         gas_limit: int(field(GAS_LIMIT)?)?,
         timestamp: int(field(TIMESTAMP)?)?,
         mix_hash: word(field(MIX_HASH)?)?,
-        fields: fields.len(),
+        field_count: fields.len(),
     })
 }
 

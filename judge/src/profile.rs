@@ -18,7 +18,7 @@ use crate::header::Header;
 /// How one chain is replayed.
 pub struct Profile {
     /// The fewest header fields a block of this chain has.
-    pub min_header_fields: usize,
+    min_header_fields: usize,
     /// The EVM rules; `None` picks them from the header (Prague or Cancun).
     spec: Option<SpecId>,
     /// The chain's per-transaction gas cap; `None` for no cap.
@@ -72,9 +72,14 @@ impl Profile {
             .map_or(&ETHEREUM_SHAPED, |(_, profile)| profile)
     }
 
+    /// The fewest header fields a block of this chain has.
+    pub fn min_header_fields(&self) -> usize {
+        self.min_header_fields
+    }
+
     /// The EVM rules to replay `header` under.
     pub fn spec(&self, header: &Header) -> SpecId {
-        self.spec.unwrap_or(if header.fields > CANCUN_FIELDS {
+        self.spec.unwrap_or(if header.field_count > CANCUN_FIELDS {
             SpecId::PRAGUE
         } else {
             SpecId::CANCUN

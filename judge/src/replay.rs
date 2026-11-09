@@ -77,7 +77,7 @@ fn run(
     diagnostics: &mut dyn FnMut(&dyn std::fmt::Display),
 ) -> Result<Reason, Ended> {
     // D29: the proof chain's profile says how its blocks are read and replayed.
-    let chain = Chain::of(rules.proof_chain.get());
+    let chain = ProofChain::of(rules.proof_chain.get());
 
     // R2.9: the header must hash to the claim's block hash and carry its number.
     let block_hash: B256 = block
@@ -86,7 +86,7 @@ fn run(
         .parse()
         .map_err(|_| Reason::UnprovenState)?;
     let header_bytes = hex(header_rlp.as_str()).ok_or(Reason::UnprovenState)?;
-    let header = header::verified(&header_bytes, block_hash, chain.profile.min_header_fields)
+    let header = header::verified(&header_bytes, block_hash, chain.profile)
         .filter(|h| h.number == block.number.get())
         .ok_or(Reason::UnprovenState)?;
 
@@ -170,7 +170,7 @@ fn run(
 #[allow(clippy::too_many_arguments)]
 fn execute(
     rules: &Rules,
-    chain: Chain,
+    chain: ProofChain,
     header: &Header,
     db: &ProvenDb,
     senders: &[Address],
@@ -259,14 +259,14 @@ fn execute(
 
 /// The proof chain: its ID and how it executes (D29).
 #[derive(Clone, Copy)]
-struct Chain {
+struct ProofChain {
     id: u64,
     profile: &'static Profile,
 }
 
-impl Chain {
+impl ProofChain {
     fn of(id: u64) -> Self {
-        Chain {
+        ProofChain {
             id,
             profile: Profile::of(id),
         }
@@ -276,7 +276,7 @@ impl Chain {
 /// The replay runs in the block after the claim's: number + 1, timestamp + 1, the claim
 /// block's beneficiary and gas limit, the chain's randomness, and a base fee of 0 (every
 /// transaction pays gas price 0, so fees never move value, R4.9).
-fn block_env(chain: Chain, header: &Header) -> BlockEnv {
+fn block_env(chain: ProofChain, header: &Header) -> BlockEnv {
     BlockEnv {
         number: U256::from(header.number + 1),
         beneficiary: header.beneficiary,
@@ -290,7 +290,7 @@ fn block_env(chain: Chain, header: &Header) -> BlockEnv {
 }
 
 /// The chain's EVM rules and per-transaction gas cap (D29).
-fn cfg(chain: Chain, header: &Header) -> CfgEnv {
+fn cfg(chain: ProofChain, header: &Header) -> CfgEnv {
     let mut cfg = CfgEnv::new_with_spec(chain.profile.spec(header));
     cfg.chain_id = chain.id;
     cfg.tx_gas_limit_cap = chain.profile.tx_gas_cap();
@@ -308,7 +308,7 @@ pub struct Values {
 /// by calling its `balanceOf` (never by knowing its storage layout, D11).
 fn value(
     rules: &Rules,
-    chain: Chain,
+    chain: ProofChain,
     header: &Header,
     mut db: Db,
     attacker: &[Address],
