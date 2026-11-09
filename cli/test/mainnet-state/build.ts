@@ -78,14 +78,14 @@ const CHAINS: ChainPlan[] = [
 
 /** The pinned judge's build hash on the mainnet bounty contract (`config().judge_build_hash`). */
 const PINNED_JUDGE = "0x5b3ba1891e81419a5fc398364e36c699a40c2ec7bce675588f06cad72171002d";
-/** Base and Arbitrum One's EVM today (Isthmus and ArbOS 40 both run Prague's opcodes). */
+/** Base and Arbitrum One's EVM today (Isthmus and ArbOS 40 both run Prague's opcodes). judge/tests/seam_j_mainnet_state.rs loads with the same. */
 const HARDFORK = "prague";
 /** Blocks mined on a loaded state before use: `bountee test` judges a block three behind the head, and the first is the dumped fork block, whose root is zero. */
-const MINED_ON_LOAD = 5;
+const MINED_ON_LOAD = 5; // as judge/tests/seam_j_mainnet_state.rs mines
 
 const hex = (n: bigint) => `0x${n.toString(16)}`;
 const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
-export const port = () =>
+const port = () =>
   new Promise<number>((ok) => {
     const s = createServer().listen(0, "127.0.0.1", () => {
       const p = (s.address() as { port: number }).port;
@@ -93,7 +93,7 @@ export const port = () =>
     });
   });
 
-export async function anvil(args: string[]): Promise<{ url: string; proc: ChildProcess }> {
+async function anvil(args: string[]): Promise<{ url: string; proc: ChildProcess }> {
   const p = await port();
   const proc = spawn("anvil", [...args, "--port", String(p), "--silent"], { stdio: "ignore" });
   const url = `http://127.0.0.1:${p}`;
@@ -218,6 +218,11 @@ async function build(chain: ChainPlan, role: string) {
     const createEstimate = chain.id === 42161
       ? BigInt(await rpc<string>(chain.rpc, "eth_estimateGas", [{ from: deployer, data: deployTxs[0]!.input }]))
       : null;
+    // The real estimate runs a little above the fork's gas used (an estimate pads the 63/64 gas a
+    // creation keeps back, and adds the L1 part); far above means the fork misprices Arbitrum.
+    if (createEstimate !== null && createEstimate > (deployed[0]!.gasUsed * 105n) / 100n + l1Gas) {
+      throw new Error(`${chain.name}: the real chain estimates the vault's creation at ${createEstimate} gas, over 5% above the fork's ${deployed[0]!.gasUsed}`);
+    }
     const deployTotal = deployed.reduce((a, r) => a + r.gasUsed, 0n) + transferGas + l1Gas;
     if (deployTotal > DEMO_DEPLOY_GAS) throw new Error(`${chain.name}: deploying takes ${deployTotal} gas, over the ${DEMO_DEPLOY_GAS} the preflight budgets`);
 

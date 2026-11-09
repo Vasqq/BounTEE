@@ -142,7 +142,11 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on a local copy of Base (#
       expect(reads).toEqual(DEMO_READS.mainnet[kind]);
       const timings = await timeProofs(job);
       for (const t of timings) expect(t.ms).toBeLessThan(manifest.rules.recency_limit_secs * 1000);
-      record(kind, { verdict: result.verdict, block, proven_reads: reads, proof_fetch_ms_on_base_mainnet: timings, recency_limit_secs: manifest.rules.recency_limit_secs });
+      const slowest = Math.max(...timings.map((t) => t.ms));
+      record(kind, {
+        verdict: result.verdict, block, proven_reads: reads, proof_fetch_ms_on_base_mainnet: timings,
+        recency_limit_secs: manifest.rules.recency_limit_secs, margin_secs: manifest.rules.recency_limit_secs - Math.ceil(slowest / 1000),
+      });
     }, 600_000);
   }
 });

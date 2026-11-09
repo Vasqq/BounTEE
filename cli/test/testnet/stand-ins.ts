@@ -22,7 +22,6 @@ export class RpcError {
 /** What a route answers: a result, an RpcError, or undefined for "not scripted". */
 export type Route = (where: string, method: string, params: any) => unknown;
 
-/** Answers `{"result": [...bytes]}` as NEAR's `call_function` does, for a view returning `value`. */
 /**
  * NEAR's pricing as mainnet's `EXPERIMENTAL_protocol_config` and `gas_price` reported it on Nov 8
  * (testnet's is the same): what a stand-in NEAR RPC answers so a pre-spend check can price a
@@ -43,6 +42,7 @@ export const NEAR_PROTOCOL_CONFIG = {
 };
 export const NEAR_GAS_PRICE = { gas_price: "100000000" };
 
+/** Answers `{"result": [...bytes]}` as NEAR's `call_function` does, for a view returning `value`. */
 export const nearView = (value: unknown) => ({ result: [...Buffer.from(JSON.stringify(value))], logs: [] });
 
 /** Nothing signed went to NEAR or a chain. */

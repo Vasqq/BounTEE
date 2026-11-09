@@ -73,7 +73,7 @@ export interface PostResult {
 /** A posting's calls: the fee's top-up when the prepaid balance is short of one fee, then the bounty amount carrying the rules. */
 export interface Posting {
   prepay?: PricedCall;
-  transfer: PricedCall;
+  transfer: PricedCall & { args: { receiver_id: string; amount: string; msg: string } };
   /** The NEAR the Protocol must hold for both, free of its storage stake, rounded up to what `formatNear` shows. */
   need: bigint;
 }
@@ -90,7 +90,7 @@ export async function postingNeed(near: Near, contract: string, id: BountyId, ru
       ? { method: "prepay_posting_fee", gas: tgas(30), deposit: postingFee - prepaid + (prepaid === 0n ? ENTRY_STORAGE : 0n), argsBytes: 2 }
       : undefined;
   const args = { receiver_id: contract, amount: rules.bounty_amount, msg: JSON.stringify({ name: id.name, rules }) };
-  const transfer: PricedCall = { method: "ft_transfer_call", gas: POSTING_GAS, deposit: 1n, argsBytes: JSON.stringify(args).length };
+  const transfer = { method: "ft_transfer_call", gas: POSTING_GAS, deposit: 1n, argsBytes: JSON.stringify(args).length, args };
   return { prepay, transfer, need: roundUpNear(await near.upfrontNear(prepay ? [prepay, transfer] : [transfer])) };
 }
 
@@ -110,7 +110,7 @@ export async function post(o: PostOptions): Promise<PostResult> {
   if (await near.view(o.contract, "bounty", { id })) {
     throw new Error(`${id.protocol}/${id.name} exists already: a bounty name is never reused (D25)`);
   }
-  const { prepay, need: needNear } = await postingNeed(near, o.contract, id, rules);
+  const { prepay, transfer, need: needNear } = await postingNeed(near, o.contract, id, rules);
   const freeNear = (await near.freeNear(id.protocol)) ?? 0n;
   if (freeNear < needNear) {
     throw new Error(
@@ -155,14 +155,7 @@ export async function post(o: PostOptions): Promise<PostResult> {
   // ---- 3. The bounty amount, carrying the rules ----
   const sent = await protocol.signAndSendTransaction({
     receiverId: config.usdc,
-    actions: [
-      actions.functionCall(
-        "ft_transfer_call",
-        { receiver_id: o.contract, amount: rules.bounty_amount, msg: JSON.stringify({ name: id.name, rules }) },
-        POSTING_GAS,
-        1n,
-      ),
-    ],
+    actions: [actions.functionCall(transfer.method, transfer.args, transfer.gas, transfer.deposit)],
     waitUntil: "FINAL",
     throwOnFailure: false,
   });

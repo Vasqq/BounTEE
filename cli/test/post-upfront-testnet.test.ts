@@ -67,13 +67,14 @@ function run(args: string[], env: Record<string, string> = {}): Promise<{ code: 
 }
 const lastJson = (text: string) => JSON.parse(text.trim().split("\n").pop()!);
 
-/** Moves `amount` yoctoNEAR from `from` to `to` and waits for it to land. */
+/** Moves NEAR between `account` and `sink` until `account` holds exactly `target` free. */
 async function moveTo(account: string, sink: string, target: bigint) {
   const free = (await near.freeNear(account))!;
   if (free > target) await transfer(account, sink, free - target);
   if (free < target) await transfer(sink, account, target - free);
 }
 
+/** Moves `amount` yoctoNEAR from `from` to `to` and waits for it to land. */
 async function transfer(from: string, to: string, amount: bigint): Promise<string> {
   const r = await near.account(from).signAndSendTransaction({ receiverId: to, actions: [actions.transfer(amount)], waitUntil: "FINAL" });
   return r.transaction.hash;
