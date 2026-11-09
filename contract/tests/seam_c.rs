@@ -303,6 +303,7 @@ impl Sandbox {
         self.submit_claim_on(by, name, 84532).await
     }
 
+    /// File a claim proven on `chain` and wait for every receipt.
     async fn submit_claim_on(
         &self,
         by: &Account,
@@ -835,7 +836,8 @@ async fn d1_a_claim_on_an_uncovered_chain_is_refused_and_draws_nothing() -> anyh
 
     let r = s.submit_claim_on(&s.whitehat, "vault", 421614).await?;
     assert!(
-        failure_text(&r).contains("a chain this bounty covers no contract on"),
+        failure_text(&r)
+            .contains("the claim's proof chain is a chain this bounty covers no contract on"),
         "{r:?}"
     );
     assert_eq!(s.claim_balance(s.whitehat.id()).await?, balance);
@@ -1561,10 +1563,11 @@ async fn d1_a_claim_proven_on_the_second_chain_is_judged_once_there_and_pauses_b
     assert_eq!(jobs.len(), jobs_before + 1, "one job for the claim");
     let input: Value = serde_json::from_str(jobs.last().unwrap()["input_data"].as_str().unwrap())?;
     let judged = &input["judge_claim"];
-    let block = json!({ "chain_id": 421614, "number": 1234, "hash": format!("0x{}", "ab".repeat(32)) });
-    assert_eq!(judged["block"], block);
+    let block = &s.claim_args_on("vault", 421614)["block"];
+    assert_eq!(block["chain_id"], 421614);
+    assert_eq!(&judged["block"], block);
     assert_eq!(judged["rules"], rules);
-    assert_eq!(s.claim(id).await?["block"], block, "the claim view shows its chain");
+    assert_eq!(&s.claim(id).await?["block"], block, "the claim view shows its chain");
 
     let bounty = s.bounty("vault").await?;
     assert_eq!(bounty["state"], "paid");

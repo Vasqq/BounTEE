@@ -4,7 +4,9 @@
 //! token; the callback answers the amount to refund, so the token's own resolve gives the
 //! USDC back on a failed check (R1.6). Any refusal panics, so the token refunds in full.
 
-use bountee_formats::{BountyId, BountyName, PostingCheckResult, Rules, RECENCY_LIMIT_SECS};
+use bountee_formats::{
+    BountyId, BountyName, PostingCheckResult, Rules, SafeU64, RECENCY_LIMIT_SECS,
+};
 use near_sdk::json_types::U128;
 use near_sdk::serde::Deserialize;
 use near_sdk::serde_json::{self, json};
@@ -18,6 +20,15 @@ use crate::{
 /// and the pause verifications its posting fee funds.
 pub const MAX_COVERED_CONTRACTS: usize = 8;
 pub const MAX_LISTED_TOKENS: usize = 16;
+
+/// Whether `chain_id` is a covered chain of `rules`: the chain of one of its covered
+/// contracts, so a claim may be proven on it and a token listed on it (ADR-0020).
+pub(crate) fn covers_chain(rules: &Rules, chain_id: &SafeU64) -> bool {
+    rules
+        .covered_contracts
+        .iter()
+        .any(|c| &c.chain_id == chain_id)
+}
 
 /// What a posting's `ft_transfer_call` carries in `msg`.
 #[derive(Deserialize)]
@@ -253,10 +264,7 @@ impl Contract {
         // listed twice on one chain, though the same token may be listed on two.
         for (i, t) in rules.listed_tokens.iter().enumerate() {
             require!(
-                rules
-                    .covered_contracts
-                    .iter()
-                    .any(|c| c.chain_id == t.chain_id),
+                covers_chain(rules, &t.chain_id),
                 "a listed token is on a chain no covered contract is on"
             );
             require!(
