@@ -4,7 +4,7 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 
-/** One request a stand-in got: where (`near` or `chain <id>`), the method, and what it asked for. */
+/** One request a stand-in got: where (`near`, `chain <id>`, or `http` for a plain endpoint), the method (an `http` request's path), and what it asked for. */
 export interface Logged {
   where: string;
   method: string;

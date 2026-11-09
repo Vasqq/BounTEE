@@ -25,8 +25,7 @@ export const DEMO_DEPLOY_GAS = 2_600_000n;
 
 /**
  * How much of Circle's USDC each mainnet demo vault starts with: 2 on every chain, since a
- * claim may be proven on any of them (ADR-0020). fresh-instance.ts deposits it and
- * mainnet-state/build.ts copies it; testnet mints a mock.
+ * claim may be proven on any of them (ADR-0020); testnet mints a mock.
  */
 export const VAULT_USDC = 2_000_000n;
 
