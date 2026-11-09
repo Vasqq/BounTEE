@@ -51,9 +51,9 @@ const bountyId = fc.record({ protocol: accountId, name: bountyName });
 
 const rulesArb = fc.record({
   covered_contracts: fc.array(fc.record({ chain_id: fc.maxSafeNat(), address }), { maxLength: 4 }),
-  proof_chain: fc.maxSafeNat(),
   recency_limit_secs: fc.integer({ min: 0, max: 2 ** 32 - 1 }),
-  listed_tokens: fc.array(fc.record({ token: fc.oneof(fc.constant("native"), address), price: uint(256n) }), {
+  // ADR-0020: each listed token names its chain.
+  listed_tokens: fc.array(fc.record({ chain_id: fc.maxSafeNat(), token: fc.oneof(fc.constant("native"), address), price: uint(256n) }), {
     maxLength: 4,
   }),
   seed: fc.record({
@@ -81,7 +81,8 @@ const accountProofArb = fc.record({
   code: bytes,
 });
 
-const blockArb = fc.record({ number: fc.maxSafeNat(), hash: hex(64) });
+// ADR-0020: a block names its chain, the claim's proof chain.
+const blockArb = fc.record({ chain_id: fc.maxSafeNat(), number: fc.maxSafeNat(), hash: hex(64) });
 
 // #8: the exploit the judge replays; `to: null` is a contract creation.
 const exploitArb = fc.record({

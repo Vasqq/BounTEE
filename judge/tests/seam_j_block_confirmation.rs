@@ -365,34 +365,61 @@ fn r2_8_block_after_the_submission_time_is_invalid() {
     assert_verdict(&out, Reason::StaleBlock);
 }
 
-// ---- D1: one proof chain ------------------------------------------------------------------
+// ---- D1, R2.8: the claim's chain ----------------------------------------------------------
 
-/// D1: a bounty covering its vaults on the proof chain and on Arbitrum Sepolia is judged
-/// against the proof chain's state only: the judge confirms the block through the proof
-/// chain's RPCs and asks Arbitrum's nothing (here they would contradict the claim), and the
-/// replay PAYS on the proof chain's vaults alone.
+/// R2.8, D1: on a bounty covering its vaults on Base Sepolia first and Arbitrum Sepolia
+/// second, a claim proven on Arbitrum Sepolia, the second chain, is confirmed through
+/// Arbitrum Sepolia's RPCs only: Base Sepolia's are asked nothing (here they would
+/// contradict the claim), and the replay PAYS. (The fixture block is anvil's, relabelled
+/// as Arbitrum Sepolia's: what is under test is which chain's RPCs are asked.)
 #[test]
-fn d1_a_claim_covering_two_chains_is_judged_on_its_proof_chain_only() {
-    const ARBITRUM: u64 = 421614;
-    let mut job = recent_claim();
+fn r2_8_d1_a_claim_proven_on_the_second_chain_is_confirmed_by_that_chains_rpcs() {
+    let mut job = claim_on(BASE_SEPOLIA);
+    job["judge_claim"]["block"]["chain_id"] = json!(ARBITRUM_SEPOLIA);
     let rules = &mut job["judge_claim"]["rules"];
-    let mut covered = rules["covered_contracts"].as_array().unwrap().clone();
-    for c in covered.clone() {
-        covered.push(json!({ "chain_id": ARBITRUM, "address": c["address"] }));
+    for list in ["covered_contracts", "listed_tokens"] {
+        let mut items = rules[list].as_array().unwrap().clone();
+        for item in items.clone() {
+            let mut on_arbitrum = item.clone();
+            on_arbitrum["chain_id"] = json!(ARBITRUM_SEPOLIA);
+            items.push(on_arbitrum);
+        }
+        rules[list] = json!(items);
     }
-    rules["covered_contracts"] = json!(covered);
-    let proof_chain = rpcs([ours(), ours(), ours()]);
-    let arbitrum = rpcs([other(), other(), other()]);
+    let arbitrum = rpcs([ours(), ours(), ours()]);
+    let base = rpcs([other(), other(), other()]);
+    let any = rpcs([other(), other(), other()]);
     let out = run_per_chain(
         test_build(),
         &job,
-        &proof_chain.iter().collect::<Vec<_>>(),
-        &[(ARBITRUM, &arbitrum.iter().collect::<Vec<_>>())],
+        &any.iter().collect::<Vec<_>>(),
+        &[
+            (ARBITRUM_SEPOLIA, &arbitrum.iter().collect::<Vec<_>>()),
+            (BASE_SEPOLIA, &base.iter().collect::<Vec<_>>()),
+        ],
         Some(&drain()),
     );
     assert_verdict(&out, Reason::MinimumTheftReached);
-    assert_eq!(proof_chain.iter().map(TestRpc::requests).sum::<usize>(), 3);
-    assert_eq!(arbitrum.iter().map(TestRpc::requests).sum::<usize>(), 0);
+    assert_eq!(arbitrum.iter().map(TestRpc::requests).sum::<usize>(), 3);
+    assert_eq!(base.iter().map(TestRpc::requests).sum::<usize>(), 0);
+    assert_eq!(any.iter().map(TestRpc::requests).sum::<usize>(), 0);
+}
+
+/// D1: a claim job whose block is on a chain no covered contract is on is INVALID
+/// `chain_not_covered`, before any RPC is asked, though every stand-in would confirm it.
+#[test]
+fn d1_a_claim_on_a_chain_no_covered_contract_is_on_is_invalid_before_any_rpc() {
+    let mut job = claim_on(BASE_SEPOLIA);
+    job["judge_claim"]["block"]["chain_id"] = json!(ARBITRUM_SEPOLIA);
+    let rpcs = rpcs([ours(), ours(), ours()]);
+    let out = run(
+        test_build(),
+        &job,
+        &rpcs.iter().collect::<Vec<_>>(),
+        Some(&drain()),
+    );
+    assert_verdict(&out, Reason::ChainNotCovered);
+    assert_eq!(rpcs.iter().map(TestRpc::requests).sum::<usize>(), 0);
 }
 
 // ---- R2.8: RPC addresses come only from the build ---------------------------------------
@@ -462,13 +489,17 @@ fn r2_8_unparseable_proofs_are_unproven() {
 const BASE_SEPOLIA: u64 = 84532;
 const ARBITRUM_SEPOLIA: u64 = 421614;
 
-/// The fixture claim with its proof chain, and every covered contract, on `chain`.
+/// The fixture claim with its block, every covered contract and every listed token on
+/// `chain`.
 fn claim_on(chain: u64) -> Value {
     let mut job = recent_claim();
+    job["judge_claim"]["block"]["chain_id"] = json!(chain);
     let rules = &mut job["judge_claim"]["rules"];
-    rules["proof_chain"] = json!(chain);
     for c in rules["covered_contracts"].as_array_mut().unwrap() {
         c["chain_id"] = json!(chain);
+    }
+    for t in rules["listed_tokens"].as_array_mut().unwrap() {
+        t["chain_id"] = json!(chain);
     }
     job
 }

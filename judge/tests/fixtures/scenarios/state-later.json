@@ -1,6 +1,7 @@
 {
  "about": "Ticket #10: the block after the owner patched the second patchable vault, with the proofs `lateFix` reads there.",
  "block": {
+  "chain_id": 31337,
   "number": 38,
   "hash": "0xa01652c52c89fd7120ca40df38508460fb0740da00d20ba71977a7143962e87e"
  },

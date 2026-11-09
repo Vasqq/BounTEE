@@ -70,10 +70,12 @@ pub enum Reason {
     BlockNotConfirmed,
     /// INVALID: the claim's block is outside the recency limit of its submission (R2.8).
     StaleBlock,
+    /// INVALID: the claim's block is on a chain no covered contract is on (D1).
+    ChainNotCovered,
 }
 
 impl Reason {
-    pub const ALL: [Reason; 8] = [
+    pub const ALL: [Reason; 9] = [
         Reason::MinimumTheftReached,
         Reason::BelowMinimumTheft,
         Reason::MalformedExploit,
@@ -82,6 +84,7 @@ impl Reason {
         Reason::UnprovenState,
         Reason::BlockNotConfirmed,
         Reason::StaleBlock,
+        Reason::ChainNotCovered,
     ];
 
     pub fn outcome(self) -> Outcome {

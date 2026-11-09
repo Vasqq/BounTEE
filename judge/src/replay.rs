@@ -76,6 +76,9 @@ fn run(
     exploit: &Exploit,
     diagnostics: &mut dyn FnMut(&dyn std::fmt::Display),
 ) -> Result<Reason, Ended> {
+    // D1: the block's chain must be a covered contract's chain, before anything else.
+    let chain = score::claim_chain(rules, block.chain_id.get())?;
+
     // R2.9: the header must hash to the claim's block hash and carry its number.
     let block_hash: B256 = block
         .hash
@@ -133,6 +136,7 @@ fn run(
     };
     let outcome = execute(
         rules,
+        &chain,
         &header,
         &db,
         &senders,
@@ -166,6 +170,7 @@ fn run(
 #[allow(clippy::too_many_arguments)]
 fn execute(
     rules: &Rules,
+    chain: &score::ClaimChain,
     header: &Header,
     db: &ProvenDb,
     senders: &[Address],
@@ -190,7 +195,7 @@ fn execute(
     let mut evm = Context::mainnet()
         .with_db(cache)
         .with_block(block_env(header))
-        .with_cfg(cfg(rules, header))
+        .with_cfg(cfg(chain.chain_id, header))
         .build_mainnet_with_inspector(creations.clone());
 
     let mut nonces: Vec<(Address, u64)> = senders.iter().map(|s| (*s, 0)).collect();
@@ -216,7 +221,7 @@ fn execute(
             .gas_limit(tx.gas.get())
             .gas_price(0)
             .nonce(nonce.1)
-            .chain_id(Some(rules.proof_chain.get()))
+            .chain_id(Some(chain.chain_id))
             .build()
             .map_err(|_| Reason::MalformedExploit)?;
         match evm.inspect_tx_commit(env) {
@@ -236,10 +241,9 @@ fn execute(
     drop(evm);
 
     let holdings = creations.holdings.borrow().clone();
-    let covered = score::covered(rules)?;
-    let start_value = value(rules, header, start, &holdings, &covered, diagnostics)?;
-    let end_value = value(rules, header, end, &holdings, &covered, diagnostics)?;
-    Ok(score::verdict(rules, &start_value, &end_value)?)
+    let start_value = value(chain, header, start, &holdings, diagnostics)?;
+    let end_value = value(chain, header, end, &holdings, diagnostics)?;
+    Ok(score::verdict(rules, chain, &start_value, &end_value)?)
 }
 
 /// The replay runs in the block after the claim's: number + 1, timestamp + 1, the claim
@@ -259,38 +263,37 @@ fn block_env(header: &Header) -> BlockEnv {
 }
 
 /// Prague for a header with `requests_hash`, Cancun otherwise.
-fn cfg(rules: &Rules, header: &Header) -> CfgEnv {
+fn cfg(chain_id: u64, header: &Header) -> CfgEnv {
     let spec = if header.has_requests_hash {
         SpecId::PRAGUE
     } else {
         SpecId::CANCUN
     };
     let mut cfg = CfgEnv::new_with_spec(spec);
-    cfg.chain_id = rules.proof_chain.get();
+    cfg.chain_id = chain_id;
     cfg
 }
 
-/// Holdings at one point of the replay, per listed token, for the attacker and the covered
-/// contracts.
+/// Holdings at one point of the replay, per listed token on the claim's chain, for the
+/// attacker and the covered contracts on that chain.
 pub struct Values {
     pub attacker: Vec<U256>,
     pub covered: Vec<U256>,
 }
 
-/// Read every listed token's holdings in `db`: native coin by account balance, an ERC-20
-/// by calling its `balanceOf` (never by knowing its storage layout, D11).
+/// Read the claim chain's listed tokens' holdings in `db`: native coin by account balance,
+/// an ERC-20 by calling its `balanceOf` (never by knowing its storage layout, D11).
 fn value(
-    rules: &Rules,
+    chain: &score::ClaimChain,
     header: &Header,
     mut db: Db,
     attacker: &[Address],
-    covered: &[Address],
     diagnostics: &mut dyn FnMut(&dyn std::fmt::Display),
 ) -> Result<Values, Ended> {
     // The caller of the balanceOf calls; a synthetic account that only this copy has.
     let reader = Address::with_last_byte(0xbb).create(u64::MAX);
     db.insert_account_info(reader, AccountInfo::default());
-    let mut cfg = cfg(rules, header);
+    let mut cfg = cfg(chain.chain_id, header);
     cfg.disable_nonce_check = true;
     let mut evm = Context::mainnet()
         .with_db(db)
@@ -300,7 +303,7 @@ fn value(
 
     let mut read = |holders: &[Address]| -> Result<Vec<U256>, Ended> {
         let mut per_token = Vec::new();
-        for listed in &rules.listed_tokens {
+        for listed in &chain.listed {
             let mut total = U256::ZERO;
             for holder in holders {
                 let amount = match &listed.token {
@@ -322,7 +325,7 @@ fn value(
                             .data(data.into())
                             .gas_limit(header.gas_limit.min(30_000_000))
                             .gas_price(0)
-                            .chain_id(Some(rules.proof_chain.get()))
+                            .chain_id(Some(chain.chain_id))
                             .build()
                             .map_err(|_| Reason::MalformedExploit)?;
                         match evm.transact(tx) {
@@ -354,7 +357,7 @@ fn value(
         Ok(per_token)
     };
     let attacker = read(attacker)?;
-    let covered = read(covered)?;
+    let covered = read(&chain.covered)?;
     Ok(Values { attacker, covered })
 }
 

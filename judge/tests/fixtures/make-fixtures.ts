@@ -68,7 +68,7 @@ try {
     const log = JSON.parse(readFileSync(`${chainDir}/broadcast/Fixture.s.sol/31337/dry-run/${name}-latest.json`, "utf8"));
     const exploit = exploitFromBroadcast(log);
     writeFileSync(`${here}exploits/${name}.json`, `${JSON.stringify(exploit, null, 2)}\n`);
-    const { replay, verdict, stderr } = await collectReplay({ rpc: url, block, rules, exploit, wasm });
+    const { replay, verdict, stderr } = await collectReplay({ rpc: url, chain: 31337, block, rules, exploit, wasm });
     if (stderr) console.log(stderr.trim());
     console.log(name, JSON.stringify(verdict), `${replay.proofs.length} proofs`);
     for (const p of replay.proofs) {

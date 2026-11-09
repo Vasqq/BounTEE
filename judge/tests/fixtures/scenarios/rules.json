@@ -1,6 +1,5 @@
 {
   "covered_contracts": [],
-  "proof_chain": 31337,
   "recency_limit_secs": 300,
   "listed_tokens": [],
   "seed": { "native": "1000000000000000000", "tokens": [] },
