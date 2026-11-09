@@ -13,6 +13,7 @@ use revm::primitives::B256;
 
 use crate::confirm::{self, Unconfirmed};
 use crate::header;
+use crate::profile::Profile;
 use crate::replay::{self, hex};
 use crate::score;
 
@@ -61,7 +62,7 @@ fn run(
 ) -> Result<Verdict, Ended> {
     // D1: the block's chain must be a covered contract's chain, before anything else and
     // before any RPC is asked.
-    score::claim_chain(&job.rules, job.block.chain_id.get())?;
+    score::on_proof_chain(&job.rules, job.block.chain_id.get())?;
 
     // The header must hash to the claim's block hash and carry its number, as in a
     // local replay (R2.9); its timestamp is the block's.
@@ -71,8 +72,10 @@ fn run(
         .as_str()
         .parse()
         .map_err(|_| Reason::UnprovenState)?;
+    // D29: as many header fields as the proof chain's profile needs.
+    let profile = Profile::of(job.block.chain_id.get());
     let header = hex(job.header.as_str())
-        .and_then(|rlp| header::verified(&rlp, hash))
+        .and_then(|rlp| header::verified(&rlp, hash, profile))
         .filter(|h| h.number == job.block.number.get())
         .ok_or(Reason::UnprovenState)?;
 

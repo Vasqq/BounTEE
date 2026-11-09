@@ -11,35 +11,30 @@ use crate::replay::Values;
 /// such products still fit.
 type Value = Uint<1024, 16>;
 
-/// The bounty as a claim on one chain sees it (D1, R3.8): the claim's proof chain, the
-/// covered contracts on it, each once, and the listed tokens on it, in the rules' order.
-/// Nothing on another chain counts toward loss or value.
-pub struct ClaimChain<'a> {
-    pub chain_id: u64,
+/// What the rules count on a claim's proof chain (D1, R3.8): the covered contracts on it,
+/// each once, and the listed tokens on it, in the rules' order. Nothing on another chain
+/// counts toward loss or value.
+pub struct OnProofChain<'a> {
     pub covered: Vec<Address>,
     pub listed: Vec<&'a ListedToken>,
 }
 
-/// The rules as seen from `chain_id`, the claim block's chain. INVALID
-/// `chain_not_covered` when no covered contract is on it (D1): checked before anything
-/// else in a claim or replay job.
-pub fn claim_chain(rules: &Rules, chain_id: u64) -> Result<ClaimChain<'_>, Reason> {
+/// The rules as counted on `chain_id`, the claim block's chain: its proof chain. INVALID
+/// `chain_not_covered` when no covered contract is on it (D1), which a claim or replay job
+/// checks before anything else.
+pub fn on_proof_chain(rules: &Rules, chain_id: u64) -> Result<OnProofChain<'_>, Reason> {
     let mut covered: Vec<Address> = Vec::new();
-    let mut on_chain = false;
-    for c in &rules.covered_contracts {
-        if c.chain_id.get() == chain_id {
-            on_chain = true;
-            let a: Address = c
-                .address
-                .as_str()
-                .parse()
-                .map_err(|_| Reason::MalformedExploit)?;
-            if !covered.contains(&a) {
-                covered.push(a);
-            }
+    for c in rules.covered_contracts.iter().filter(|c| c.chain_id.get() == chain_id) {
+        let a: Address = c
+            .address
+            .as_str()
+            .parse()
+            .map_err(|_| Reason::MalformedExploit)?;
+        if !covered.contains(&a) {
+            covered.push(a);
         }
     }
-    if !on_chain {
+    if covered.is_empty() {
         return Err(Reason::ChainNotCovered);
     }
     let listed = rules
@@ -47,11 +42,7 @@ pub fn claim_chain(rules: &Rules, chain_id: u64) -> Result<ClaimChain<'_>, Reaso
         .iter()
         .filter(|t| t.chain_id.get() == chain_id)
         .collect();
-    Ok(ClaimChain {
-        chain_id,
-        covered,
-        listed,
-    })
+    Ok(OnProofChain { covered, listed })
 }
 
 /// PAYS when the score reaches the minimum theft, ZERO otherwise (R3.8).
@@ -63,12 +54,12 @@ pub fn claim_chain(rules: &Rules, chain_id: u64) -> Result<ClaimChain<'_>, Reaso
 /// block minus at the end.
 pub fn verdict(
     rules: &Rules,
-    chain: &ClaimChain,
+    counted: &OnProofChain,
     start: &Values,
     end: &Values,
 ) -> Result<Reason, Reason> {
-    // The prices of the claim chain's listed tokens, in the order [`Values`] holds them.
-    let prices = chain
+    // The prices of the proof chain's listed tokens, in the order [`Values`] holds them.
+    let prices = counted
         .listed
         .iter()
         .map(|t| {
