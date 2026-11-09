@@ -45,7 +45,7 @@ import { gunzipSync } from "node:zlib";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { PAUSE_GAS_PER_PAUSE, pauseRole, type BountyId } from "@bountee/formats";
 import { rpc } from "../../src/proofs.ts";
-import { DEMO_DEPLOY_GAS } from "../testnet/deploy.ts";
+import { DEMO_DEPLOY_GAS, VAULT_USDC } from "../testnet/deploy.ts";
 import { sealedExploit } from "../testnet/sealed-exploit.ts";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -61,11 +61,6 @@ const CONTRACT = "bounty.bountee.near";
 const SEED_NATIVE = 10n ** 18n;
 /** How far behind each chain's head the fork starts, so every public RPC has the block. */
 const BEHIND = 5;
-/**
- * How much of Circle's USDC each vault starts with: 2 on every chain, since a claim may be
- * proven on any of them (ADR-0020), as `testnet/fresh-instance.ts` deposits on mainnet.
- */
-const VAULT_USDC = 2_000_000n;
 
 interface ChainPlan {
   id: number;

@@ -57,7 +57,7 @@ import { DEMO_READS, budgetClaims, whitehatNeed, type ClaimBudget, type ClaimPla
 import { CLAIM_GAS } from "../../src/claim.ts";
 import { formatNear, roundUpNear } from "../../src/near.ts";
 import { postingNeed } from "../../src/post.ts";
-import { DEMO_DEPLOY_GAS, MPC_ROOT, near, network as NETWORK, need, stopIfShort, wholeNumber, type Need } from "./deploy.ts";
+import { DEMO_DEPLOY_GAS, MPC_ROOT, near, network as NETWORK, need, stopIfShort, VAULT_USDC, wholeNumber, type Need } from "./deploy.ts";
 import { keystoreEnv, redact } from "./evm-key.ts";
 
 const home = homedir();
@@ -102,9 +102,6 @@ const chainRpcs = { ...parseRpcFlags(process.env.CHAIN_RPCS ? process.env.CHAIN_
 const rpcOf = (chain: number) => chainRpcs[chain] ?? defaultRpc(chain) ?? (() => { throw new Error(`no RPC for chain ${chain}: set CHAIN_RPCS`); })();
 const chainName = (chain: number) => CHAINS[chain]?.name ?? `chain ${chain}`;
 const circleUsdc = (chain: number) => CHAINS[chain]?.usdc ?? (() => { throw new Error(`no USDC known on chain ${chain}`); })();
-// How much of Circle's USDC each mainnet vault starts with (ADR-0020: 2 on every chain, since
-// a claim may be proven on any of them), as mainnet-state/build.ts deposits. Testnet mints a mock.
-const VAULT_USDC = 2_000_000n;
 if (MAINNET) CHAIN_IDS.forEach(circleUsdc);
 const nearChain = `near-${NETWORK}`;
 const OUT = process.env.BOUNTEE_INSTANCE ?? join(dir, "day3-instance.json");
