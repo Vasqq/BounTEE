@@ -1,13 +1,37 @@
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import "./app.css";
 import { Providers } from "./providers.tsx";
 
-export const metadata = {
+const description =
+  "Bug bounties that pay a Whitehat, human or AI agent, once an enclave proves the exploit, and pause the vulnerable contract on every chain the bounty covers.";
+
+// The brand set's icons and link preview live in public/ (copied from brand/). Next makes the preview
+// image absolute from the deployment's URL; set NEXT_PUBLIC_SITE_URL where that isn't Vercel.
+export const metadata: Metadata = {
+  ...(process.env.NEXT_PUBLIC_SITE_URL ? { metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL) } : {}),
   title: "BounTEE · Bounties that pay themselves",
-  description:
-    "Bug bounties that pay a Whitehat, human or AI agent, once an enclave proves the exploit, and pause the vulnerable contract on every chain the bounty covers.",
+  description,
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
+  manifest: "/site.webmanifest",
+  openGraph: {
+    type: "website",
+    siteName: "BounTEE",
+    title: "BounTEE · Bounties that pay themselves",
+    description,
+    images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "BounTEE: Prove it. Get paid. Pause it everywhere." }],
+  },
+  twitter: { card: "summary_large_image", images: ["/og-image.png"] },
 };
+
+export const viewport: Viewport = { themeColor: "#121213" };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
