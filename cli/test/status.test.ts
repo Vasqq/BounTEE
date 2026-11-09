@@ -81,7 +81,7 @@ function reset() {
 const newClaim = () => ({
   bounty: BOUNTY,
   whitehat: WHITEHAT,
-  block: { number: 8, hash: "0x" + "00".repeat(32) },
+  block: { chain_id: 84532, number: 8, hash: "0x" + "00".repeat(32) },
   header: "0x",
   proofs_sha256: "0x" + "00".repeat(32),
   submitted_at_ns: "1793850608584544984",

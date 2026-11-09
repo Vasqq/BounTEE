@@ -19,7 +19,7 @@ import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { parseReplay, parseRules, toJson, type Exploit, type Rules, type Verdict } from "@bountee/formats";
+import { parseReplay, parseRules, toJson, type BlockRef, type Exploit, type Rules, type Verdict } from "@bountee/formats";
 import { parseBountyId } from "./bounties.ts";
 import { proofRpcs } from "./chains.ts";
 import type { Near } from "./near.ts";
@@ -45,7 +45,7 @@ export interface TestOptions {
 
 export interface TestResult {
   verdict: Verdict;
-  block: { number: number; hash: string };
+  block: BlockRef;
   attacker: string;
   rpc: string;
   transactions: number;
@@ -120,21 +120,31 @@ function freshAccount(root: string): { key: string; address: string } {
 
 // ---- Steps ---------------------------------------------------------------------------------------------
 
-async function pickRpc(rules: Rules, o: TestOptions): Promise<{ urls: string[]; block: number }> {
-  const urls = o.rpc ? [o.rpc] : proofRpcs(rules.proof_chain);
-  if (urls.length === 0) throw new Error(`no public RPC known for chain ${rules.proof_chain}: pass --rpc`);
+/**
+ * The chain a claim is proven on: the first covered chain, until `--chain` lets the Whitehat
+ * name any covered chain (D26, #64). The claim's block carries it (D1).
+ */
+export function provingChain(rules: Rules): number {
+  const first = rules.covered_contracts[0];
+  if (!first) throw new Error("the bounty covers no contract, so no chain to prove a claim on");
+  return first.chain_id;
+}
+
+async function pickRpc(chainId: number, o: TestOptions): Promise<{ urls: string[]; block: number }> {
+  const urls = o.rpc ? [o.rpc] : proofRpcs(chainId);
+  if (urls.length === 0) throw new Error(`no public RPC known for chain ${chainId}: pass --rpc`);
   const errors: string[] = [];
   for (const [i, url] of urls.entries()) {
     try {
       const chain = Number(BigInt(await rpc<string>(url, "eth_chainId", [])));
-      if (chain !== rules.proof_chain) throw new Error(`serves chain ${chain}, not ${rules.proof_chain}`);
+      if (chain !== chainId) throw new Error(`serves chain ${chain}, not ${chainId}`);
       const head = Number(BigInt(await rpc<string>(url, "eth_blockNumber", [])));
       return { urls: urls.slice(i), block: o.block ?? head - BLOCKS_BEHIND };
     } catch (e) {
       errors.push(`${url}: ${(e as Error).message}`);
     }
   }
-  throw new Error(`no RPC answered for chain ${rules.proof_chain}:\n${errors.join("\n")}`);
+  throw new Error(`no RPC answered for chain ${chainId}:\n${errors.join("\n")}`);
 }
 
 /** Dry-run the script as `attacker` on a fork at `block` and read back its broadcast as an Exploit (D3). */
@@ -187,18 +197,20 @@ async function scriptToExploit(o: TestOptions, rules: Rules, forkUrl: string, bl
 export async function testCommand(o: TestOptions): Promise<TestResult> {
   const rules = await loadRules(o);
   const wasm = judgeWasm(o);
-  const { urls, block } = await pickRpc(rules, o);
+  const chainId = provingChain(rules);
+  const { urls, block } = await pickRpc(chainId, o);
   const { exploit, attacker } = await scriptToExploit(o, rules, urls[0]!, block);
 
-  // Prove up front what any replay reads: the senders, covered contracts and listed tokens.
+  // Prove up front what any replay reads: the senders, and the covered contracts and listed
+  // tokens on the claim's chain (R3.8).
   const accounts = [
-    ...rules.covered_contracts.filter((c) => c.chain_id === rules.proof_chain).map((c) => c.address),
-    ...rules.listed_tokens.map((t) => t.token).filter((t) => t !== "native"),
+    ...rules.covered_contracts.filter((c) => c.chain_id === chainId).map((c) => c.address),
+    ...rules.listed_tokens.filter((t) => t.chain_id === chainId && t.token !== "native").map((t) => t.token),
   ];
   const errors: string[] = [];
   for (const url of urls) {
     try {
-      const { replay, verdict, stderr } = await collectReplay({ rpc: url, block, rules, exploit, wasm, accounts });
+      const { replay, verdict, stderr } = await collectReplay({ rpc: url, chain: chainId, block, rules, exploit, wasm, accounts });
       const diagnostics = stderr.split("\n").map((l) => l.trim()).filter(Boolean);
       if (!verdict) throw new Error(`the judge gave no verdict:\n${diagnostics.join("\n")}`);
       const job = `${toJson({ replay })}\n`;
@@ -228,7 +240,7 @@ export async function testCommand(o: TestOptions): Promise<TestResult> {
 
 export interface ReplayResult {
   verdict: Verdict;
-  block: { number: number; hash: string };
+  block: BlockRef;
   job: string;
   /** The compiled judge that gave the verdict, and whether it is the very build the bounty pins (the one the enclave runs). */
   judge: { wasm: string; sha256: string; bounty_build: string; same_as_bounty: boolean };

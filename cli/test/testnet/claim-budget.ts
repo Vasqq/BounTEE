@@ -107,7 +107,8 @@ export async function budgetClaims(url: string, fees: any, plans: ClaimPlan[]): 
   const block = Number(BigInt(await rpc<string>(url, "eth_blockNumber", [])));
   const { hash, header } = await fetchHeader(url, block);
   const headerBytes = header.length;
-  const blockJsonBytes = JSON.stringify({ number: block, hash }).length;
+  const chainId = Number(BigInt(await rpc<string>(url, "eth_chainId", [])));
+  const blockJsonBytes = JSON.stringify({ chain_id: chainId, number: block, hash }).length;
   const out: ClaimBudget[] = [];
   for (const plan of plans) {
     const input = claimInputBytes(await proofsBytes(url, block, plan.reads), headerBytes, blockJsonBytes);

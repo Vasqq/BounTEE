@@ -17,8 +17,9 @@
 //    for (R7.6): the gas its signed pause may burn at its fee limit (200,000 gas at 1 gwei =
 //    0.0002 ETH), plus Base's L1 data fee allowance (0.00001 ETH); the formats'
 //    `PAUSE_GAS_PER_PAUSE`.
-// 4. Posts the bounty with `bountee post` (#17), covering every chain's vault, the first
-//    chain as its proof chain (D1); it goes live once the enclave's posting check passes.
+// 4. Posts the bounty with `bountee post` (#17), covering every chain's vault and listing each
+//    chain's USDC at price 1 and its native coin at 0 (ADR-0020): a claim may be proven on any
+//    of them (D1). It goes live once the enclave's posting check passes.
 //
 // The deployer's key never goes on forge's or cast's command line (where a failed command's
 // error would print it): they read it from a throwaway encrypted keystore (evm-key.ts), and
@@ -35,8 +36,8 @@
 // default 1, ADR-0018), WHITEHAT and CLAIMS (the Whitehat and how many claims the run files,
 // for the preflight; default 2, ADR-0018's cheat and win), DEPLOYER_ENV (default
 // ~/.bountee-testnet/base-sepolia-deployer.env, ~/.bountee-mainnet/deployer.env; the same key
-// deploys on every chain), CHAINS (comma-separated chain IDs, the proof chain first; default
-// 84532 on testnet, 8453,42161 on mainnet), RPC (the proof chain's RPC), CHAIN_RPCS
+// deploys on every chain), CHAINS (comma-separated chain IDs, the run's claims proven on the first; default
+// 84532 on testnet, 8453,42161 on mainnet), RPC (the first chain's RPC), CHAIN_RPCS
 // (<chain id>=<url>,... for any chain; every chain's default is in cli/src/chains.ts),
 // NEAR_RPC, EXPLOIT_PUBLIC_KEY (the rules' exploit key, x25519:<base58>, such as the one
 // `bountee open-exploit --public-key` derives from the Protocol's wallet; default: a new key,
@@ -151,16 +152,19 @@ const eth = (wei: bigint) => `${(Number(wei) / 1e18).toFixed(6)} ETH`;
 
 // ---- 0. Preflight --------------------------------------------------------------------------------
 
-/** The bounty's rules, covering `vaults`: built for the preflight's sizing before the vaults exist, and for the posting after. */
-function bountyRules(config: any, vaults: { chain_id: number; address: string }[], evmUsdc: string, exploitPublicKey: string) {
+/**
+ * The bounty's rules, covering `vaults` and listing each chain's USDC (`usdcs`) at price 1 and its
+ * native coin at 0 (ADR-0020): built for the preflight's sizing before the vaults exist, and for
+ * the posting after.
+ */
+function bountyRules(config: any, vaults: { chain_id: number; address: string }[], usdcs: { chain_id: number; usdc: string }[], exploitPublicKey: string) {
   return {
     covered_contracts: vaults,
-    proof_chain: CHAIN,
     recency_limit_secs: 300,
-    listed_tokens: [
-      { token: evmUsdc, price: "1" },
-      { token: "native", price: "0" },
-    ],
+    listed_tokens: usdcs.flatMap(({ chain_id, usdc }) => [
+      { chain_id, token: usdc, price: "1" },
+      { chain_id, token: "native", price: "0" },
+    ]),
     seed: config.seed,
     bounty_amount: BOUNTY_AMOUNT,
     minimum_theft: MINIMUM_THEFT,
@@ -251,7 +255,7 @@ const sizingRules = parseRules(
   bountyRules(
     await near.view(CONTRACT, "config"),
     CHAIN_IDS.map((chain_id) => ({ chain_id, address: `0x${"0".repeat(40)}` })),
-    MAINNET ? circleUsdc(CHAIN) : `0x${"0".repeat(40)}`,
+    CHAIN_IDS.map((chain_id) => ({ chain_id, usdc: MAINNET ? circleUsdc(chain_id) : `0x${"0".repeat(40)}` })),
     "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
   ),
 );
@@ -349,7 +353,12 @@ function newExploitKey(): string {
   writeFileSync(join(dir, `${NAME}-exploit-key.pem`), x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
   return `x25519:${base58.encode(pub)}`;
 }
-const rules = bountyRules(config, chains.map((c) => ({ chain_id: c.chain_id, address: c.vault })), proof.evm_usdc, exploitPublicKey);
+const rules = bountyRules(
+  config,
+  chains.map((c) => ({ chain_id: c.chain_id, address: c.vault })),
+  chains.map((c) => ({ chain_id: c.chain_id, usdc: c.evm_usdc })),
+  exploitPublicKey,
+);
 const rulesFile = join(dir, `${NAME}-rules.json`);
 writeFileSync(rulesFile, `${JSON.stringify(rules, null, 2)}\n`, { mode: 0o600 });
 const posted = spawnSync(

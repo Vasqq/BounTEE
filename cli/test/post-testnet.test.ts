@@ -75,8 +75,7 @@ describe.skipIf(!RUN)("bountee post on testnet (#17)", () => {
     const file = join(home, ".bountee-testnet", `${name}-rules.json`);
     const rules = {
       covered_contracts: [{ chain_id: 84532, address: vault }],
-      proof_chain: 84532,
-      listed_tokens: [{ token: "native", price: "1" }],
+      listed_tokens: [{ chain_id: 84532, token: "native", price: "1" }],
       bounty_amount: "1000000",
       minimum_theft: "1000000000",
       end_date_ns: String(BigInt(Date.now() + 30 * 86_400_000) * 1_000_000n),

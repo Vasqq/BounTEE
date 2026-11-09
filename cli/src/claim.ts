@@ -45,7 +45,7 @@
 import { readFileSync } from "node:fs";
 import { actions } from "near-api-js";
 import { BARE_FLAGS } from "./usage.ts";
-import { parseBlockRef, parseExploit, parseAccountProof, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
+import { parseBlockRef, parseExploit, parseAccountProof, type BlockRef, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
 import { parseBountyId } from "./bounties.ts";
 import { parseRpcFlags } from "./broadcast.ts";
 import { checkClaimNear, claimCost, claimInputBytes, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
@@ -113,7 +113,7 @@ export interface ClaimResult {
   /** The verdict `bountee test` gave these exact inputs (D2); null when claiming from --exploit/--evidence or an unre-run --job. */
   local_verdict?: Verdict | null;
   saved?: string;
-  block?: { number: number; hash: string };
+  block?: BlockRef;
   block_age_secs?: number;
   topped_up_near?: string;
   claim_id?: number;

@@ -50,6 +50,8 @@ test("D19 R2.9: bountee test on the demo exploit returns PAYS offline", () => {
   const out = JSON.parse(res.stdout);
   expect(out.verdict).toStrictEqual({ outcome: "PAYS", reason: "minimum_theft_reached" });
   expect(out.block).toStrictEqual({
+    // D1: the demo exploit is proven on Base Sepolia, which its block names.
+    chain_id: 84532,
     number: 54643662,
     hash: JSON.parse(readFileSync(EXPLOIT, "utf8")).replay.block.hash,
   });

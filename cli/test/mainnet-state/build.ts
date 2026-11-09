@@ -289,13 +289,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       loaded.proc.kill();
     }
   }
-  // The demo bounty's mainnet rules (ADR-0018), for the posting check and the claims.
-  const base = chains.find((c) => c.chain_id === 8453)!;
+  // The demo bounty's mainnet rules (ADR-0018, ADR-0020), for the posting check and the
+  // claims: each covered chain lists its own USDC at price 1 and its native coin at 0.
   const rules = {
     covered_contracts: chains.map((c) => ({ chain_id: c.chain_id, address: c.vault })),
-    proof_chain: 8453,
     recency_limit_secs: 300,
-    listed_tokens: [{ token: base.usdc, price: "1" }, { token: "native", price: "0" }],
+    listed_tokens: chains.flatMap((c) => [
+      { chain_id: c.chain_id, token: c.usdc, price: "1" },
+      { chain_id: c.chain_id, token: "native", price: "0" },
+    ]),
     seed: { native: SEED_NATIVE.toString(), tokens: [] },
     bounty_amount: "10000000",
     minimum_theft: "1000000",

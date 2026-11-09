@@ -1,5 +1,5 @@
-// Seam T, ticket #20: the second chain. A bounty covers the demo vault on Base Sepolia (its
-// proof chain) and on Arbitrum Sepolia; one winning claim pauses both. Driven through the
+// Seam T, ticket #20: the second chain. A bounty covers the demo vault on Base Sepolia (where
+// the claim is proven) and on Arbitrum Sepolia; one winning claim pauses both. Driven through the
 // committed scripts and the `bountee` command line; chain state read back with `cast` and
 // NEAR RPC views.
 //
@@ -92,7 +92,8 @@ describe.runIf(RUN)("#20: one winning claim pauses the vault on Base Sepolia and
     expect(instance.contract).toBe(contract);
     record("contract", contract);
     record("instance", { bounty: instance.bounty, pause_role: instance.pause_role, post_tx: instance.post_tx, chains: instance.chains });
-    expect(instance.rules.proof_chain).toBe(BASE);
+    // ADR-0020: each covered chain lists its own USDC (and native coin at 0); no proof chain.
+    expect(instance.rules.listed_tokens.map((t: any) => t.chain_id)).toStrictEqual([BASE, BASE, ARBITRUM, ARBITRUM]);
     expect(instance.rules.covered_contracts.map((c: any) => c.chain_id)).toStrictEqual([BASE, ARBITRUM]);
     const bounty = await near.view(contract, "bounty", { id: { protocol: instance.protocol, name: instance.name } });
     // Live only on a passing posting check, which read Arbitrum Sepolia through the judge's

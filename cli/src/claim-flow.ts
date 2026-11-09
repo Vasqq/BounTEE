@@ -55,7 +55,7 @@ export async function prepareClaim(o: { job?: string; test?: TestOptions; rpc?: 
   const usable = (age: number) => age + SUBMIT_MARGIN_SECS < RECENCY_LIMIT_SECS;
   if (o.job) {
     const replay = parseReplay(JSON.parse(readFileSync(o.job, "utf8")).replay);
-    const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.rules.proof_chain, replay.block.number, o.rpc));
+    const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.block.chain_id, replay.block.number, o.rpc));
     if (usable(age) || !o.test) {
       if (!usable(age)) throw new Error(`${o.job} is ${age} s old: re-run \`bountee test\` (claims must be under ${RECENCY_LIMIT_SECS} s)`);
       return { replay, local: null, saved: o.job, block_age_secs: age, reran: false };
@@ -64,7 +64,7 @@ export async function prepareClaim(o: { job?: string; test?: TestOptions; rpc?: 
   if (!o.test) throw new Error("claim needs a Foundry script or a saved job (--job)");
   const result = await testCommand(o.test);
   const replay = parseReplay(JSON.parse(readFileSync(result.saved, "utf8")).replay);
-  const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.rules.proof_chain, replay.block.number, result.rpc));
+  const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.block.chain_id, replay.block.number, result.rpc));
   if (!usable(age)) throw new Error(`the test took too long: its block is already ${age} s old`);
   return { replay, local: result.verdict, saved: result.saved, block_age_secs: age, reran: o.job !== undefined, test: result };
 }
