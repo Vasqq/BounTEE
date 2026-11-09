@@ -48,7 +48,7 @@ import { BARE_FLAGS } from "./usage.ts";
 import { parseBlockRef, parseExploit, parseAccountProof, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
 import { parseBountyId } from "./bounties.ts";
 import { parseRpcFlags } from "./broadcast.ts";
-import { claimCost, claimInputBytes, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
+import { checkClaimNear, claimCost, claimInputBytes, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
 import { proofsMatchingClaim, type ProofsSource } from "./claim-proofs.ts";
 import { KEYSTORE_API, NEAR_RPC, type Network } from "./endpoints.ts";
 import { formatNear, Near, parseNetwork } from "./near.ts";
@@ -67,7 +67,7 @@ import {
 } from "./status.ts";
 
 /** `submit_claim` needs at least 200 Tgas; the rest goes to storing the secret, the job and, on PAYS, signing the pauses. */
-const CLAIM_GAS = 300_000_000_000_000n;
+export const CLAIM_GAS = 300_000_000_000_000n;
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -188,12 +188,14 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
   const proofsJson = JSON.stringify(proofs);
   const fees = await near.view(contract, "fees");
   const cost = claimCost(fees, claimInputBytes(proofsJson.length, header.length, JSON.stringify(block).length), sealed.length);
+  const submitArgs = { bounty, block, header, proofs: proofsJson, sealed_exploit: sealed };
+  await checkClaimNear(near, contract, whitehat, cost, { method: "submit_claim", gas: CLAIM_GAS, deposit: 0n, argsBytes: JSON.stringify(submitArgs).length });
   const added = await ensureClaimBalance(near, contract, whitehat, cost);
   if (added > 0n) out.topped_up_near = formatNear(added);
 
   const outcome = await near.account(whitehat).signAndSendTransaction({
     receiverId: contract,
-    actions: [actions.functionCall("submit_claim", { bounty, block, header, proofs: proofsJson, sealed_exploit: sealed }, CLAIM_GAS, 0n)],
+    actions: [actions.functionCall("submit_claim", submitArgs, CLAIM_GAS, 0n)],
     waitUntil: "EXECUTED_OPTIMISTIC",
     throwOnFailure: false,
   });
@@ -234,12 +236,14 @@ async function retryClaim(args: string[], c: Context & { given?: BountyId }, onS
   const fees = await c.near.view(c.contract, "fees");
   // The new job's input is the claim's own; no secret is stored again.
   const cost = claimCost(fees, claimInputBytes(proofs.length, filed.header.length, JSON.stringify(filed.block).length), 0);
+  const retryArgs = { claim_id: claimId, proofs };
+  await checkClaimNear(c.near, c.contract, c.whitehat, cost, { method: "retry_claim", gas: CLAIM_GAS, deposit: 0n, argsBytes: JSON.stringify(retryArgs).length });
   const added = await ensureClaimBalance(c.near, c.contract, c.whitehat, cost);
   if (added > 0n) out.topped_up_near = formatNear(added);
 
   const outcome = await c.near.account(c.whitehat).signAndSendTransaction({
     receiverId: c.contract,
-    actions: [actions.functionCall("retry_claim", { claim_id: claimId, proofs }, CLAIM_GAS, 0n)],
+    actions: [actions.functionCall("retry_claim", retryArgs, CLAIM_GAS, 0n)],
     waitUntil: "EXECUTED_OPTIMISTIC",
     throwOnFailure: false,
   });

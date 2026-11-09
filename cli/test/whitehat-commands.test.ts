@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { base58 } from "@scure/base";
 import { decodeSignedTransaction, KeyPair } from "near-api-js";
 import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import { NEAR_GAS_PRICE, NEAR_PROTOCOL_CONFIG } from "./testnet/stand-ins.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const judgeFixtures = new URL("../../judge/tests/fixtures/", import.meta.url);
@@ -69,6 +70,8 @@ let world: {
   permission: unknown;
   /** Keys added by the tool, by public key. */
   added: Record<string, unknown>;
+  /** The Whitehat account's NEAR (its storage stake is 1 byte). */
+  near: bigint;
   balance: bigint;
   verified: boolean;
   /** The prepaid verification attempts left on the chain (of three). */
@@ -107,6 +110,7 @@ function reset() {
     },
     permission: "FullAccess",
     added: {},
+    near: 10n * YOCTO,
     balance: 3n * YOCTO,
     verified: false,
     prepaidLeft: 3,
@@ -222,7 +226,11 @@ const server = createServer(async (req, res) => {
     const permission = p.public_key === signerKey.getPublicKey().toString() ? world.permission : world.added[p.public_key];
     if (permission) return ok({ nonce: 1, permission, block_height: 1, block_hash: "11111111111111111111111111111111" });
   } else if (call.method === "query" && p.request_type === "view_account") {
-    return ok({ amount: String(10n * YOCTO), locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 1, block_height: 1, block_hash: "11111111111111111111111111111111" });
+    return ok({ amount: String(world.near), locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 1, block_height: 1, block_hash: "11111111111111111111111111111111" });
+  } else if (call.method === "EXPERIMENTAL_protocol_config") {
+    return ok(NEAR_PROTOCOL_CONFIG);
+  } else if (call.method === "gas_price") {
+    return ok(NEAR_GAS_PRICE);
   } else if (call.method === "block") {
     return ok({ header: { hash: "11111111111111111111111111111111", height: 1, timestamp: 0 } });
   } else if (call.method === "send_tx" || call.method === "broadcast_tx_commit") {
@@ -398,6 +406,26 @@ test("R2.6: claim --retry refuses, sending nothing, proofs other than the claim'
   world.claim.whitehat = "bob.testnet";
   const theirs = await bountee(RETRY());
   expect(JSON.parse(theirs.stderr.split("\n")[0]!).error).toBe("claim 3 was filed by bob.testnet: only its Whitehat may retry it");
+  expect(sent).toHaveLength(0);
+}, 60_000);
+
+/**
+ * R11.1 R14.1, #57: NEAR takes a call's attached gas up front at its 1e9 yoctoNEAR minimum price,
+ * so `retry_claim`'s 300 Tgas wants about 0.3 NEAR in hand, and a claim key's allowance pays it.
+ * The tool checks both before anything is sent, and names what to add.
+ */
+test("R11.1 R14.1: claim --retry refuses, sending nothing, when the Whitehat can't hold the call's gas or a claim key's allowance can't cover it", async () => {
+  world.permission = CLAIM_KEY;
+  world.near = (YOCTO * 3n) / 10n; // 0.3 NEAR, just under 300 Tgas at 1e9 plus the call's receipt costs
+  const poor = await bountee(RETRY());
+  expect(poor.code).toBe(1);
+  expect(JSON.parse(poor.stderr.split("\n")[0]!).error).toMatch(/^alice\.testnet holds 0\.29\d* NEAR free of its storage stake and this claim needs 0\.30\d+ in hand .*: add 0\.00\d+ NEAR \(nothing was spent\)$/);
+
+  world.near = 10n * YOCTO;
+  world.permission = { FunctionCall: { ...CLAIM_KEY.FunctionCall, allowance: String(YOCTO / 4n) } };
+  const spent = await bountee(RETRY());
+  expect(spent.code).toBe(1);
+  expect(JSON.parse(spent.stderr.split("\n")[0]!).error).toMatch(/^the claim key's allowance holds 0\.25 NEAR and retry_claim takes 0\.30\d+ of it up front: add a claim key with a larger --allowance \(nothing was spent\)$/);
   expect(sent).toHaveLength(0);
 }, 60_000);
 
