@@ -284,9 +284,14 @@ impl Sandbox {
     }
 
     fn claim_args(&self, name: &str) -> Value {
+        self.claim_args_on(name, 84532)
+    }
+
+    /// A claim's arguments, its block on `chain`: the claim's proof chain (D1).
+    fn claim_args_on(&self, name: &str, chain: u64) -> Value {
         json!({
             "bounty": { "protocol": self.protocol.id(), "name": name },
-            "block": { "chain_id": 84532, "number": 1234, "hash": format!("0x{}", "ab".repeat(32)) },
+            "block": { "chain_id": chain, "number": 1234, "hash": format!("0x{}", "ab".repeat(32)) },
             "header": "0xf90200",
             "proofs": PROOFS,
             "sealed_exploit": sealed(),
@@ -295,9 +300,18 @@ impl Sandbox {
 
     /// File a claim and wait for every receipt (the job's answer must already be scripted).
     async fn submit_claim(&self, by: &Account, name: &str) -> anyhow::Result<ExecutionFinalResult> {
+        self.submit_claim_on(by, name, 84532).await
+    }
+
+    async fn submit_claim_on(
+        &self,
+        by: &Account,
+        name: &str,
+        chain: u64,
+    ) -> anyhow::Result<ExecutionFinalResult> {
         Ok(by
             .call(self.contract.id(), "submit_claim")
-            .args_json(self.claim_args(name))
+            .args_json(self.claim_args_on(name, chain))
             .gas(tgas(300))
             .transact()
             .await?)
@@ -337,6 +351,14 @@ async fn now_ns(s: &Sandbox) -> anyhow::Result<u64> {
 
 async fn valid_rules(s: &Sandbox) -> anyhow::Result<Value> {
     Ok(rules(s, 30 * DAY_NS, now_ns(s).await?))
+}
+
+/// List a token on Arbitrum Sepolia too, as a posting covering a contract there must (R1.4).
+fn list_on_arbitrum_sepolia(rules: &mut Value) {
+    rules["listed_tokens"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "chain_id": 421614, "token": "native", "price": "1" }));
 }
 
 /// R1.1, R1.2: a posting records every rule, including the seed and judge build hash set
@@ -503,6 +525,74 @@ async fn missing_or_invalid_rules_are_refused() -> anyhow::Result<()> {
     }
     assert_eq!(s.usdc_balance(s.protocol.id()).await?, before);
     assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+    Ok(())
+}
+
+/// R1.4, R1.1: listed tokens are checked per chain. A posting is refused, its USDC refunded,
+/// when a listed token is on a chain no covered contract is on, when a covered chain has no
+/// listed token, or when a token is listed twice on one chain. The same token on two chains
+/// (native, and one USDC address) is accepted and read back with its chains unchanged.
+#[tokio::test]
+async fn r1_4_listed_tokens_are_checked_per_chain() -> anyhow::Result<()> {
+    let s = Sandbox::start().await?;
+    let now = now_ns(&s).await?;
+    let before = s.usdc_balance(s.protocol.id()).await?;
+    let usdc = "0x00000000000000000000000000000000000000bb";
+    let two_chains = json!([
+        { "chain_id": 84532, "address": "0x00000000000000000000000000000000000000aa" },
+        { "chain_id": 421614, "address": "0x00000000000000000000000000000000000000dd" },
+    ]);
+    let cases: Vec<(&str, Value, Value, &str)> = vec![
+        (
+            "token-on-uncovered-chain",
+            rules(&s, 30 * DAY_NS, now)["covered_contracts"].clone(),
+            json!([
+                { "chain_id": 84532, "token": usdc, "price": "1" },
+                { "chain_id": 421614, "token": usdc, "price": "1" },
+            ]),
+            "a listed token is on a chain no covered contract is on",
+        ),
+        (
+            "chain-without-token",
+            two_chains.clone(),
+            json!([{ "chain_id": 84532, "token": usdc, "price": "1" }]),
+            "a covered chain has no listed token",
+        ),
+        (
+            "twice-on-one-chain",
+            two_chains.clone(),
+            json!([
+                { "chain_id": 84532, "token": usdc, "price": "1" },
+                { "chain_id": 421614, "token": "native", "price": "0" },
+                { "chain_id": 84532, "token": usdc, "price": "2" },
+            ]),
+            "a listed token is named twice on one chain",
+        ),
+    ];
+    for (name, covered, listed, expected) in cases {
+        let mut rules = rules(&s, 30 * DAY_NS, now);
+        rules["covered_contracts"] = covered;
+        rules["listed_tokens"] = listed;
+        let r = s.post(name, &rules).await?;
+        assert!(failure_text(&r).contains(expected), "{name}: {r:?}");
+        assert_eq!(s.bounty(name).await?, Value::Null, "{name}");
+    }
+    assert_eq!(s.usdc_balance(s.protocol.id()).await?, before);
+    assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
+
+    // The same native coin and the same USDC address, each listed once on each chain.
+    let mut rules = rules(&s, 30 * DAY_NS, now);
+    rules["covered_contracts"] = two_chains;
+    rules["listed_tokens"] = json!([
+        { "chain_id": 84532, "token": usdc, "price": "1" },
+        { "chain_id": 84532, "token": "native", "price": "0" },
+        { "chain_id": 421614, "token": usdc, "price": "1" },
+        { "chain_id": 421614, "token": "native", "price": "0" },
+    ]);
+    s.post("usdc-on-both", &rules).await?.into_result()?;
+    let bounty = s.bounty("usdc-on-both").await?;
+    assert_eq!(bounty["state"], "live");
+    assert_eq!(bounty["rules"], rules);
     Ok(())
 }
 
@@ -731,6 +821,36 @@ async fn a_claim_draws_from_the_claim_balance_and_requests_its_job_at_once() -> 
         "the claim's own storage is drawn too"
     );
     assert!(drawn < job_deposit + secret_deposit + NearToken::from_millinear(10).as_yoctonear());
+    Ok(())
+}
+
+/// D1: a claim whose block is on a chain the bounty covers no contract on is refused before
+/// anything is drawn from the claim balance: no claim is recorded, no secret is stored and no
+/// job is requested, so the same sealed exploit can still be filed on a covered chain.
+#[tokio::test]
+async fn d1_a_claim_on_an_uncovered_chain_is_refused_and_draws_nothing() -> anyhow::Result<()> {
+    let s = live_bounty("vault").await?;
+    let balance = s.claim_balance(s.whitehat.id()).await?;
+    let jobs_before = s.requests().await?.len();
+
+    let r = s.submit_claim_on(&s.whitehat, "vault", 421614).await?;
+    assert!(
+        failure_text(&r).contains("a chain this bounty covers no contract on"),
+        "{r:?}"
+    );
+    assert_eq!(s.claim_balance(s.whitehat.id()).await?, balance);
+    assert_eq!(s.requests().await?.len(), jobs_before, "no job");
+    assert_eq!(s.claim(0).await?, Value::Null, "no claim recorded");
+    let rows: Vec<(String, u32)> = s.test_outlayer.view("secret_rows").await?.json()?;
+    assert_eq!(rows, vec![], "no secret stored");
+
+    s.script(json!({ "output": ZERO })).await?;
+    let id: u64 = s
+        .submit_claim(&s.whitehat, "vault")
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(s.claim(id).await?["state"], "judged");
     Ok(())
 }
 
@@ -1265,11 +1385,16 @@ impl Sandbox {
 
     /// A claim that scores PAYS, submitted without waiting for its receipts.
     async fn submit_pays(&self, name: &str) -> anyhow::Result<Pending> {
+        self.submit_pays_on(name, 84532).await
+    }
+
+    /// A claim proven on `chain` that scores PAYS, submitted without waiting for its receipts.
+    async fn submit_pays_on(&self, name: &str, chain: u64) -> anyhow::Result<Pending> {
         self.script(json!({ "output": PAYS })).await?;
         Ok(self
             .whitehat
             .call(self.contract.id(), "submit_claim")
-            .args_json(self.claim_args(name))
+            .args_json(self.claim_args_on(name, chain))
             .gas(tgas(300))
             .transact_async()
             .await?)
@@ -1278,7 +1403,12 @@ impl Sandbox {
     /// A claim by the Whitehat that scores PAYS, its pauses signed by the MPC stand-in with
     /// the bounty's own key, and paid. Returns the claim's ID.
     async fn pay_claim(&self, name: &str) -> anyhow::Result<u64> {
-        let id = self.judge_pays(name).await?;
+        self.pay_claim_on(name, 84532).await
+    }
+
+    /// As `pay_claim`, the claim proven on `chain`.
+    async fn pay_claim_on(&self, name: &str, chain: u64) -> anyhow::Result<u64> {
+        let id = self.judge_pays_on(name, chain).await?;
         self.wait_for_bounty_state(name, "paid").await?;
         Ok(id)
     }
@@ -1286,12 +1416,17 @@ impl Sandbox {
     /// A claim by the Whitehat that scores PAYS, its pauses signed by the MPC stand-in with
     /// the bounty's own key; the payout is started. Returns the claim's ID.
     async fn judge_pays(&self, name: &str) -> anyhow::Result<u64> {
+        self.judge_pays_on(name, 84532).await
+    }
+
+    /// As `judge_pays`, the claim proven on `chain`.
+    async fn judge_pays_on(&self, name: &str, chain: u64) -> anyhow::Result<u64> {
         let before = self.sign_requests().await?.len();
         let covered = self.bounty(name).await?["rules"]["covered_contracts"]
             .as_array()
             .unwrap()
             .len();
-        let claim = self.submit_pays(name).await?;
+        let claim = self.submit_pays_on(name, chain).await?;
         let requests = self.wait_for_sign_requests(before + covered).await?;
         self.answer_from(&requests, before, &self.pause_key(name), false)
             .await?;
@@ -1341,6 +1476,7 @@ async fn pays_signs_every_pause_from_the_pause_role_address_and_then_pays() -> a
         { "chain_id": 84532, "address": "0x00000000000000000000000000000000000000cc" },
         { "chain_id": 421614, "address": "0x00000000000000000000000000000000000000aa" },
     ]);
+    list_on_arbitrum_sepolia(&mut rules);
     s.post("vault", &rules).await?.into_result()?;
     s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
     let role = pause_role_address(&s, "vault");
@@ -1400,12 +1536,13 @@ async fn pays_signs_every_pause_from_the_pause_role_address_and_then_pays() -> a
 }
 
 /// D1, R7.1: a bounty covering Base Sepolia and Arbitrum Sepolia, with a claim proven on
-/// Base. A claim is ONE judge job, carrying the rules and the claim's block with its chain
-/// (ADR-0020), with nothing asked of the other chain; its PAYS verdict signs a
-/// pause for the covered contract on each chain, each for its own chain ID with that
-/// chain's first nonce, before the payout.
+/// Arbitrum Sepolia, the second covered chain. A claim is ONE judge job, carrying the rules
+/// and the claim's block with its chain unchanged (ADR-0020), with nothing asked of the other
+/// chain, and the claim view shows that block; its PAYS verdict signs a pause for the
+/// covered contract on each chain, each for its own chain ID with that chain's first nonce,
+/// before the payout.
 #[tokio::test]
-async fn d1_a_two_chain_bounty_is_judged_once_on_its_proof_chain_and_pauses_both_chains(
+async fn d1_a_claim_proven_on_the_second_chain_is_judged_once_there_and_pauses_both_chains(
 ) -> anyhow::Result<()> {
     let s = Sandbox::start().await?;
     let mut rules = valid_rules(&s).await?;
@@ -1413,19 +1550,21 @@ async fn d1_a_two_chain_bounty_is_judged_once_on_its_proof_chain_and_pauses_both
         { "chain_id": 84532, "address": "0x00000000000000000000000000000000000000aa" },
         { "chain_id": 421614, "address": "0x00000000000000000000000000000000000000dd" },
     ]);
+    list_on_arbitrum_sepolia(&mut rules);
     s.post("vault", &rules).await?.into_result()?;
     s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
     let jobs_before = s.requests().await?.len();
 
-    let id = s.pay_claim("vault").await?;
+    let id = s.pay_claim_on("vault", 421614).await?;
 
     let jobs = s.requests().await?;
     assert_eq!(jobs.len(), jobs_before + 1, "one job for the claim");
     let input: Value = serde_json::from_str(jobs.last().unwrap()["input_data"].as_str().unwrap())?;
     let judged = &input["judge_claim"];
-    assert_eq!(judged["block"]["chain_id"], 84532);
-    assert_eq!(judged["rules"]["covered_contracts"], rules["covered_contracts"]);
-    assert_eq!(judged["block"], s.claim_args("vault")["block"]);
+    let block = json!({ "chain_id": 421614, "number": 1234, "hash": format!("0x{}", "ab".repeat(32)) });
+    assert_eq!(judged["block"], block);
+    assert_eq!(judged["rules"], rules);
+    assert_eq!(s.claim(id).await?["block"], block, "the claim view shows its chain");
 
     let bounty = s.bounty("vault").await?;
     assert_eq!(bounty["state"], "paid");
@@ -1943,6 +2082,7 @@ async fn paid_two_chain_bounty() -> anyhow::Result<Sandbox> {
         { "chain_id": 84532, "address": "0x00000000000000000000000000000000000000cc" },
         { "chain_id": 421614, "address": "0x00000000000000000000000000000000000000aa" },
     ]);
+    list_on_arbitrum_sepolia(&mut rules);
     s.post("vault", &rules).await?.into_result()?;
     s.top_up(&s.whitehat, NearToken::from_near(1)).await?;
     s.pay_claim("vault").await?;

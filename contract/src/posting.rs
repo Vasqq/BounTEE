@@ -248,10 +248,28 @@ impl Contract {
                 "a covered contract is named twice"
             );
         }
+        // Listed tokens are checked per chain (ADR-0020): each is on a covered chain, each
+        // covered chain lists one (or a theft there could never score), and no token is
+        // listed twice on one chain, though the same token may be listed on two.
         for (i, t) in rules.listed_tokens.iter().enumerate() {
             require!(
-                !rules.listed_tokens[..i].iter().any(|u| u.token == t.token),
-                "a listed token is named twice"
+                rules
+                    .covered_contracts
+                    .iter()
+                    .any(|c| c.chain_id == t.chain_id),
+                "a listed token is on a chain no covered contract is on"
+            );
+            require!(
+                !rules.listed_tokens[..i]
+                    .iter()
+                    .any(|u| u.chain_id == t.chain_id && u.token == t.token),
+                "a listed token is named twice on one chain"
+            );
+        }
+        for c in &rules.covered_contracts {
+            require!(
+                rules.listed_tokens.iter().any(|t| t.chain_id == c.chain_id),
+                "a covered chain has no listed token"
             );
         }
     }
