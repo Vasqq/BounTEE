@@ -51,6 +51,7 @@ const status = await archive.rpc<any>("EXPERIMENTAL_tx_status", { tx_hash: txHas
 // `sealed_exploit` and OutLayer's `store_secrets`. Neither is read by verify, and nothing sealed,
 // even encrypted, goes in the repo: both are replaced here.
 const REDACTED = "redacted: the sealed exploit, as OutLayer ciphertext";
+const SEALED_FIELDS = ["sealed_exploit", "encrypted_secrets_base64"];
 const redact = (actions: any[] = []) => {
   for (const a of actions) {
     const call = a.FunctionCall;
@@ -61,8 +62,8 @@ const redact = (actions: any[] = []) => {
     } catch {
       continue; // not JSON arguments
     }
-    if (!["sealed_exploit", "encrypted_secrets_base64"].some((f) => f in args)) continue;
-    for (const field of ["sealed_exploit", "encrypted_secrets_base64"]) if (field in args) args[field] = REDACTED;
+    if (!SEALED_FIELDS.some((f) => f in args)) continue;
+    for (const field of SEALED_FIELDS) if (field in args) args[field] = REDACTED;
     call.args = Buffer.from(JSON.stringify(args)).toString("base64");
   }
 };

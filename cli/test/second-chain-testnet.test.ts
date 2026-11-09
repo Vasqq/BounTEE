@@ -8,7 +8,7 @@
 //   of the sealed exploit, and `bountee build` of that commit reproduces the code hash NEAR
 //   shows and the judge hash the contract pins (R15.2)
 //   -> fresh instance on both chains + `bountee post` (fresh-instance.ts, CHAINS=84532,421614):
-//      each chain's USDC listed; the enclave's posting check reads both chains (R12.5, R1.4)
+//      each chain's USDC listed; the enclave's posting check reads both chains (R12.5)
 //   -> `bountee claim HonestUser.s.sol --chain base-sepolia`: ZERO, nothing moves (R4.11)
 //   -> `bountee claim <sealed exploit> --chain arbitrum-sepolia`: the claim's block is on
 //      Arbitrum Sepolia, the enclave judges it there (D1, D29), PAYS, paid once (R3.10, as a
@@ -35,7 +35,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { Near, events } from "../src/near.ts";
@@ -76,11 +76,11 @@ function run(cmd: string, args: string[], env: Record<string, string> = {}, cwd?
     child.on("close", (code) => resolve({ code, stdout, stderr }));
   });
 }
-const bountee = (args: string[], env: Record<string, string> = {}) => run(process.execPath, [entry, ...args], env);
+const bountee = (args: string[], env: Record<string, string> = {}, cwd?: string) => run(process.execPath, [entry, ...args], env, cwd);
 /** `bountee` from an empty directory with an empty home: no keys and no saved claims (R15.1). */
 function keyless(args: string[]) {
   const empty = mkdtempSync(join(tmpdir(), "bountee-gate-keyless-"));
-  return run(process.execPath, [entry, ...args], { HOME: empty, BOUNTEE_CREDENTIALS_DIR: join(empty, "none") }, empty);
+  return bountee(args, { HOME: empty, BOUNTEE_CREDENTIALS_DIR: join(empty, "none") }, empty);
 }
 
 describe.runIf(RUN)("#67 gate: the cheat proven on Base Sepolia scores zero; the win proven on Arbitrum Sepolia pauses both chains", () => {
@@ -96,14 +96,20 @@ describe.runIf(RUN)("#67 gate: the cheat proven on Base Sepolia scores zero; the
   const id = () => ({ protocol: instance.protocol, name: instance.name });
   const ft = async (who: string) => BigInt(await near.view<string>(usdc, "ft_balance_of", { account_id: who }));
 
-  test("R15.2: the deployment's commit is pushed, holds no sealed file, and rebuilds both deployed hashes", async () => {
+  test("R15.2, R2.1: the keyless deployment's commit is pushed, holds no sealed file, and rebuilds both deployed hashes", async () => {
     const exploit = sealedExploit();
     const meta = await near.view<any>(contract, "contract_source_metadata");
     const rev = /rev=([0-9a-f]{40})/.exec(meta.build_info.source_code_snapshot)![1]!;
-    // Pushed: anyone can rebuild it. No sealed file: no blob in its tree is the sealed exploit.
+    // Pushed: anyone can rebuild it. No sealed file: no blob in its tree is the sealed exploit,
+    // and no file in it has the sealed exploit's name (an edited copy).
     expect(git("branch", "-r", "--contains", rev)).not.toBe("");
-    const sealedBlob = git("hash-object", exploit);
-    expect(git("ls-tree", "-r", rev).split("\n").map((l) => l.split(/\s+/)[2])).not.toContain(sealedBlob);
+    // ls-tree: "<mode> <type> <blob>\t<path>".
+    const tree = git("ls-tree", "-r", rev).split("\n").map((l) => {
+      const [head, path] = l.split("\t");
+      return { blob: head!.split(" ")[2], path: path! };
+    });
+    expect(tree.map((t) => t.blob)).not.toContain(git("hash-object", exploit));
+    expect(tree.map((t) => basename(t.path))).not.toContain(basename(exploit));
     const keys = await near.rpc<{ keys: unknown[] }>("query", { request_type: "view_access_key_list", finality: "final", account_id: contract });
     expect(keys.keys).toEqual([]); // keyless: the code can't change after this
 
@@ -119,7 +125,7 @@ describe.runIf(RUN)("#67 gate: the cheat proven on Base Sepolia scores zero; the
     expect(`0x${built.judge.sha256}`).toBe(config.judge_build_hash);
   }, 1_900_000);
 
-  test("R12.5, R1.4, D1: a bounty covering both chains, each chain's USDC listed, passes the enclave's posting check and goes live", async () => {
+  test("R12.5, D1: a bounty covering both chains, each chain's USDC listed, passes the enclave's posting check and goes live", async () => {
     sealedExploit();
     expect(whitehat, "set WHITEHAT").not.toBe("");
     if (process.env.INSTANCE) {
