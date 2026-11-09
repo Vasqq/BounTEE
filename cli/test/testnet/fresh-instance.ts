@@ -36,9 +36,9 @@
 // default 1, ADR-0018), WHITEHAT and CLAIMS (the Whitehat and how many claims the run files,
 // for the preflight; default 2, ADR-0018's cheat and win), DEPLOYER_ENV (default
 // ~/.bountee-testnet/base-sepolia-deployer.env, ~/.bountee-mainnet/deployer.env; the same key
-// deploys on every chain), CHAINS (comma-separated chain IDs, the run's claims proven on the first; default
-// 84532 on testnet, 8453,42161 on mainnet), RPC (the first chain's RPC), CHAIN_RPCS
-// (<chain id>=<url>,... for any chain; every chain's default is in cli/src/chains.ts),
+// deploys on every chain), CHAINS (comma-separated chain IDs, the run's claims proven on
+// the first; default 84532 on testnet, 8453,42161 on mainnet), RPC (the first chain's RPC),
+// CHAIN_RPCS (<chain id>=<url>,... for any chain; every chain's default is in cli/src/chains.ts),
 // NEAR_RPC, EXPLOIT_PUBLIC_KEY (the rules' exploit key, x25519:<base58>, such as the one
 // `bountee open-exploit --public-key` derives from the Protocol's wallet; default: a new key,
 // written to <dir>/<name>-exploit-key.pem), PREFLIGHT_ONLY=1 to stop after step 0.
@@ -264,8 +264,8 @@ needs.push(need(PROTOCOL, nearChain, "NEAR", (await near.freeNear(PROTOCOL)) ?? 
 needs.push(need(PROTOCOL, nearChain, `${MAINNET ? "" : "test "}USDC (${USDC})`, await ftBalance(PROTOCOL), BigInt(BOUNTY_AMOUNT), showUsdc));
 let claimBudgets: ClaimBudget[] = [];
 if (WHITEHAT) {
-  // Each claim's draw, from the very proofs it will carry on this network's proof chain
-  // (claim-budget.ts); the Whitehat holds the largest draw plus what the others keep.
+  // Each claim's draw, from the very proofs it will carry on the chain the run's claims are
+  // proven on (claim-budget.ts); the Whitehat holds the largest draw plus what the others keep.
   claimBudgets = await budgetClaims(proofRpc, fees, await claimPlans());
   // Plus one claim's gas in hand (#57): `submit_claim` attaches CLAIM_GAS, bought up front, and the
   // claims go one at a time, so the largest claim's call is the most ever held at once.

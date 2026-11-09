@@ -200,14 +200,20 @@ const SECOND_NS: u64 = 1_000_000_000;
 fn claim_job(delay_ns: i64) -> Value {
     let state = fixture("state.json");
     let submitted = (block_timestamp() * SECOND_NS) as i64 + delay_ns;
+    judge_claim(fixture("rules.json"), &state, submitted as u64)
+}
+
+/// The bounty contract's `judge_claim` job under `rules` for the claim recorded in `claim`
+/// (its block, header and proofs), submitted at `submitted_at_ns`.
+fn judge_claim(rules: Value, claim: &Value, submitted_at_ns: u64) -> Value {
     json!({ "judge_claim": {
-        "rules": fixture("rules.json"),
+        "rules": rules,
         "bounty": { "protocol": "protocol.testnet", "name": "demo-vault-1" },
         "whitehat": "whitehat.testnet",
-        "block": state["block"],
-        "header": state["header"],
-        "proofs_json": state["proofs"].to_string(),
-        "submitted_at_ns": submitted.to_string(),
+        "block": claim["block"],
+        "header": claim["header"],
+        "proofs_json": claim["proofs"].to_string(),
+        "submitted_at_ns": submitted_at_ns.to_string(),
     }})
 }
 
@@ -387,20 +393,11 @@ fn r2_8_d1_a_claim_proven_on_the_second_chain_is_confirmed_by_that_chains_rpcs()
         items.extend(rules[list].as_array().unwrap().iter().cloned());
         rules[list] = json!(items);
     }
-    let header = replay["header"].as_str().unwrap();
-    let submitted = (timestamp_of(header) + 10) * SECOND_NS;
-    let job = json!({ "judge_claim": {
-        "rules": rules,
-        "bounty": { "protocol": "protocol.testnet", "name": "demo-vault-1" },
-        "whitehat": "whitehat.testnet",
-        "block": replay["block"],
-        "header": header,
-        "proofs_json": replay["proofs"].to_string(),
-        "submitted_at_ns": submitted.to_string(),
-    }});
+    let submitted = (timestamp_of(replay["header"].as_str().unwrap()) + 10) * SECOND_NS;
+    let job = judge_claim(rules, &replay, submitted);
     assert_eq!(job["judge_claim"]["block"]["chain_id"], ARBITRUM_SEPOLIA);
-    let ours = || Answer::Hash(replay["block"]["hash"].as_str().unwrap().to_owned());
-    let arbitrum = rpcs([ours(), ours(), ours()]);
+    let arbitrum_block = || Answer::Hash(replay["block"]["hash"].as_str().unwrap().to_owned());
+    let arbitrum = rpcs([arbitrum_block(), arbitrum_block(), arbitrum_block()]);
     let base = rpcs([other(), other(), other()]);
     let any = rpcs([other(), other(), other()]);
     let out = run_per_chain(

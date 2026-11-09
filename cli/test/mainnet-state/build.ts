@@ -17,9 +17,10 @@
 //   3. Deploy and seed the vault with demo/script/Deploy.s.sol's own transactions, each sent with
 //      its EIP-2930 access list recorded first (eth_createAccessList: every account and slot the
 //      EVM touches, read or written).
-//   4. On Base, the proof chain, record the same for the two claims (the cheat, HonestUser.s.sol,
-//      buying through Uniswap V2; and the sealed exploit, SEALED_EXPLOIT) from a fresh account
-//      holding the bounty's native seed, then roll them back.
+//   4. On Base, the chain the claims are proven on, record the same for the two claims (the
+//      cheat, HonestUser.s.sol, buying through Uniswap V2; and the sealed exploit,
+//      SEALED_EXPLOIT) from a fresh account holding the bounty's native seed, then roll them
+//      back.
 //   5. Write every recorded account (code, balance, nonce) and slot back onto the fork with its
 //      current value, which puts it in the fork's own state; dump that.
 //   On each chain, before the claims, the drain bot's fork test runs against this vault.
