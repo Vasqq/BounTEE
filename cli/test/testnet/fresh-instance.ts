@@ -10,7 +10,7 @@
 // 1. Reads the new bounty's pause-role address from the bounty contract (`pause_role`), and
 //    checks it against the formats' own derivation (D25). One address serves every chain.
 // 2. On each chain, deploys a new PositionVault (demo/script/Deploy.s.sol, --broadcast),
-//    granting the pause role to that address, and seeds it by the deployer's own deposit:
+//    granting the pause role to that address, and funds it by the deployer's own deposit:
 //    a new MockUSDC minted to the deployer on testnet, Circle's USDC the deployer holds on
 //    mainnet, approved to the vault and deposited for shares (ADR-0019).
 // 3. On each chain, funds the pause-role address with the pause gas the posting check asks
@@ -101,10 +101,10 @@ const CHAIN = CHAIN_IDS[0]!;
 const chainRpcs = { ...parseRpcFlags(process.env.CHAIN_RPCS ? process.env.CHAIN_RPCS.split(",") : []), ...(process.env.RPC ? { [CHAIN]: process.env.RPC } : {}) };
 const rpcOf = (chain: number) => chainRpcs[chain] ?? defaultRpc(chain) ?? (() => { throw new Error(`no RPC for chain ${chain}: set CHAIN_RPCS`); })();
 const chainName = (chain: number) => CHAINS[chain]?.name ?? `chain ${chain}`;
-// How much of Circle's USDC each mainnet vault starts with (ADR-0020: 2 on every chain, since
-// a claim may be proven on any of them). Testnet mints a mock.
 const circleUsdc = (chain: number) => CHAINS[chain]?.usdc ?? (() => { throw new Error(`no USDC known on chain ${chain}`); })();
-const VAULT_SEED = 2_000_000n;
+// How much of Circle's USDC each mainnet vault starts with (ADR-0020: 2 on every chain, since
+// a claim may be proven on any of them), as mainnet-state/build.ts deposits. Testnet mints a mock.
+const VAULT_USDC = 2_000_000n;
 if (MAINNET) CHAIN_IDS.forEach(circleUsdc);
 const nearChain = `near-${NETWORK}`;
 const OUT = process.env.BOUNTEE_INSTANCE ?? join(dir, "day3-instance.json");
@@ -254,7 +254,7 @@ for (const chain of CHAIN_IDS) {
   needs.push(need(DEPLOYER, chainName(chain), "ETH", BigInt(cast("balance", DEPLOYER, "--rpc-url", rpc)), deployWei(rpc) + pauseGasWei, eth));
   if (MAINNET) {
     const have = BigInt(cast("call", circleUsdc(chain), "balanceOf(address)(uint256)", DEPLOYER, "--rpc-url", rpc).split(" ")[0]!);
-    needs.push(need(DEPLOYER, chainName(chain), `USDC (${circleUsdc(chain)})`, have, VAULT_SEED, showUsdc));
+    needs.push(need(DEPLOYER, chainName(chain), `USDC (${circleUsdc(chain)})`, have, VAULT_USDC, showUsdc));
   }
 }
 // The posting's NEAR in hand (#57): sized on rules of the same shape as the real ones, with
@@ -333,7 +333,7 @@ for (const chain of CHAIN_IDS) {
   const forge = foundry("forge", ["script", "script/Deploy.s.sol", "--rpc-url", rpc, "--broadcast", "--sender", DEPLOYER, "--slow"], {
     signs: true,
     cwd: demoDir,
-    env: { PAUSE_ROLE: role.address, ...(MAINNET ? { USDC: circleUsdc(chain), SEED_USDC: VAULT_SEED.toString() } : {}) },
+    env: { PAUSE_ROLE: role.address, ...(MAINNET ? { USDC: circleUsdc(chain), SEED_USDC: VAULT_USDC.toString() } : {}) },
   });
   const deployed = JSON.parse(forge.slice(forge.indexOf("DEMO_DEPLOY_JSON:") + "DEMO_DEPLOY_JSON:".length).trim().split("\n")[0]!);
   const vault = String(deployed.vault).toLowerCase();
