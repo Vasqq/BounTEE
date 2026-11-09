@@ -4,9 +4,9 @@ You are a coding agent working for a **Whitehat**: a security researcher who cla
 
 ## What BounTEE is
 
-A Protocol posts a **bounty** on a keyless NEAR contract (the **bounty contract**): USDC held on NEAR, plus rules fixed at posting: the **covered contracts** (chain and address), the **minimum theft** that counts as an exploit, the **bounty amount**, and the chains to pause.
+A Protocol posts a **bounty** on a keyless NEAR contract (the **bounty contract**): USDC held on NEAR, plus rules fixed at posting: the **covered contracts** (chain and address), the **listed tokens** (chain, token and price), the **minimum theft** that counts as an exploit, the **bounty amount**, and the chains to pause.
 
-A claim is a Foundry script that steals from the covered contracts. The `bountee` command-line tool runs it on a fork of the chain's recent state and judges it with the same judging program the enclave runs. If it steals at least the minimum theft, the verdict is **PAYS**. The tool then **seals** the exploit, so only the bounty contract's judging job can read it, and files the claim. The enclave judges it again. On PAYS, NEAR signs a **pause** for every covered contract, and the bounty pays the Whitehat's NEAR account in USDC.
+A claim is a Foundry script that steals from the covered contracts on one covered chain, its **proof chain**: any chain the bounty covers, which you name. The `bountee` command-line tool runs it on a fork of that chain's recent state and judges it with the same judging program the enclave runs. Only the covered contracts on that chain count as losing, and only the tokens listed on that chain count. If it steals at least the minimum theft, the verdict is **PAYS**. The tool then **seals** the exploit, so only the bounty contract's judging job can read it, and files the claim. The enclave judges it again. On PAYS, NEAR signs a **pause** for every covered contract on every chain, whichever chain the claim was proven on, and the bounty pays the Whitehat's NEAR account in USDC.
 
 Nobody sees your exploit before it is judged. A script that steals less than the minimum theft scores **ZERO** and pays nothing.
 
@@ -34,24 +34,26 @@ The key can't top up the claim balance. If it is short, `bountee claim` stops be
 
 ## Steps
 
-1. **Find the bounty.** `bountee list --contract <bounty contract> --json` lists every bounty and its state. Pick a `live` one, then run `bountee show <protocol>/<name> --contract <bounty contract> --json`. Note each covered contract's chain and address, the proof chain, the listed tokens and their prices, and the minimum theft. Done when you can name the address you will attack and the theft you need.
+1. **Find the bounty.** `bountee list --contract <bounty contract> --json` lists every bounty and its state. Pick a `live` one, then run `bountee show <protocol>/<name> --contract <bounty contract> --json`. Note each covered contract's chain and address, the listed tokens with their chains and prices, and the minimum theft. Any covered chain can be your proof chain. Done when you can name the address you will attack on each covered chain and the theft you need.
 
-2. **Find the bug.** Read the covered contracts' source. Look for any path that moves the contract's funds to a caller who shouldn't get them: a missing access check, an unchecked external call, a reentrancy, a broken price or share calculation. Read the deployed state with `cast` (for example `cast call <address> "balanceOf(address)(uint256)" <vault> --rpc-url <url>`). Done when you can say which function, called by an account with no role, moves which tokens to you.
+2. **Find the bug.** Read the covered contracts' source. Look for any path that moves the contract's funds to a caller who shouldn't get them: a missing access check, an unchecked external call, a reentrancy, a broken price or share calculation. Read the deployed state with `cast` on each covered chain (for example `cast call <address> "balanceOf(address)(uint256)" <vault> --rpc-url <url>`): the same contract can hold different balances, settings or code on each chain, so a bug may be live on only one of them. Done when you can say which function, called by an account with no role, moves which tokens to you, and on which chains.
 
-3. **Write the exploit as a Foundry script.** Make a project with `forge init <dir>` and write a script under `script/`. Its `run()` wraps the attack in `vm.startBroadcast()` / `vm.stopBroadcast()` and sends the stolen tokens to `msg.sender`. An exploit may deploy its own contracts: put them in the same project and create them inside the broadcast. The tool runs it from a **fresh account** that holds only the bounty's seed (1 native token by default) and no role on any contract. Hard-code the covered contract's address, or read it from an environment variable. `bountee show` prints addresses in lowercase, and solc rejects a lowercase address literal: write it checksummed (EIP-55), as `cast to-check-sum-address <address>` prints it.
+3. **Write the exploit as a Foundry script.** Make a project with `forge init <dir>` and write a script under `script/`. Its `run()` wraps the attack in `vm.startBroadcast()` / `vm.stopBroadcast()` and sends the stolen tokens to `msg.sender`. An exploit may deploy its own contracts: put them in the same project and create them inside the broadcast. The tool runs it from a **fresh account** that holds only the bounty's seed (1 native token by default) and no role on any contract. Hard-code the covered contract's address, or read it from an environment variable (`vm.envAddress`), which lets one script run against each chain's address. `bountee show` prints addresses in lowercase, and solc rejects a lowercase address literal: write it checksummed (EIP-55), as `cast to-check-sum-address <address>` prints it.
 
-4. **Judge it locally.** `bountee test <dir>/script/<File>.s.sol --bounty <protocol>/<name> --contract <bounty contract> --json`. This needs no keys or funds. The first run forks the chain and runs the judge under wasmtime, so it can take a few minutes with no output. Read `verdict.outcome`:
+4. **Judge it locally, on each covered chain.** `bountee test <dir>/script/<File>.s.sol --bounty <protocol>/<name> --contract <bounty contract> --chain <chain> --json`. `--chain` names the proof chain: `base`, `base-sepolia`, `arbitrum` (or `arbitrum-one`), `arbitrum-sepolia`, in any case, or a chain ID. On a bounty that covers one chain you may leave it out; on one that covers several it is required, and `test` refuses without it (or with a chain the bounty doesn't cover), listing the covered chains. Run `test` once for each covered chain, with the script pointed at that chain's address (if the script reads it from an environment variable, set it for `claim` too). This needs no keys or funds. The first run forks the chain and runs the judge under wasmtime, so it can take a few minutes with no output. Read `verdict.outcome`:
    - `PAYS`: go to step 5.
    - `ZERO`: the theft fell short, or a transaction reverted. Read `verdict.reason` and `diagnostics`, fix the script and test again.
-   Done when `bountee test` prints `PAYS`.
+   Done when `bountee test` prints `PAYS` on at least one covered chain. That chain is the one you claim on.
 
 5. **File the claim.** Run it with the claim key's folder:
 
    ```
    BOUNTEE_CREDENTIALS_DIR=<credentials folder> bountee claim <dir>/script/<File>.s.sol \
      --bounty <protocol>/<name> --contract <bounty contract> --as <Whitehat account> \
-     --no-verify --timeout 540 --json
+     --chain <chain> --no-verify --timeout 540 --json
    ```
+
+   `--chain` names the chain where `test` gave `PAYS`, as you named it there. If it pays on several chains, pick one and file one claim: a win pauses every chain and closes the bounty, so a second claim only spends the claim balance. A saved job (`claim --job <job.json>`, from `test --out`) or `claim --exploit <file> --evidence <file>` also takes `--chain` on a bounty that covers several chains, naming the chain the job was proven on; `claim` refuses a job proven on another chain. (`test --job` takes no `--chain`: the job's block names its chain.)
 
    The tool collects fresh proofs, seals, files, then follows the claim until it is paid and its pauses have been broadcast. `--no-verify` skips the pause verification, which waits for each chain's safe head and can take half an hour. `--timeout 540` keeps the command inside a ten-minute command limit. If your shell stops commands sooner (many cap them near 120 s), run `claim` in the background with stdout and stderr in separate files, and follow the claim with `bountee status` as in step 6. Its live stages go to stderr as they happen, carrying the `claim_id` once it is filed; its JSON result reaches stdout only when it exits. Save the `claim_id`.
 
@@ -63,9 +65,10 @@ The key can't top up the claim balance. If it is short, `bountee claim` stops be
 
 - **`claim` stops because the claim balance is short:** report the amount it names and stop.
 - **`claim` says the bounty isn't live:** someone else's claim won it first, or it ended. Check with `bountee show`. Don't file again.
+- **`test` or `claim` refuses, listing the covered chains:** you left out `--chain` on a bounty that covers several chains, or named one it doesn't cover. Run it again with `--chain` naming one of the chains listed.
 - **`claim` ends in `no_verdict`:** the enclave job failed and the claim keeps its place. Retry that same claim, once, with the claim key's folder: `bountee claim --retry <claim id> --contract <bounty contract> --as <Whitehat account> --no-verify --timeout 540 --json`, run from the same directory as the first `claim` (it reads the proofs back from the claim's saved transaction). If it ends in `no_verdict` again, report it rather than filing a second claim.
 - **`claim` lists `next_steps`:** report them to your Whitehat as they are; they need the Whitehat's own key.
-- **Locally `PAYS`, then `ZERO` on chain:** state moved between your test and the claim. Run `bountee test` again before filing anything else.
+- **Locally `PAYS`, then `ZERO` on chain:** state moved between your test and the claim. Run `bountee test` again, on the same chain, before filing anything else.
 
 ## For the Whitehat: before you hand over
 
