@@ -30,7 +30,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { RpcError, nearView, runScript, sendsAmong, standIns, type Logged } from "./testnet/stand-ins.ts";
+import { NEAR_GAS_PRICE, NEAR_PROTOCOL_CONFIG, RpcError, nearView, runScript, sendsAmong, standIns, type Logged } from "./testnet/stand-ins.ts";
 
 const script = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
 const CONTRACT = "bounty.bountee.near";
@@ -59,20 +59,6 @@ const USDC_IMPL = "0x2ce6311ddae708829bc0784c967b7d77d19fd779";
 const COINBASE = "0x4200000000000000000000000000000000000011";
 const IMPL_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
 const CONTRACTS = new Set([ROUTER, FACTORY, WETH, PAIR, USDC_IMPL, COINBASE, BASE_USDC]);
-// The parts of NEAR's runtime config that price a transaction up front (mainnet, Nov 8).
-const PROTOCOL_CONFIG = {
-  runtime_config: {
-    min_gas_purchase_price: "1000000000",
-    storage_amount_per_byte: "10000000000000000000",
-    transaction_costs: {
-      action_receipt_creation_config: { send_not_sir: 108059500000, send_sir: 108059500000, execution: 108059500000 },
-      action_creation_config: {
-        function_call_cost: { send_not_sir: 200000000000, send_sir: 200000000000, execution: 780000000000 },
-        function_call_cost_per_byte: { send_not_sir: 47683715, send_sir: 2235934, execution: 2235934 },
-      },
-    },
-  },
-};
 const RAW_HEADER = `0x${"cd".repeat(600)}`;
 const HEADER_HASH = `0x${Buffer.from(keccak_256(Buffer.from(RAW_HEADER.slice(2), "hex"))).toString("hex")}`;
 
@@ -108,9 +94,8 @@ beforeAll(async () => {
           ? new RpcError("UNKNOWN_ACCOUNT")
           : { amount: amount.toString(), locked: "0", storage_usage: world.nearStorage.get(p.account_id) ?? 182 };
       }
-      // NEAR mainnet's pricing as `EXPERIMENTAL_protocol_config` and `gas_price` report it (Nov 8).
-      if (method === "EXPERIMENTAL_protocol_config") return PROTOCOL_CONFIG;
-      if (method === "gas_price") return { gas_price: "100000000" };
+      if (method === "EXPERIMENTAL_protocol_config") return NEAR_PROTOCOL_CONFIG;
+      if (method === "gas_price") return NEAR_GAS_PRICE;
       if (method === "query" && p.request_type === "call_function") {
         const args = JSON.parse(Buffer.from(p.args_base64, "base64").toString() || "{}");
         if (p.account_id === CONTRACT && p.method_name === "fees") return nearView(FEES);
@@ -250,14 +235,17 @@ test("D21: a Protocol with the posting fee plus 0.1 NEAR is short of the posting
 test("D21: with the posting fee prepaid, the Protocol needs Nov 7's 0.2709 NEAR of gas in hand, and 0.0903 is short", async () => {
   world.near.set(PROTOCOL, 903n * YOCTO / 10_000n);
   world.prepaid.set(PROTOCOL, POSTING_FEE);
-  const r = await preflight();
-  expect(r.status, r.stderr).toBe(3);
-  const protocol = r.out.balances.find((b: any) => b.who === PROTOCOL && b.asset === "NEAR");
-  // Nov 7's 0.2709 NEAR, plus the stake the account's 182 bytes lock.
-  expect(near(protocol.need)).toBeGreaterThan(2709n * YOCTO / 10_000n);
-  expect(near(protocol.need)).toBeLessThan(2740n * YOCTO / 10_000n);
-  world.prepaid.delete(PROTOCOL);
-  expectNothingSent();
+  try {
+    const r = await preflight();
+    expect(r.status, r.stderr).toBe(3);
+    const protocol = r.out.balances.find((b: any) => b.who === PROTOCOL && b.asset === "NEAR");
+    // Nov 7's 0.2709 NEAR, plus the stake the account's 182 bytes lock.
+    expect(near(protocol.need)).toBeGreaterThan(2709n * YOCTO / 10_000n);
+    expect(near(protocol.need)).toBeLessThan(2740n * YOCTO / 10_000n);
+    expectNothingSent();
+  } finally {
+    world.prepaid.delete(PROTOCOL);
+  }
 });
 
 /** D21, ADR-0018: with no settings, the preflight plans ADR-0018's run: two claims (the cheat and the win) and a 1-day disclosure delay. */

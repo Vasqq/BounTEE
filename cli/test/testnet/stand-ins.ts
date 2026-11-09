@@ -23,6 +23,26 @@ export class RpcError {
 export type Route = (where: string, method: string, params: any) => unknown;
 
 /** Answers `{"result": [...bytes]}` as NEAR's `call_function` does, for a view returning `value`. */
+/**
+ * NEAR's pricing as mainnet's `EXPERIMENTAL_protocol_config` and `gas_price` reported it on Nov 8
+ * (testnet's is the same): what a stand-in NEAR RPC answers so a pre-spend check can price a
+ * transaction's gas in hand (#57).
+ */
+export const NEAR_PROTOCOL_CONFIG = {
+  runtime_config: {
+    min_gas_purchase_price: "1000000000",
+    storage_amount_per_byte: "10000000000000000000",
+    transaction_costs: {
+      action_receipt_creation_config: { send_not_sir: 108059500000, send_sir: 108059500000, execution: 108059500000 },
+      action_creation_config: {
+        function_call_cost: { send_not_sir: 200000000000, send_sir: 200000000000, execution: 780000000000 },
+        function_call_cost_per_byte: { send_not_sir: 47683715, send_sir: 2235934, execution: 2235934 },
+      },
+    },
+  },
+};
+export const NEAR_GAS_PRICE = { gas_price: "100000000" };
+
 export const nearView = (value: unknown) => ({ result: [...Buffer.from(JSON.stringify(value))], logs: [] });
 
 /** Nothing signed went to NEAR or a chain. */

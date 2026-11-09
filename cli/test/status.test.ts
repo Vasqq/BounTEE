@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { KeyPair } from "near-api-js";
 import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import { NEAR_GAS_PRICE, NEAR_PROTOCOL_CONFIG } from "./testnet/stand-ins.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const judgeFixtures = new URL("../../judge/tests/fixtures/", import.meta.url);
@@ -216,6 +217,12 @@ const server = createServer(async (req, res) => {
     }
   } else if (call.method === "query" && call.params.request_type === "view_access_key") {
     return reply({ nonce: 1, permission: "FullAccess", block_height: 1, block_hash: "11111111111111111111111111111111" });
+  } else if (call.method === "query" && call.params.request_type === "view_account") {
+    return reply({ amount: String(10n ** 25n), locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 1, block_height: 1, block_hash: "11111111111111111111111111111111" });
+  } else if (call.method === "EXPERIMENTAL_protocol_config") {
+    return reply(NEAR_PROTOCOL_CONFIG);
+  } else if (call.method === "gas_price") {
+    return reply(NEAR_GAS_PRICE);
   } else if (call.method === "block") {
     return reply({ header: { hash: "11111111111111111111111111111111", height: 1, timestamp: 0 } });
   } else if (call.method === "send_tx" || call.method === "broadcast_tx_commit") {

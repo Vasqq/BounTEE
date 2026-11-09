@@ -12,14 +12,17 @@
 //   mainnet figures are a recorded analysis), and the preflight's arithmetic on stand-in
 //   balances (`fresh-instance-preflight.test.ts`, in CI).
 //
+//   NEAR's own refusal of a 270 Tgas transfer-and-call from an account too poor for it states
+//     its cost, which is exactly what `upfrontNear` prices for that call, to the yoctoNEAR
+//     (the analysis of NEAR's up-front pricing, checked on the runtime itself) (D21)
 //   an account just under the figure: `bountee post` refuses, naming the NEAR to add, and its
 //     NEAR and prepaid posting fee are unchanged (D21)
-//   the same account topped up to the figure the fresh-instance script states (to within its
-//     0.00001 NEAR display): a fresh instance posts and goes live (D21)
+//   the same account topped up to exactly the figure the fresh-instance script states (figures
+//     are rounded up to the 0.00001 NEAR shown): a fresh instance posts and goes live (D21)
 //
 // Runs only with BOUNTEE_UPFRONT_RUN=1 (it spends testnet NEAR and Base Sepolia ETH). Needs the
 // deployment file of `testnet/deploy-system.ts` in BOUNTEE_DAY3, the Protocol's key (PROTOCOL,
-// default bountee-spike4.testnet, with no posting fee prepaid on that contract) and a second
+// default bountee-spike4.testnet; the figure counts any posting fee it has prepaid) and a second
 // testnet account's key (SINK) in ~/.near-credentials/testnet, which holds the Protocol's NEAR
 // above the figure meanwhile. Evidence goes to ~/.bountee-testnet/upfront-evidence.json.
 import { spawn } from "node:child_process";
@@ -30,7 +33,7 @@ import { fileURLToPath } from "node:url";
 import { actions } from "near-api-js";
 import { describe, expect, test } from "vitest";
 import { parseRules } from "@bountee/formats";
-import { formatNear, Near } from "../src/near.ts";
+import { formatNear, Near, roundUpNear } from "../src/near.ts";
 import { postingNeed } from "../src/post.ts";
 
 const RUN = process.env.BOUNTEE_UPFRONT_RUN === "1";
@@ -65,6 +68,12 @@ function run(args: string[], env: Record<string, string> = {}): Promise<{ code: 
 const lastJson = (text: string) => JSON.parse(text.trim().split("\n").pop()!);
 
 /** Moves `amount` yoctoNEAR from `from` to `to` and waits for it to land. */
+async function moveTo(account: string, sink: string, target: bigint) {
+  const free = (await near.freeNear(account))!;
+  if (free > target) await transfer(account, sink, free - target);
+  if (free < target) await transfer(sink, account, target - free);
+}
+
 async function transfer(from: string, to: string, amount: bigint): Promise<string> {
   const r = await near.account(from).signAndSendTransaction({ receiverId: to, actions: [actions.transfer(amount)], waitUntil: "FINAL" });
   return r.transaction.hash;
@@ -88,17 +97,27 @@ describe.skipIf(!RUN)("a posting holds its NEAR before spending (#57)", () => {
   };
   let figure: bigint;
 
+  test("D21: NEAR's own refusal of a 270 Tgas transfer-and-call states exactly the cost the figure prices for it", async () => {
+    await moveTo(PROTOCOL, SINK, YOCTO / 5n);
+    const args = { receiver_id: CONTRACT, amount: "1", msg: "{}" };
+    const predicted = await near.upfrontNear([{ method: "ft_transfer_call", gas: 270_000_000_000_000n, deposit: 1n, argsBytes: JSON.stringify(args).length }]);
+    const refused = await near
+      .account(PROTOCOL)
+      .signAndSendTransaction({ receiverId: deployment.usdc, actions: [actions.functionCall("ft_transfer_call", args, 270_000_000_000_000n, 1n)], waitUntil: "FINAL" })
+      .then(() => null, (e: any) => e);
+    expect(refused?.message).toMatch(/^Not enough balance for /);
+    expect(BigInt(refused.cost)).toBe(predicted);
+    record("d21_near_cost", { predicted: predicted.toString(), near_says: String(refused.cost), message: refused.message });
+  }, 300_000);
+
   test("D21: a Protocol just under the posting's NEAR is refused before anything is sent, told what to add", async () => {
-    expect(await feeBalance()).toBe(0n);
     const config = await near.view(CONTRACT, "config");
     const full = parseRules({ ...rules, recency_limit_secs: 300, seed: config.seed, judge_build_hash: config.judge_build_hash });
-    figure = (await postingNeed(near, CONTRACT, PROTOCOL, name, full)).need;
-    // The fee (0.5 on this contract) and its entry's storage, and 300 Tgas of gas at 1e9: about 0.81.
-    expect(figure).toBeGreaterThan(8n * YOCTO / 10n);
-    const free = (await near.freeNear(PROTOCOL))!;
-    const target = figure - YOCTO / 100n;
-    expect(free).toBeGreaterThan(target);
-    await transfer(PROTOCOL, SINK, free - target);
+    figure = (await postingNeed(near, CONTRACT, { protocol: PROTOCOL, name }, full)).need;
+    // At least what the prepaid fee lacks and both calls' 300 Tgas of gas at 1e9 (0.3 NEAR).
+    const fee = BigInt((await near.view(CONTRACT, "fees")).posting_fee);
+    expect(figure).toBeGreaterThan(fee - (await feeBalance()) + (3n * YOCTO) / 10n);
+    await moveTo(PROTOCOL, SINK, figure - YOCTO / 100n);
     const before = { near: (await near.freeNear(PROTOCOL))!, fee: await feeBalance() };
     // The transfer's own gas comes off too: the account sits between 0.02 and 0 NEAR under the figure.
     expect(before.near).toBeLessThan(figure);
@@ -107,7 +126,7 @@ describe.skipIf(!RUN)("a posting holds its NEAR before spending (#57)", () => {
     writeFileSync(file, `${JSON.stringify(rules)}\n`, { mode: 0o600 });
     const r = await run([entry, "post", `${PROTOCOL}/${name}`, "--rules", file, "--contract", CONTRACT, "--json"]);
     expect(r.code).toBe(1);
-    expect(r.stderr).toContain(`add ${formatNear(figure - before.near)} NEAR (nothing was spent)`);
+    expect(r.stderr).toContain(`add ${formatNear(roundUpNear(figure - before.near))} NEAR (nothing was spent)`);
     expect(await near.view(CONTRACT, "bounty", { id: { protocol: PROTOCOL, name } })).toBeNull();
     expect((await near.freeNear(PROTOCOL))!).toBe(before.near);
     expect(await feeBalance()).toBe(before.fee);
@@ -119,12 +138,11 @@ describe.skipIf(!RUN)("a posting holds its NEAR before spending (#57)", () => {
     const out = join(home, ".bountee-testnet", `upfront-instance-${stamp}.json`);
     const live = `upfront-live-${stamp}`;
     const env = { BOUNTEE_DAY3: deploymentFile, BOUNTEE_INSTANCE: out, BOUNTY_NAME: live, BOUNTY_AMOUNT: "1000000", CLAIMS: "0", PROTOCOL };
-    // The figure the script states for this posting (its own rules' size), shown to 5 decimals:
-    // the Protocol is topped up to it, rounded up to the next 0.00001 NEAR.
+    // The figure the script states for this posting (its own rules' size), exactly as shown.
     const plan = lastJson((await run([freshInstance], { ...env, PREFLIGHT_ONLY: "1" })).stdout);
     const stated = plan.balances.find((b: any) => b.who === PROTOCOL && b.asset === "NEAR").need as string;
     const [whole, frac = ""] = stated.replace(/ NEAR$/, "").split(".");
-    const statedYocto = (BigInt(whole!) * 100_000n + BigInt(frac.padEnd(5, "0")) + 1n) * 10n ** 19n;
+    const statedYocto = (BigInt(whole!) * 100_000n + BigInt(frac.padEnd(5, "0"))) * 10n ** 19n;
     const topUp = await transfer(SINK, PROTOCOL, statedYocto - (await near.freeNear(PROTOCOL))!);
     expect((await near.freeNear(PROTOCOL))!).toBe(statedYocto);
     const r = await run([freshInstance], env);

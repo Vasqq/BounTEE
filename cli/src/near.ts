@@ -117,6 +117,26 @@ export class Near {
     }
   }
 
+  #protocolConfig?: Promise<any>;
+  /** The network's runtime config, read once: what storage and gas cost. */
+  private protocolConfig(): Promise<any> {
+    this.#protocolConfig ??= this.rpc<any>("EXPERIMENTAL_protocol_config", { finality: "final" });
+    return this.#protocolConfig;
+  }
+
+  /** What the local key for `id` may still spend on gas: null for a full-access key or an unlimited allowance. */
+  async keyAllowance(id: string): Promise<bigint | null> {
+    const publicKey = KeyPair.fromString(loadKey(this.network, id)).getPublicKey().toString();
+    const r = await this.rpc<{ permission: "FullAccess" | { FunctionCall: { allowance: string | null } } }>("query", {
+      request_type: "view_access_key",
+      finality: "final",
+      account_id: id,
+      public_key: publicKey,
+    });
+    if (r.permission === "FullAccess" || r.permission.FunctionCall.allowance === null) return null;
+    return BigInt(r.permission.FunctionCall.allowance);
+  }
+
   /** The NEAR an account can spend: its balance less the stake its stored bytes lock; null if it doesn't exist. */
   async freeNear(accountId: string): Promise<bigint | null> {
     let a: { amount: string; locked: string; storage_usage: number };
@@ -126,7 +146,7 @@ export class Near {
       if (/UNKNOWN_ACCOUNT|does not exist/.test((e as Error).message)) return null;
       throw e;
     }
-    const { storage_amount_per_byte } = (await this.rpc<any>("EXPERIMENTAL_protocol_config", { finality: "final" })).runtime_config;
+    const { storage_amount_per_byte } = (await this.protocolConfig()).runtime_config;
     const stake = BigInt(a.storage_usage) * BigInt(storage_amount_per_byte) - BigInt(a.locked);
     return BigInt(a.amount) - (stake > 0n ? stake : 0n);
   }
@@ -141,10 +161,7 @@ export class Near {
    * Summing the calls counts no refund between them, so a run of calls is never short.
    */
   async upfrontNear(calls: PricedCall[]): Promise<bigint> {
-    const [{ runtime_config: rc }, { gas_price }] = await Promise.all([
-      this.rpc<any>("EXPERIMENTAL_protocol_config", { finality: "final" }),
-      this.rpc<{ gas_price: string }>("gas_price", [null]),
-    ]);
+    const [{ runtime_config: rc }, { gas_price }] = await Promise.all([this.protocolConfig(), this.rpc<{ gas_price: string }>("gas_price", [null])]);
     const price = BigInt(gas_price);
     const minimum = BigInt(rc.min_gas_purchase_price);
     const buy = price > minimum ? price : minimum;
@@ -196,6 +213,12 @@ export function events(status: any): { event: string; data: any }[] {
 
 export const tgas = (n: number) => BigInt(n) * 10n ** 12n;
 export const milliNear = (n: number) => BigInt(Math.round(n * 1000)) * 10n ** 18n;
+/** `yocto` rounded up to the 0.00001 NEAR `formatNear` shows, so a stated need, or an amount to add, is never short. */
+export const roundUpNear = (yocto: bigint) => {
+  const step = 10n ** 19n;
+  return ((yocto + step - 1n) / step) * step;
+};
+
 export const formatNear = (yocto: bigint) => {
   const s = yocto.toString().padStart(25, "0");
   return `${s.slice(0, -24)}.${s.slice(-24, -19)}`.replace(/\.?0+$/, "") || "0";

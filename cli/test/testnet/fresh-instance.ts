@@ -48,13 +48,13 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { base58 } from "@scure/base";
-import { PAUSE_GAS_PER_PAUSE, pauseRole } from "@bountee/formats";
+import { PAUSE_GAS_PER_PAUSE, parseRules, pauseRole } from "@bountee/formats";
 import { parseRpcFlags } from "../../src/broadcast.ts";
 import { CHAINS, defaultRpc, proofRpcs } from "../../src/chains.ts";
 import { rpc } from "../../src/proofs.ts";
 import { DEMO_READS, budgetClaims, whitehatNeed, type ClaimBudget, type ClaimPlan, type Read, type Role } from "./claim-budget.ts";
 import { CLAIM_GAS } from "../../src/claim.ts";
-import { formatNear } from "../../src/near.ts";
+import { formatNear, roundUpNear } from "../../src/near.ts";
 import { postingNeed } from "../../src/post.ts";
 import { DEMO_DEPLOY_GAS, MPC_ROOT, near, network as NETWORK, need, stopIfShort, wholeNumber, type Need } from "./deploy.ts";
 import { keystoreEnv, redact } from "./evm-key.ts";
@@ -245,14 +245,17 @@ for (const chain of CHAIN_IDS) {
   }
 }
 // The posting's NEAR in hand (#57): sized on rules of the same shape as the real ones, with
-// placeholder vaults and exploit key of the same lengths, since neither exists yet.
-const sizingRules = bountyRules(
-  await near.view(CONTRACT, "config"),
-  CHAIN_IDS.map((chain_id) => ({ chain_id, address: `0x${"0".repeat(40)}` })),
-  MAINNET ? circleUsdc(CHAIN) : `0x${"0".repeat(40)}`,
-  `x25519:${"1".repeat(44)}`,
+// placeholder vaults and exploit key of the same lengths (a key's base58 is 43 or 44 characters;
+// this one is 44), since neither exists yet.
+const sizingRules = parseRules(
+  bountyRules(
+    await near.view(CONTRACT, "config"),
+    CHAIN_IDS.map((chain_id) => ({ chain_id, address: `0x${"0".repeat(40)}` })),
+    MAINNET ? circleUsdc(CHAIN) : `0x${"0".repeat(40)}`,
+    "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
+  ),
 );
-const { need: postingNear } = await postingNeed(near, CONTRACT, PROTOCOL, NAME, sizingRules as any);
+const { need: postingNear } = await postingNeed(near, CONTRACT, { protocol: PROTOCOL, name: NAME }, sizingRules);
 needs.push(need(PROTOCOL, nearChain, "NEAR", (await near.freeNear(PROTOCOL)) ?? 0n, postingNear, showNear));
 needs.push(need(PROTOCOL, nearChain, `${MAINNET ? "" : "test "}USDC (${USDC})`, await ftBalance(PROTOCOL), BigInt(BOUNTY_AMOUNT), showUsdc));
 let claimBudgets: ClaimBudget[] = [];
@@ -266,7 +269,7 @@ if (WHITEHAT) {
     claimBudgets.map((c) => near.upfrontNear([{ method: "submit_claim", gas: CLAIM_GAS, deposit: 0n, argsBytes: c.input_bytes }])),
   );
   const claimGasNear = claimGas.reduce((m, x) => (x > m ? x : m), 0n);
-  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.freeNear(WHITEHAT)) ?? 0n, whitehatNeed(claimBudgets) + claimGasNear, showNear));
+  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.freeNear(WHITEHAT)) ?? 0n, roundUpNear(whitehatNeed(claimBudgets) + claimGasNear), showNear));
 }
 stopIfShort(needs, {
   run: {

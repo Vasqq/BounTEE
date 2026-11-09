@@ -28,7 +28,7 @@ import { PAUSE_GAS_PER_PAUSE, parseRules, type BountyId, type PostingFailure, ty
 import { parseBountyId } from "./bounties.ts";
 import { defaultRpc } from "./chains.ts";
 import { NEAR_RPC, type Network } from "./endpoints.ts";
-import { events, formatNear, Near, tgas, type PricedCall } from "./near.ts";
+import { events, formatNear, Near, roundUpNear, tgas, type PricedCall } from "./near.ts";
 import { rpc } from "./proofs.ts";
 
 /** NEAR's Ethereum-wallet relayer caps a transaction at 270 Tgas, so the web app attaches that; so does the tool. */
@@ -70,25 +70,28 @@ export interface PostResult {
   failures?: (PostingFailure & { contract: Rules["covered_contracts"][number] })[] | null;
 }
 
-/** The posting's two calls: the fee's top-up when the prepaid balance is short of one fee, then the bounty amount carrying the rules. */
-function postingCalls(postingFee: bigint, prepaid: bigint, name: string, rules: Rules, amount: string, contract: string): PricedCall[] {
-  const calls: PricedCall[] = [];
-  if (prepaid < postingFee) {
-    calls.push({ method: "prepay_posting_fee", gas: tgas(30), deposit: postingFee - prepaid + (prepaid === 0n ? ENTRY_STORAGE : 0n), argsBytes: 2 });
-  }
-  const args = { receiver_id: contract, amount, msg: JSON.stringify({ name, rules }) };
-  calls.push({ method: "ft_transfer_call", gas: POSTING_GAS, deposit: 1n, argsBytes: JSON.stringify(args).length });
-  return calls;
+/** A posting's calls: the fee's top-up when the prepaid balance is short of one fee, then the bounty amount carrying the rules. */
+export interface Posting {
+  prepay?: PricedCall;
+  transfer: PricedCall;
+  /** The NEAR the Protocol must hold for both, free of its storage stake, rounded up to what `formatNear` shows. */
+  need: bigint;
 }
 
-/** The calls that post `rules` as `name` on `contract`, and the NEAR `protocol` must hold for them, free of its storage stake. */
-export async function postingNeed(near: Near, contract: string, protocol: string, name: string, rules: Rules): Promise<{ calls: PricedCall[]; need: bigint }> {
+/** How `id` is posted with `rules` on `contract`, and the NEAR its Protocol must hold first. */
+export async function postingNeed(near: Near, contract: string, id: BountyId, rules: Rules): Promise<Posting> {
   const [fees, prepaid] = await Promise.all([
     near.view(contract, "fees"),
-    near.view<string>(contract, "posting_fee_balance", { account_id: protocol }),
+    near.view<string>(contract, "posting_fee_balance", { account_id: id.protocol }).then(BigInt),
   ]);
-  const calls = postingCalls(BigInt(fees.posting_fee), BigInt(prepaid), name, rules, rules.bounty_amount, contract);
-  return { calls, need: await near.upfrontNear(calls) };
+  const postingFee = BigInt(fees.posting_fee);
+  const prepay: PricedCall | undefined =
+    prepaid < postingFee
+      ? { method: "prepay_posting_fee", gas: tgas(30), deposit: postingFee - prepaid + (prepaid === 0n ? ENTRY_STORAGE : 0n), argsBytes: 2 }
+      : undefined;
+  const args = { receiver_id: contract, amount: rules.bounty_amount, msg: JSON.stringify({ name: id.name, rules }) };
+  const transfer: PricedCall = { method: "ft_transfer_call", gas: POSTING_GAS, deposit: 1n, argsBytes: JSON.stringify(args).length };
+  return { prepay, transfer, need: roundUpNear(await near.upfrontNear(prepay ? [prepay, transfer] : [transfer])) };
 }
 
 export async function post(o: PostOptions): Promise<PostResult> {
@@ -107,12 +110,12 @@ export async function post(o: PostOptions): Promise<PostResult> {
   if (await near.view(o.contract, "bounty", { id })) {
     throw new Error(`${id.protocol}/${id.name} exists already: a bounty name is never reused (D25)`);
   }
-  const { calls, need: needNear } = await postingNeed(near, o.contract, id.protocol, id.name, rules);
+  const { prepay, need: needNear } = await postingNeed(near, o.contract, id, rules);
   const freeNear = (await near.freeNear(id.protocol)) ?? 0n;
   if (freeNear < needNear) {
     throw new Error(
       `${id.protocol} holds ${formatNear(freeNear)} NEAR free of its storage stake and the posting needs ${formatNear(needNear)} in hand ` +
-        `(the posting fee and the gas both calls attach, refunded once unused): add ${formatNear(needNear - freeNear)} NEAR (nothing was spent)`,
+        `(the posting fee and the gas both calls attach, refunded once unused): add ${formatNear(roundUpNear(needNear - freeNear))} NEAR (nothing was spent)`,
     );
   }
   const role = await near.view<{ address: string }>(o.contract, "pause_role", { id });
@@ -139,7 +142,6 @@ export async function post(o: PostOptions): Promise<PostResult> {
   // ---- 2. Posting fee ----
   const protocol = near.account(id.protocol);
   const out: Partial<PostResult> = {};
-  const prepay = calls.find((c) => c.method === "prepay_posting_fee");
   if (prepay) {
     const r = await protocol.signAndSendTransaction({
       receiverId: o.contract,
