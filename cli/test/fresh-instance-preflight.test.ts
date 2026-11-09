@@ -180,7 +180,8 @@ test("D21: the mainnet preflight lists every balance the run needs and names eac
     [DEPLOYER, "Base", "ETH", expect.stringMatching(/ETH$/), false],
     [DEPLOYER, "Base", `USDC (${BASE_USDC})`, "2 USDC", false],
     [DEPLOYER, "Arbitrum One", "ETH", expect.stringMatching(/ETH$/), false],
-    [DEPLOYER, "Arbitrum One", `USDC (${ARBITRUM_USDC})`, "1 USDC", false],
+    // ADR-0020: 2 USDC into each chain's vault, so a theft on either reaches the 1 USDC minimum.
+    [DEPLOYER, "Arbitrum One", `USDC (${ARBITRUM_USDC})`, "2 USDC", false],
     [PROTOCOL, "near-mainnet", "NEAR", expect.stringMatching(/ NEAR$/), false],
     [PROTOCOL, "near-mainnet", `USDC (${NEAR_USDC})`, "10 USDC", false],
     [WHITEHAT, "near-mainnet", "NEAR", expect.stringMatching(/ NEAR$/), false],
@@ -202,7 +203,7 @@ test("D21: a funded mainnet run passes the preflight and spends nothing", async 
   world.nearUsdc.set(PROTOCOL, 10_000_000n);
   for (const chain of [8453, 42161]) world.eth.set(chain, ETH / 100n);
   world.evmUsdc.set(BASE_USDC, 2_000_000n);
-  world.evmUsdc.set(ARBITRUM_USDC, 1_000_000n);
+  world.evmUsdc.set(ARBITRUM_USDC, 2_000_000n);
   const r = await preflight();
   expect(r.status, r.stderr).toBe(0);
   expect(r.out.ok).toBe(true);

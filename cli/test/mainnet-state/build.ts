@@ -73,7 +73,7 @@ interface ChainPlan {
 }
 const CHAINS: ChainPlan[] = [
   { id: 8453, name: "Base", rpc: process.env.BASE_RPC ?? "https://mainnet.base.org", usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", balanceSlot: 9n, seed: 2_000_000n, claims: true },
-  { id: 42161, name: "Arbitrum One", rpc: process.env.ARBITRUM_RPC ?? "https://arb1.arbitrum.io/rpc", usdc: "0xaf88d065e77c8cc2239327c5edb3a432268e5831", balanceSlot: 9n, seed: 1_000_000n, claims: false },
+  { id: 42161, name: "Arbitrum One", rpc: process.env.ARBITRUM_RPC ?? "https://arb1.arbitrum.io/rpc", usdc: "0xaf88d065e77c8cc2239327c5edb3a432268e5831", balanceSlot: 9n, seed: 2_000_000n, claims: false },
 ];
 
 /** The pinned judge's build hash on the mainnet bounty contract (`config().judge_build_hash`). */
