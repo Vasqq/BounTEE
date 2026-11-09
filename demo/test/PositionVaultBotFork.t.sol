@@ -15,10 +15,13 @@ interface IUSDC {
 /// FORK_RPC is set; the bot's 7702 designator needs the Prague EVM, so run it under the `fork`
 /// Foundry profile:
 ///   FORK_RPC=<arbitrum one rpc> FOUNDRY_PROFILE=fork forge test --match-contract PositionVaultBotFork
+/// With VAULT set, the fork already holds a vault demo/script/Deploy.s.sol deployed and seeded
+/// (ticket #58's mainnet-state harness, on a Base or Arbitrum One fork), and that one is tried.
 contract PositionVaultBotForkTest is Test {
     address constant BOT = 0x4a00e700C0005610c9E0C0000040126E55007821;
-    address constant USDC = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831;
     PositionVault vault;
+    IUSDC usdc;
+    uint256 seeded;
 
     function setUp() public {
         string memory rpc = vm.envOr("FORK_RPC", string(""));
@@ -27,13 +30,24 @@ contract PositionVaultBotForkTest is Test {
             return;
         }
         vm.createSelectFork(rpc);
-        vault = new PositionVault(USDC, makeAddr("pauser"));
+        address deployed = vm.envOr("VAULT", address(0));
+        if (deployed != address(0)) {
+            vault = PositionVault(deployed);
+            usdc = IUSDC(address(vault.token()));
+            seeded = usdc.balanceOf(deployed);
+            assertGt(seeded, 0, "the deploy script seeded the vault");
+            return;
+        }
+        // Circle's USDC on Arbitrum One.
+        usdc = IUSDC(0xaf88d065e77c8cC2239327C5EDb3A432268e5831);
+        vault = new PositionVault(address(usdc), makeAddr("pauser"));
         address protocol = makeAddr("protocol");
-        deal(USDC, protocol, 1e6);
+        deal(address(usdc), protocol, 1e6);
         vm.startPrank(protocol);
-        IUSDC(USDC).approve(address(vault), 1e6);
+        usdc.approve(address(vault), 1e6);
         vault.deposit(1e6);
         vm.stopPrank();
+        seeded = 1e6;
     }
 
     function test_real_bot_code_as_its_own_position_is_refused() public {
@@ -41,6 +55,6 @@ contract PositionVaultBotForkTest is Test {
         vm.prank(BOT);
         vm.expectRevert(bytes("position belongs to another vault"));
         vault.depositFrom(IPosition(BOT));
-        assertEq(IUSDC(USDC).balanceOf(address(vault)), 1e6, "vault USDC unchanged");
+        assertEq(usdc.balanceOf(address(vault)), seeded, "vault USDC unchanged");
     }
 }

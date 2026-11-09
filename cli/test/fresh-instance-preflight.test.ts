@@ -30,7 +30,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { RpcError, nearView, runScript, sendsAmong, standIns, type Logged } from "./testnet/stand-ins.ts";
+import { NEAR_GAS_PRICE, NEAR_PROTOCOL_CONFIG, RpcError, nearView, runScript, sendsAmong, standIns, type Logged } from "./testnet/stand-ins.ts";
 
 const script = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
 const CONTRACT = "bounty.bountee.near";
@@ -67,6 +67,10 @@ const world = {
   /** Bytes per trie node in the stand-in chain's proofs: a deeper, wider trie gives bigger proofs. */
   node: 500,
   near: new Map<string, bigint>(),
+  /** Bytes each NEAR account stores: NEAR locks their stake, so it can't pay for anything. */
+  nearStorage: new Map<string, number>(),
+  /** The posting fee each Protocol has already prepaid on the contract. */
+  prepaid: new Map<string, bigint>(),
   nearUsdc: new Map<string, bigint>(),
   eth: new Map<number, bigint>(),
   evmUsdc: new Map<string, bigint>(),
@@ -86,11 +90,20 @@ beforeAll(async () => {
     if (where === "near") {
       if (method === "query" && p.request_type === "view_account") {
         const amount = world.near.get(p.account_id);
-        return amount === undefined ? new RpcError("UNKNOWN_ACCOUNT") : { amount: amount.toString() };
+        return amount === undefined
+          ? new RpcError("UNKNOWN_ACCOUNT")
+          : { amount: amount.toString(), locked: "0", storage_usage: world.nearStorage.get(p.account_id) ?? 182 };
       }
+      if (method === "EXPERIMENTAL_protocol_config") return NEAR_PROTOCOL_CONFIG;
+      if (method === "gas_price") return NEAR_GAS_PRICE;
       if (method === "query" && p.request_type === "call_function") {
         const args = JSON.parse(Buffer.from(p.args_base64, "base64").toString() || "{}");
         if (p.account_id === CONTRACT && p.method_name === "fees") return nearView(FEES);
+        // The deployed contract's config (bounty.bountee.near, Nov 8), which the posting's rules take their seed and judge from.
+        if (p.account_id === CONTRACT && p.method_name === "config") {
+          return nearView({ seed: { native: "1000000000000000000", tokens: [] }, judge_build_hash: `0x${"5b".repeat(32)}` });
+        }
+        if (p.account_id === CONTRACT && p.method_name === "posting_fee_balance") return nearView((world.prepaid.get(args.account_id) ?? 0n).toString());
         if (p.account_id === NEAR_USDC && p.method_name === "ft_balance_of") return nearView((world.nearUsdc.get(args.account_id) ?? 0n).toString());
       }
       return undefined;
@@ -168,7 +181,7 @@ test("D21: the mainnet preflight lists every balance the run needs and names eac
     [DEPLOYER, "Base", `USDC (${BASE_USDC})`, "2 USDC", false],
     [DEPLOYER, "Arbitrum One", "ETH", expect.stringMatching(/ETH$/), false],
     [DEPLOYER, "Arbitrum One", `USDC (${ARBITRUM_USDC})`, "1 USDC", false],
-    [PROTOCOL, "near-mainnet", "NEAR", "0.6 NEAR", false],
+    [PROTOCOL, "near-mainnet", "NEAR", expect.stringMatching(/ NEAR$/), false],
     [PROTOCOL, "near-mainnet", `USDC (${NEAR_USDC})`, "10 USDC", false],
     [WHITEHAT, "near-mainnet", "NEAR", expect.stringMatching(/ NEAR$/), false],
   ]);
@@ -195,6 +208,44 @@ test("D21: a funded mainnet run passes the preflight and spends nothing", async 
   expect(r.out.ok).toBe(true);
   expect(r.out.balances.every((b: any) => b.ok)).toBe(true);
   expectNothingSent();
+});
+
+/**
+ * D21, #57: the Protocol holds the posting's gas in hand. NEAR takes a transaction's attached gas
+ * up front at max(gas price, min_gas_purchase_price), 1e9 yoctoNEAR on mainnet, and refunds what's
+ * unused only afterwards. The old check asked for the posting fee plus 0.1 NEAR; Nov 7's post
+ * failed with the fee prepaid and 0.0903 NEAR left, its 270 Tgas transfer-and-call wanting 0.2709.
+ */
+test("D21: a Protocol with the posting fee plus 0.1 NEAR is short of the posting's gas, and nothing is sent", async () => {
+  world.near.set(PROTOCOL, 7n * YOCTO / 10n);
+  world.prepaid.delete(PROTOCOL);
+  const r = await preflight();
+  expect(r.status, r.stderr).toBe(3);
+  const protocol = r.out.balances.find((b: any) => b.who === PROTOCOL && b.asset === "NEAR");
+  expect(protocol.ok).toBe(false);
+  // The fee (0.5) and its first balance entry's storage (0.01), the prepayment's 30 Tgas (0.03)
+  // and the transfer-and-call's 270 Tgas (0.27) at 1e9, each call's receipt costs (under 0.002),
+  // and the 182 bytes the account stores (0.00182, locked).
+  expect(near(protocol.need)).toBeGreaterThan(81n * YOCTO / 100n);
+  expect(near(protocol.need)).toBeLessThan(815n * YOCTO / 1000n);
+  expectNothingSent();
+});
+
+/** D21, #57: with the posting fee prepaid, as `demo.bountee.near`'s was on Nov 7, only the transfer-and-call's gas is left to hold. */
+test("D21: with the posting fee prepaid, the Protocol needs Nov 7's 0.2709 NEAR of gas in hand, and 0.0903 is short", async () => {
+  world.near.set(PROTOCOL, 903n * YOCTO / 10_000n);
+  world.prepaid.set(PROTOCOL, POSTING_FEE);
+  try {
+    const r = await preflight();
+    expect(r.status, r.stderr).toBe(3);
+    const protocol = r.out.balances.find((b: any) => b.who === PROTOCOL && b.asset === "NEAR");
+    // Nov 7's 0.2709 NEAR, plus the stake the account's 182 bytes lock.
+    expect(near(protocol.need)).toBeGreaterThan(2709n * YOCTO / 10_000n);
+    expect(near(protocol.need)).toBeLessThan(2740n * YOCTO / 10_000n);
+    expectNothingSent();
+  } finally {
+    world.prepaid.delete(PROTOCOL);
+  }
 });
 
 /** D21, ADR-0018: with no settings, the preflight plans ADR-0018's run: two claims (the cheat and the win) and a 1-day disclosure delay. */
@@ -228,9 +279,13 @@ test("D21: the Whitehat's budget follows each claim's input on the proof chain: 
   expect(cheat.input_bytes).toBeGreaterThan(win.input_bytes);
   // OutLayer holds the storage price for every input byte above the free 32 KiB (fees()).
   for (const c of [cheat, win]) expect(near(c.refunded)).toBe(BigInt(c.input_bytes - 32 * 1024) * 10n ** 19n);
-  // The claims run one at a time and each hold comes back: the cheat's whole draw, and the win's draw less its hold.
+  // The claims run one at a time and each hold comes back: the cheat's whole draw, and the win's
+  // draw less its hold, plus one claim's gas in hand: `submit_claim` attaches 300 Tgas, which NEAR
+  // takes up front at its 1e9 yoctoNEAR minimum price, 0.3 NEAR, before refunding what's unused.
   const whitehat = r.out.balances.find((b: any) => b.who === WHITEHAT);
-  expect(near(whitehat.need)).toBe(near(cheat.draw) + near(win.draw) - near(win.refunded));
+  const gasInHand = near(whitehat.need) - (near(cheat.draw) + near(win.draw) - near(win.refunded));
+  expect(gasInHand).toBeGreaterThanOrEqual(3n * YOCTO / 10n);
+  expect(gasInHand).toBeLessThan(31n * YOCTO / 100n);
   // A deeper trie on the proof chain makes bigger proofs, and the budget grows with them.
   world.node = 1000;
   const deeper = await preflight();

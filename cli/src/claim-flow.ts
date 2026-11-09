@@ -18,7 +18,7 @@ import { rpc } from "./proofs.ts";
 import { proofRpcs } from "./chains.ts";
 import { testCommand, type TestOptions, type TestResult } from "./test.ts";
 import { verifyPauses, type VerifyResult } from "./verify-pause.ts";
-import { Near, events, formatNear, milliNear, tgas } from "./near.ts";
+import { Near, events, formatNear, milliNear, roundUpNear, tgas, type PricedCall } from "./near.ts";
 import { signPauses } from "./payout.ts";
 
 /** Time a claim needs from here to `submit_claim` recording its submission time. */
@@ -82,11 +82,47 @@ export function claimCost(fees: any, inputBytes: number, sealedBytes: number): b
   return BigInt(fees.job_deposit) + (hold + secret + 2048n) * perByte + milliNear(10);
 }
 
+/** The gas `ensureClaimBalance`'s top-up attaches, which `checkClaimNear` prices. */
+const TOP_UP_GAS = tgas(30);
+
+/** What `whitehat`'s claim balance lacks of `cost` on `contract`. */
+async function claimBalanceShort(near: Near, contract: string, whitehat: string, cost: bigint): Promise<{ have: bigint; add: bigint }> {
+  const have = BigInt(await near.view<string>(contract, "claim_balance", { account_id: whitehat }));
+  return { have, add: have >= cost ? 0n : cost - have };
+}
+
+/**
+ * Before a claim spends anything (#57): the Whitehat holds, free of its storage stake, what its
+ * claim balance lacks of `cost` and the gas both calls attach (the top-up's and `call`'s, which
+ * NEAR takes up front and refunds once unused); and a claim key's allowance covers `call`'s gas.
+ * A claim key can't top up, so for one only `call` is priced: `ensureClaimBalance` refuses a short
+ * claim balance with its own message.
+ */
+export async function checkClaimNear(near: Near, contract: string, whitehat: string, cost: bigint, call: PricedCall): Promise<void> {
+  const claimKey = await near.signsWithFunctionCallKey(whitehat);
+  const add = claimKey ? 0n : (await claimBalanceShort(near, contract, whitehat, cost)).add;
+  const callNear = await near.upfrontNear([call]);
+  const need = roundUpNear(add > 0n ? await near.upfrontNear([{ method: "top_up_claim_balance", gas: TOP_UP_GAS, deposit: add, argsBytes: 2 }, call]) : callNear);
+  const free = (await near.freeNear(whitehat)) ?? 0n;
+  if (free < need) {
+    throw new Error(
+      `${whitehat} holds ${formatNear(free)} NEAR free of its storage stake and this claim needs ${formatNear(need)} in hand ` +
+        `(what the claim balance lacks, and the gas its calls attach, refunded once unused): add ${formatNear(roundUpNear(need - free))} NEAR (nothing was spent)`,
+    );
+  }
+  const allowance = claimKey ? await near.keyAllowance(whitehat) : null;
+  if (allowance !== null && allowance < callNear) {
+    throw new Error(
+      `the claim key's allowance holds ${formatNear(allowance)} NEAR and ${call.method} takes ${formatNear(roundUpNear(callNear))} of it up front: ` +
+        `add a claim key with a larger --allowance (nothing was spent)`,
+    );
+  }
+}
+
 /** Top the Whitehat's claim balance up to `cost` if it's short. Returns the amount added. */
 export async function ensureClaimBalance(near: Near, contract: string, whitehat: string, cost: bigint): Promise<bigint> {
-  const have = BigInt(await near.view<string>(contract, "claim_balance", { account_id: whitehat }));
-  if (have >= cost) return 0n;
-  const add = cost - have;
+  const { have, add } = await claimBalanceShort(near, contract, whitehat, cost);
+  if (add === 0n) return 0n;
   // A claim key (#25) can't attach a deposit: the Whitehat tops up from their own key.
   if (await near.signsWithFunctionCallKey(whitehat)) {
     throw new Error(
@@ -94,7 +130,7 @@ export async function ensureClaimBalance(near: Near, contract: string, whitehat:
         `Ask the Whitehat to add ${formatNear(add)} NEAR or more (top_up_claim_balance on ${contract}, signed with their own key).`,
     );
   }
-  await near.account(whitehat).callFunction({ contractId: contract, methodName: "top_up_claim_balance", args: {}, deposit: add, gas: tgas(30) });
+  await near.account(whitehat).callFunction({ contractId: contract, methodName: "top_up_claim_balance", args: {}, deposit: add, gas: TOP_UP_GAS });
   return add;
 }
 
