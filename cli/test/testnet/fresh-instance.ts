@@ -53,7 +53,9 @@ import { parseRpcFlags } from "../../src/broadcast.ts";
 import { CHAINS, defaultRpc, proofRpcs } from "../../src/chains.ts";
 import { rpc } from "../../src/proofs.ts";
 import { DEMO_READS, budgetClaims, whitehatNeed, type ClaimBudget, type ClaimPlan, type Read, type Role } from "./claim-budget.ts";
-import { formatNear, milliNear } from "../../src/near.ts";
+import { CLAIM_GAS } from "../../src/claim.ts";
+import { formatNear } from "../../src/near.ts";
+import { postingNeed } from "../../src/post.ts";
 import { DEMO_DEPLOY_GAS, MPC_ROOT, near, network as NETWORK, need, stopIfShort, wholeNumber, type Need } from "./deploy.ts";
 import { keystoreEnv, redact } from "./evm-key.ts";
 
@@ -149,6 +151,26 @@ const eth = (wei: bigint) => `${(Number(wei) / 1e18).toFixed(6)} ETH`;
 
 // ---- 0. Preflight --------------------------------------------------------------------------------
 
+/** The bounty's rules, covering `vaults`: built for the preflight's sizing before the vaults exist, and for the posting after. */
+function bountyRules(config: any, vaults: { chain_id: number; address: string }[], evmUsdc: string, exploitPublicKey: string) {
+  return {
+    covered_contracts: vaults,
+    proof_chain: CHAIN,
+    recency_limit_secs: 300,
+    listed_tokens: [
+      { token: evmUsdc, price: "1" },
+      { token: "native", price: "0" },
+    ],
+    seed: config.seed,
+    bounty_amount: BOUNTY_AMOUNT,
+    minimum_theft: MINIMUM_THEFT,
+    end_date_ns: String(BigInt(Date.now() + 30 * 86_400_000) * 1_000_000n),
+    disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
+    exploit_public_key: exploitPublicKey,
+    judge_build_hash: config.judge_build_hash,
+  };
+}
+
 const fees = await near.view(CONTRACT, "fees");
 // Gas limit at the fee limit (0.0002 ETH, R7.6), plus the L1 data fee an OP-stack chain such as
 // Base charges on top: its pool refuses a pause whose sender holds exactly gas x max fee (Day-3
@@ -222,14 +244,29 @@ for (const chain of CHAIN_IDS) {
     needs.push(need(DEPLOYER, chainName(chain), `USDC (${circleUsdc(chain)})`, have, vaultSeed(chain), showUsdc));
   }
 }
-needs.push(need(PROTOCOL, nearChain, "NEAR", (await near.balance(PROTOCOL)) ?? 0n, BigInt(fees.posting_fee) + milliNear(100), showNear));
+// The posting's NEAR in hand (#57): sized on rules of the same shape as the real ones, with
+// placeholder vaults and exploit key of the same lengths, since neither exists yet.
+const sizingRules = bountyRules(
+  await near.view(CONTRACT, "config"),
+  CHAIN_IDS.map((chain_id) => ({ chain_id, address: `0x${"0".repeat(40)}` })),
+  MAINNET ? circleUsdc(CHAIN) : `0x${"0".repeat(40)}`,
+  `x25519:${"1".repeat(44)}`,
+);
+const { need: postingNear } = await postingNeed(near, CONTRACT, PROTOCOL, NAME, sizingRules as any);
+needs.push(need(PROTOCOL, nearChain, "NEAR", (await near.freeNear(PROTOCOL)) ?? 0n, postingNear, showNear));
 needs.push(need(PROTOCOL, nearChain, `${MAINNET ? "" : "test "}USDC (${USDC})`, await ftBalance(PROTOCOL), BigInt(BOUNTY_AMOUNT), showUsdc));
 let claimBudgets: ClaimBudget[] = [];
 if (WHITEHAT) {
   // Each claim's draw, from the very proofs it will carry on this network's proof chain
   // (claim-budget.ts); the Whitehat holds the largest draw plus what the others keep.
   claimBudgets = await budgetClaims(proofRpc, fees, await claimPlans());
-  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.balance(WHITEHAT)) ?? 0n, whitehatNeed(claimBudgets), showNear));
+  // Plus one claim's gas in hand (#57): `submit_claim` attaches CLAIM_GAS, bought up front, and the
+  // claims go one at a time, so the largest claim's call is the most ever held at once.
+  const claimGas = await Promise.all(
+    claimBudgets.map((c) => near.upfrontNear([{ method: "submit_claim", gas: CLAIM_GAS, deposit: 0n, argsBytes: c.input_bytes }])),
+  );
+  const claimGasNear = claimGas.reduce((m, x) => (x > m ? x : m), 0n);
+  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.freeNear(WHITEHAT)) ?? 0n, whitehatNeed(claimBudgets) + claimGasNear, showNear));
 }
 stopIfShort(needs, {
   run: {
@@ -309,22 +346,7 @@ function newExploitKey(): string {
   writeFileSync(join(dir, `${NAME}-exploit-key.pem`), x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
   return `x25519:${base58.encode(pub)}`;
 }
-const rules = {
-  covered_contracts: chains.map((c) => ({ chain_id: c.chain_id, address: c.vault })),
-  proof_chain: CHAIN,
-  recency_limit_secs: 300,
-  listed_tokens: [
-    { token: proof.evm_usdc, price: "1" },
-    { token: "native", price: "0" },
-  ],
-  seed: config.seed,
-  bounty_amount: BOUNTY_AMOUNT,
-  minimum_theft: MINIMUM_THEFT,
-  end_date_ns: String(BigInt(Date.now() + 30 * 86_400_000) * 1_000_000n),
-  disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
-  exploit_public_key: exploitPublicKey,
-  judge_build_hash: config.judge_build_hash,
-};
+const rules = bountyRules(config, chains.map((c) => ({ chain_id: c.chain_id, address: c.vault })), proof.evm_usdc, exploitPublicKey);
 const rulesFile = join(dir, `${NAME}-rules.json`);
 writeFileSync(rulesFile, `${JSON.stringify(rules, null, 2)}\n`, { mode: 0o600 });
 const posted = spawnSync(

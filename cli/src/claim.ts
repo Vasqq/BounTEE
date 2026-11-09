@@ -67,7 +67,7 @@ import {
 } from "./status.ts";
 
 /** `submit_claim` needs at least 200 Tgas; the rest goes to storing the secret, the job and, on PAYS, signing the pauses. */
-const CLAIM_GAS = 300_000_000_000_000n;
+export const CLAIM_GAS = 300_000_000_000_000n;
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);

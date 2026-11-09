@@ -35,6 +35,14 @@ export function loadKey(network: Network, accountId: string, dir: string = crede
   return key as KeyPairString;
 }
 
+/** A function call a pre-spend check prices: its method, attached gas, deposit and argument bytes. */
+export interface PricedCall {
+  method: string;
+  gas: bigint;
+  deposit: bigint;
+  argsBytes: number;
+}
+
 export class Near {
   readonly network: Network;
   readonly url: string;
@@ -107,6 +115,50 @@ export class Near {
       if (/UNKNOWN_ACCOUNT|does not exist/.test((e as Error).message)) return null;
       throw e;
     }
+  }
+
+  /** The NEAR an account can spend: its balance less the stake its stored bytes lock; null if it doesn't exist. */
+  async freeNear(accountId: string): Promise<bigint | null> {
+    let a: { amount: string; locked: string; storage_usage: number };
+    try {
+      a = await this.rpc("query", { request_type: "view_account", finality: "final", account_id: accountId });
+    } catch (e) {
+      if (/UNKNOWN_ACCOUNT|does not exist/.test((e as Error).message)) return null;
+      throw e;
+    }
+    const { storage_amount_per_byte } = (await this.rpc<any>("EXPERIMENTAL_protocol_config", { finality: "final" })).runtime_config;
+    const stake = BigInt(a.storage_usage) * BigInt(storage_amount_per_byte) - BigInt(a.locked);
+    return BigInt(a.amount) - (stake > 0n ? stake : 0n);
+  }
+
+  /**
+   * The NEAR a signer must hold to send these function calls, each as its own transaction to
+   * another account (NEAR docs, protocol/transactions/gas). Turning a transaction into its receipt
+   * burns the send costs at the gas price; the receipt's execution costs and its attached gas are
+   * bought up front at max(gas price, min_gas_purchase_price), and what's unused comes back only
+   * afterwards. That minimum is 1e9 yoctoNEAR on mainnet and testnet while `gas_price` reports 1e8,
+   * so 270 Tgas wants 0.27 NEAR in hand: Nov 7's mainnet post failed holding 0.0903 for 0.2709.
+   * Summing the calls counts no refund between them, so a run of calls is never short.
+   */
+  async upfrontNear(calls: PricedCall[]): Promise<bigint> {
+    const [{ runtime_config: rc }, { gas_price }] = await Promise.all([
+      this.rpc<any>("EXPERIMENTAL_protocol_config", { finality: "final" }),
+      this.rpc<{ gas_price: string }>("gas_price", [null]),
+    ]);
+    const price = BigInt(gas_price);
+    const minimum = BigInt(rc.min_gas_purchase_price);
+    const buy = price > minimum ? price : minimum;
+    const receipt = rc.transaction_costs.action_receipt_creation_config;
+    const call = rc.transaction_costs.action_creation_config.function_call_cost;
+    const perByte = rc.transaction_costs.action_creation_config.function_call_cost_per_byte;
+    let total = 0n;
+    for (const c of calls) {
+      const bytes = BigInt(c.method.length + c.argsBytes);
+      const send = BigInt(receipt.send_not_sir) + BigInt(call.send_not_sir) + BigInt(perByte.send_not_sir) * bytes;
+      const execution = BigInt(receipt.execution) + BigInt(call.execution) + BigInt(perByte.execution) * bytes;
+      total += c.deposit + send * price + (execution + c.gas) * buy;
+    }
+    return total;
   }
 
   /** A transaction's whole outcome, every receipt included, once all have executed. */
