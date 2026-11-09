@@ -63,12 +63,11 @@ try {
   const judgeHash = `0x${createHash("sha256").update(readFileSync(wasm)).digest("hex")}`;
   const rulesFor = (world: "unmodified" | "adapted", pool: string) => ({
     covered_contracts: [{ chain_id: 31337, address: made[world]![pool] }],
-    proof_chain: 31337,
     recency_limit_secs: 300,
     // Per smallest unit, in 10^-18 USD: DVT at $1, ETH at $3,000.
     listed_tokens: [
-      { token: made[world]!.DamnValuableToken, price: "1" },
-      { token: "native", price: "3000" },
+      { chain_id: 31337, token: made[world]!.DamnValuableToken, price: "1" },
+      { chain_id: 31337, token: "native", price: "3000" },
     ],
     seed: { native: "1000000000000000000", tokens: [] },
     bounty_amount: "100000000",
