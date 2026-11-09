@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { parseReplay, parseRules, toJson, type BlockRef, type Exploit, type Rules, type Verdict } from "@bountee/formats";
 import { parseBountyId, proofChain } from "./bounties.ts";
-import { proofRpcs } from "./chains.ts";
+import { chainLabel, proofRpcs } from "./chains.ts";
 import type { Near } from "./near.ts";
 import { collectReplay, exploitFromBroadcast, rpc, runJudge } from "./proofs.ts";
 
@@ -125,19 +125,19 @@ function freshAccount(root: string): { key: string; address: string } {
 
 async function pickRpc(chainId: number, o: TestOptions): Promise<{ urls: string[]; block: number }> {
   const urls = o.rpc ? [o.rpc] : proofRpcs(chainId);
-  if (urls.length === 0) throw new Error(`no public RPC known for chain ${chainId}: pass --rpc`);
+  if (urls.length === 0) throw new Error(`no public RPC known for ${chainLabel(chainId)}: pass --rpc`);
   const errors: string[] = [];
   for (const [i, url] of urls.entries()) {
     try {
       const chain = Number(BigInt(await rpc<string>(url, "eth_chainId", [])));
-      if (chain !== chainId) throw new Error(`serves chain ${chain}, not ${chainId}`);
+      if (chain !== chainId) throw new Error(`serves ${chainLabel(chain)}, not ${chainLabel(chainId)}`);
       const head = Number(BigInt(await rpc<string>(url, "eth_blockNumber", [])));
       return { urls: urls.slice(i), block: o.block ?? head - BLOCKS_BEHIND };
     } catch (e) {
       errors.push(`${url}: ${(e as Error).message}`);
     }
   }
-  throw new Error(`no RPC answered for chain ${chainId}:\n${errors.join("\n")}`);
+  throw new Error(`no RPC answered for ${chainLabel(chainId)}:\n${errors.join("\n")}`);
 }
 
 /** Dry-run the script as `attacker` on a fork at `block` and read back its broadcast as an Exploit (D3). */
