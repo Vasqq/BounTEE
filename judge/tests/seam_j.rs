@@ -139,17 +139,20 @@ fn proof_of<'a>(job: &'a mut Value, address: &str) -> &'a mut Value {
         .unwrap_or_else(|| panic!("a proof of {address}"))
 }
 
+/// The fixture chain, anvil's: the chain the fixture block is on (`state.json`).
+const ANVIL: u64 = 31337;
+
 fn set_prices(job: &mut Value, token: &str, native: &str) {
     rules(job)["listed_tokens"] = json!([
-        { "chain_id": 31337, "token": address("token"), "price": token },
-        { "chain_id": 31337, "token": "native", "price": native },
+        { "chain_id": ANVIL, "token": address("token"), "price": token },
+        { "chain_id": ANVIL, "token": "native", "price": native },
     ]);
 }
 
 fn cover(job: &mut Value, vaults: &[&str]) {
     rules(job)["covered_contracts"] = vaults
         .iter()
-        .map(|v| json!({ "chain_id": 31337, "address": address(v) }))
+        .map(|v| json!({ "chain_id": ANVIL, "address": address(v) }))
         .collect();
 }
 
@@ -244,8 +247,8 @@ fn r3_8_no_loss_scores_zero() {
 
 // ---- D1, R3.8: the claim's chain ----------------------------------------------------------
 
-/// The other chain of a two-chain bounty: Arbitrum Sepolia. The fixture's block is on the
-/// anvil chain (31337), the claim's proof chain.
+/// The other chain of a two-chain bounty: Arbitrum Sepolia. The fixture's block is on
+/// [`ANVIL`], the claim's proof chain.
 const OTHER_CHAIN: u64 = 421614;
 
 /// D1: a replay job whose block is on a chain no covered contract is on is INVALID
@@ -272,13 +275,13 @@ fn r3_8_d1_loss_and_value_count_only_the_claims_chain() {
     let mut j = job("drain");
     rules(&mut j)["covered_contracts"] = json!([
         { "chain_id": OTHER_CHAIN, "address": address("vault2") },
-        { "chain_id": 31337, "address": address("vault1") },
+        { "chain_id": ANVIL, "address": address("vault1") },
     ]);
     rules(&mut j)["listed_tokens"] = json!([
-        { "chain_id": 31337, "token": address("token"), "price": "1000" },
+        { "chain_id": ANVIL, "token": address("token"), "price": "1000" },
         { "chain_id": OTHER_CHAIN, "token": address("token"), "price": "7" },
         { "chain_id": OTHER_CHAIN, "token": "native", "price": "13" },
-        { "chain_id": 31337, "token": "native", "price": "1" },
+        { "chain_id": ANVIL, "token": "native", "price": "1" },
     ]);
     let score = 500 * 1000 + 2 * ETHER;
     rules(&mut j)["minimum_theft"] = json!(score.to_string());
@@ -487,7 +490,7 @@ fn r4_5_r4_8_contract_a_covered_contract_creates_needs_no_proof_and_is_not_gain(
     let child = address("child");
     proofs(&mut j).retain(|p| p["address"] != child.as_str());
     cover(&mut j, &["factory"]);
-    rules(&mut j)["listed_tokens"] = json!([{ "chain_id": 31337, "token": "native", "price": "1" }]);
+    rules(&mut j)["listed_tokens"] = json!([{ "chain_id": ANVIL, "token": "native", "price": "1" }]);
     rules(&mut j)["minimum_theft"] = json!("1");
     assert_verdict(&j, Reason::BelowMinimumTheft);
 }
@@ -499,7 +502,7 @@ fn r4_5_r4_8_contract_a_covered_contract_creates_needs_no_proof_and_is_not_gain(
 fn r4_5_create2_by_an_existing_contract_needs_a_proof_of_absence() {
     let mut j = job("spawnChild2");
     cover(&mut j, &["factory"]);
-    rules(&mut j)["listed_tokens"] = json!([{ "chain_id": 31337, "token": "native", "price": "1" }]);
+    rules(&mut j)["listed_tokens"] = json!([{ "chain_id": ANVIL, "token": "native", "price": "1" }]);
     rules(&mut j)["minimum_theft"] = json!("1");
     assert_verdict(&j, Reason::BelowMinimumTheft);
     let child = address("child2");
@@ -556,7 +559,7 @@ fn r4_7_seed_is_subtracted_from_gain() {
 #[test]
 fn r4_9_unlisted_token_is_worth_nothing() {
     let mut j = job("viaContract");
-    rules(&mut j)["listed_tokens"] = json!([{ "chain_id": 31337, "token": "native", "price": "1000000" }]);
+    rules(&mut j)["listed_tokens"] = json!([{ "chain_id": ANVIL, "token": "native", "price": "1000000" }]);
     rules(&mut j)["minimum_theft"] = json!("1");
     assert_verdict(&j, Reason::BelowMinimumTheft);
 }
