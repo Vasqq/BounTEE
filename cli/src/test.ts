@@ -1,7 +1,8 @@
 // `bountee test`: judge a Whitehat's Foundry script locally against the proof chain as it is
 // now (ticket #11; D2, D3, R2.9, R4.5).
 //
-// 1. Pick a recent block of the proof chain from an ordinary public RPC.
+// 1. Pick a recent block of the proof chain, the covered chain `--chain` names (D26), from an
+//    ordinary public RPC.
 // 2. Fork the chain at that block with anvil, give a fresh account the bounty's seed, and
 //    dry-run the script as that account; its broadcast log becomes the shared Exploit.
 // 3. Prove every account and slot the replay reads, from the same public RPC (proofs.ts).
@@ -20,7 +21,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { parseReplay, parseRules, toJson, type BlockRef, type Exploit, type Rules, type Verdict } from "@bountee/formats";
-import { parseBountyId } from "./bounties.ts";
+import { parseBountyId, proofChain } from "./bounties.ts";
 import { proofRpcs } from "./chains.ts";
 import type { Near } from "./near.ts";
 import { collectReplay, exploitFromBroadcast, rpc, runJudge } from "./proofs.ts";
@@ -39,6 +40,8 @@ export interface TestOptions {
   block?: number;
   judge?: string;
   contract?: string;
+  /** The covered chain to prove on (`--chain`, through `parseChain`); optional on a one-chain bounty (D26). */
+  chain?: number;
   /** The NEAR network a bounty id is read from. */
   near: Near;
 }
@@ -120,16 +123,6 @@ function freshAccount(root: string): { key: string; address: string } {
 
 // ---- Steps ---------------------------------------------------------------------------------------------
 
-/**
- * The chain a claim is proven on: the first covered chain, until `--chain` lets the Whitehat
- * name any covered chain (D26, #64). The claim's block carries it (D1).
- */
-export function proofChain(rules: Rules): number {
-  const first = rules.covered_contracts[0];
-  if (!first) throw new Error("the bounty covers no contract, so no chain to prove a claim on");
-  return first.chain_id;
-}
-
 async function pickRpc(chainId: number, o: TestOptions): Promise<{ urls: string[]; block: number }> {
   const urls = o.rpc ? [o.rpc] : proofRpcs(chainId);
   if (urls.length === 0) throw new Error(`no public RPC known for chain ${chainId}: pass --rpc`);
@@ -196,8 +189,8 @@ async function scriptToExploit(o: TestOptions, rules: Rules, forkUrl: string, bl
 
 export async function testCommand(o: TestOptions): Promise<TestResult> {
   const rules = await loadRules(o);
+  const chainId = proofChain(rules, o.chain);
   const wasm = judgeWasm(o);
-  const chainId = proofChain(rules);
   const { urls, block } = await pickRpc(chainId, o);
   const { exploit, attacker } = await scriptToExploit(o, rules, urls[0]!, block);
 

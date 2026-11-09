@@ -12,10 +12,10 @@
 //   as is a payout left waiting (`retry_payout`) or a claim with no verdict (`retry_claim`):
 //   each as the command the Whitehat runs.
 import { readFileSync } from "node:fs";
-import { parseReplay, RECENCY_LIMIT_SECS, type Replay, type Verdict } from "@bountee/formats";
+import { parseReplay, RECENCY_LIMIT_SECS, type BlockRef, type Replay, type Verdict } from "@bountee/formats";
 import { broadcastCommand, type BroadcastResult } from "./broadcast.ts";
 import { rpc } from "./proofs.ts";
-import { proofRpcs } from "./chains.ts";
+import { chainLabel, proofRpcs } from "./chains.ts";
 import { testCommand, type TestOptions, type TestResult } from "./test.ts";
 import { verifyPauses, type VerifyResult } from "./verify-pause.ts";
 import { Near, events, formatNear, milliNear, roundUpNear, tgas, type PricedCall } from "./near.ts";
@@ -34,37 +34,55 @@ export interface PreparedClaim {
   test?: TestResult;
 }
 
-async function blockTimestamp(chainId: number, number: number, rpcUrl?: string): Promise<number> {
-  const urls = rpcUrl ? [rpcUrl] : proofRpcs(chainId);
+/**
+ * The claim's block's timestamp, from its chain's RPCs (or `rpcUrl`). Only an RPC that holds that
+ * very block (its hash) answers, so an RPC of another chain, given with --proof-rpc, can't
+ * pass a block off as recent (R2.8).
+ */
+async function blockTimestamp(block: BlockRef, rpcUrl?: string): Promise<number> {
+  const urls = rpcUrl ? [rpcUrl] : proofRpcs(block.chain_id);
+  const errors: string[] = [];
   for (const url of urls) {
     try {
-      const b = await rpc<{ timestamp: string }>(url, "eth_getBlockByNumber", [`0x${number.toString(16)}`, false]);
+      const b = await rpc<{ hash: string; timestamp: string }>(url, "eth_getBlockByNumber", [`0x${block.number.toString(16)}`, false]);
+      if (b.hash !== block.hash) throw new Error(`its block ${block.number} is ${b.hash}, not the claim's (is it ${chainLabel(block.chain_id)}'s RPC?)`);
       return Number(BigInt(b.timestamp));
-    } catch {
-      // next RPC
+    } catch (e) {
+      errors.push(`${url}: ${(e as Error).message}`);
     }
   }
-  throw new Error(`no RPC answered for block ${number} of chain ${chainId}`);
+  throw new Error(`no RPC holds block ${block.number} of ${chainLabel(block.chain_id)}:\n${errors.join("\n")}`);
+}
+
+/** A job `bountee test` saved (`--out`), read from `path`. */
+export interface SavedJob {
+  path: string;
+  replay: Replay;
+}
+
+/** The job saved at `path`, parsed: the claim's block, header, proofs and exploit, and the rules it was judged under. */
+export function readJob(path: string): SavedJob {
+  return { path, replay: parseReplay(JSON.parse(readFileSync(path, "utf8")).replay) };
 }
 
 /**
  * The inputs to claim with: those `test` saved in `job` if still recent enough, else a fresh
  * `test` run of `script`. What is submitted is exactly the saved job's block, header and proofs.
  */
-export async function prepareClaim(o: { job?: string; test?: TestOptions; rpc?: string }): Promise<PreparedClaim> {
+export async function prepareClaim(o: { job?: SavedJob; test?: TestOptions; rpc?: string }): Promise<PreparedClaim> {
   const usable = (age: number) => age + SUBMIT_MARGIN_SECS < RECENCY_LIMIT_SECS;
   if (o.job) {
-    const replay = parseReplay(JSON.parse(readFileSync(o.job, "utf8")).replay);
-    const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.block.chain_id, replay.block.number, o.rpc));
+    const { replay, path } = o.job;
+    const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.block, o.rpc));
     if (usable(age) || !o.test) {
-      if (!usable(age)) throw new Error(`${o.job} is ${age} s old: re-run \`bountee test\` (claims must be under ${RECENCY_LIMIT_SECS} s)`);
-      return { replay, local: null, saved: o.job, block_age_secs: age, reran: false };
+      if (!usable(age)) throw new Error(`${path} is ${age} s old: re-run \`bountee test\` (claims must be under ${RECENCY_LIMIT_SECS} s)`);
+      return { replay, local: null, saved: path, block_age_secs: age, reran: false };
     }
   }
   if (!o.test) throw new Error("claim needs a Foundry script or a saved job (--job)");
   const result = await testCommand(o.test);
-  const replay = parseReplay(JSON.parse(readFileSync(result.saved, "utf8")).replay);
-  const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.block.chain_id, replay.block.number, result.rpc));
+  const { replay } = readJob(result.saved);
+  const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.block, result.rpc));
   if (!usable(age)) throw new Error(`the test took too long: its block is already ${age} s old`);
   return { replay, local: result.verdict, saved: result.saved, block_age_secs: age, reran: o.job !== undefined, test: result };
 }

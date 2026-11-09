@@ -42,6 +42,15 @@ const PAUSES = [
   { chain_id: 421614, contract: "0x" + "bb".repeat(20), nonce: 0, tx: "0x02", tx_hash: "0x" + "b2".repeat(32) },
 ];
 const JUDGE_HASH = "5a".repeat(32);
+/** The bounty's rules as the contract shows them: the paused contracts covered, each chain's native coin listed. */
+const RULES = {
+  ...JSON.parse(readFileSync(new URL("../../judge/tests/fixtures/rules.json", import.meta.url), "utf8")),
+  covered_contracts: PAUSES.map((p) => ({ chain_id: p.chain_id, address: p.contract })),
+  listed_tokens: PAUSES.map((p) => ({ chain_id: p.chain_id, token: "native", price: "1" })),
+  bounty_amount: "100000000",
+};
+/** The anvil fixture's block, relabelled to the bounty's first chain: the stand-in contract checks no header (D1, D26). */
+const onCoveredChain = (block: { chain_id: number }) => ({ ...block, chain_id: PAUSES[0]!.chain_id });
 const PAYS = { outcome: "PAYS", reason: "minimum_theft_reached" };
 
 // ---- The stand-in's world, moved on by `step` -------------------------------------------------
@@ -65,7 +74,7 @@ function reset() {
     claim: null,
     bounty: {
       id: BOUNTY,
-      rules: { bounty_amount: "100000000", covered_contracts: PAUSES.map((p) => ({ chain_id: p.chain_id, address: p.contract })) },
+      rules: RULES,
       state: "live",
       winning_claim: null,
       signed_pauses: [],
@@ -329,12 +338,12 @@ test("D23 D24 R14.5: claim shows its own progress live after filing, then gives 
   writeFileSync(join(dir, `${WHITEHAT}.json`), JSON.stringify({ account_id: WHITEHAT, public_key: keystore.getPublicKey().toString(), private_key: keystore.toString() }));
   const state = JSON.parse(readFileSync(new URL("state.json", judgeFixtures), "utf8"));
   writeFileSync(join(dir, "exploit.json"), readFileSync(new URL("exploits/drain.json", judgeFixtures)));
-  writeFileSync(join(dir, "evidence.json"), JSON.stringify({ block: state.block, header: state.header, proofs: state.proofs }));
+  writeFileSync(join(dir, "evidence.json"), JSON.stringify({ block: onCoveredChain(state.block), header: state.header, proofs: state.proofs }));
 
   const r = await follow(
     [
       "claim", "--contract", CONTRACT, "--bounty", `${BOUNTY.protocol}/${BOUNTY.name}`, "--as", WHITEHAT,
-      "--exploit", join(dir, "exploit.json"), "--evidence", join(dir, "evidence.json"),
+      "--exploit", join(dir, "exploit.json"), "--evidence", join(dir, "evidence.json"), "--chain", String(PAUSES[0]!.chain_id),
       "--rpc", `${base}/near`, "--outlayer-api", `${base}/outlayer`, "--tx-api", `${base}/txapi`, "--chain-rpc", `84532=${base}/evm,421614=${base}/evm`,
       "--no-broadcast", "--interval", "0.05", "--json",
     ],
@@ -361,11 +370,11 @@ test("R11.1: claim refuses, filing nothing, when the Whitehat can't hold submit_
   writeFileSync(join(dir, `${WHITEHAT}.json`), JSON.stringify({ account_id: WHITEHAT, public_key: keystore.getPublicKey().toString(), private_key: keystore.toString() }));
   const state = JSON.parse(readFileSync(new URL("state.json", judgeFixtures), "utf8"));
   writeFileSync(join(dir, "exploit.json"), readFileSync(new URL("exploits/drain.json", judgeFixtures)));
-  writeFileSync(join(dir, "evidence.json"), JSON.stringify({ block: state.block, header: state.header, proofs: state.proofs }));
+  writeFileSync(join(dir, "evidence.json"), JSON.stringify({ block: onCoveredChain(state.block), header: state.header, proofs: state.proofs }));
   const r = await follow(
     [
       "claim", "--contract", CONTRACT, "--bounty", `${BOUNTY.protocol}/${BOUNTY.name}`, "--as", WHITEHAT,
-      "--exploit", join(dir, "exploit.json"), "--evidence", join(dir, "evidence.json"),
+      "--exploit", join(dir, "exploit.json"), "--evidence", join(dir, "evidence.json"), "--chain", String(PAUSES[0]!.chain_id),
       "--rpc", `${base}/near`, "--outlayer-api", `${base}/outlayer`, "--tx-api", `${base}/txapi`, "--chain-rpc", `84532=${base}/evm,421614=${base}/evm`,
       "--no-broadcast", "--interval", "0.05", "--json",
     ],

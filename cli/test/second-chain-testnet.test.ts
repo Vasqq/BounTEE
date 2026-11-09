@@ -106,7 +106,7 @@ describe.runIf(RUN)("#20: one winning claim pauses the vault on Base Sepolia and
     const exploit = sealedExploit();
     const id = { protocol: instance.protocol, name: instance.name };
     const arbBefore = { usdc: usdcOf(ARBITRUM, on(ARBITRUM)), shares: sharesOf(ARBITRUM, on(ARBITRUM).vault) };
-    const r = await run(process.execPath, [entry, "claim", exploit, "--bounty", instance.bounty, "--contract", contract, "--as", whitehat, "--verify-wait", "3600", "--timeout", "3600", "--json"], { VAULT: on(BASE).vault });
+    const r = await run(process.execPath, [entry, "claim", exploit, "--bounty", instance.bounty, "--chain", "base-sepolia", "--contract", contract, "--as", whitehat, "--verify-wait", "3600", "--timeout", "3600", "--json"], { VAULT: on(BASE).vault });
     const out = JSON.parse(r.stdout || "{}");
     record("claim", { code: r.code, claim_id: out.claim_id, tx: out.tx_hash, verdict: out.verdict, local_verdict: out.local_verdict, paid: out.paid, broadcast: out.broadcast, verification: out.verification, stderr: r.stderr.slice(-2000) });
 

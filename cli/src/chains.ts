@@ -5,6 +5,8 @@ import { rpc } from "./proofs.ts";
 
 export interface Chain {
   name: string;
+  /** The names `--chain` takes for it, in any case (D26), beside its chain ID. */
+  names: string[];
   /** Public RPCs in order of preference; the first is the default for sending and reading. */
   rpcs: string[];
   /** Those known to serve `eth_getProof` at recent blocks, for `test` (spec, RPCs). */
@@ -24,6 +26,7 @@ export interface Chain {
 export const CHAINS: Record<number, Chain> = {
   84532: {
     name: "Base Sepolia",
+    names: ["base-sepolia"],
     rpcs: ["https://sepolia.base.org", "https://84532.rpc.thirdweb.com"],
     proofRpcs: ["https://sepolia.base.org", "https://84532.rpc.thirdweb.com"],
     explorerTx: "https://sepolia.basescan.org/tx/",
@@ -31,6 +34,7 @@ export const CHAINS: Record<number, Chain> = {
   },
   421614: {
     name: "Arbitrum Sepolia",
+    names: ["arbitrum-sepolia"],
     rpcs: ["https://sepolia-rollup.arbitrum.io/rpc", "https://421614.rpc.thirdweb.com"],
     proofRpcs: ["https://sepolia-rollup.arbitrum.io/rpc", "https://421614.rpc.thirdweb.com"],
     explorerTx: "https://sepolia.arbiscan.io/tx/",
@@ -42,6 +46,7 @@ export const CHAINS: Record<number, Chain> = {
   },
   8453: {
     name: "Base",
+    names: ["base"],
     rpcs: ["https://mainnet.base.org", "https://8453.rpc.thirdweb.com"],
     // Not mainnet.base.org: it answers "no state found" for a proof 100 blocks back (Nov 5).
     proofRpcs: ["https://8453.rpc.thirdweb.com", "https://base.drpc.org"],
@@ -51,6 +56,7 @@ export const CHAINS: Record<number, Chain> = {
   },
   42161: {
     name: "Arbitrum One",
+    names: ["arbitrum", "arbitrum-one"],
     rpcs: ["https://arb1.arbitrum.io/rpc", "https://42161.rpc.thirdweb.com"],
     // Not PublicNode: it wants a token for proofs 100 blocks back (Nov 5).
     proofRpcs: ["https://arb1.arbitrum.io/rpc", "https://42161.rpc.thirdweb.com"],
@@ -59,6 +65,21 @@ export const CHAINS: Record<number, Chain> = {
     usdc: "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
   },
 };
+
+/** A chain named on the command line (`--chain`): a known chain's name, in any case, or a chain ID. */
+export function parseChain(text: string): number {
+  const names = Object.entries(CHAINS).flatMap(([id, c]) => c.names.map((name) => [name, Number(id)] as const));
+  const named = names.find(([name]) => name === text.toLowerCase());
+  if (named) return named[1];
+  if (/^[1-9][0-9]*$/.test(text) && Number.isSafeInteger(Number(text))) return Number(text);
+  throw new Error(`--chain takes a chain ID or one of ${names.map(([name]) => name).join(", ")}: got ${text}`);
+}
+
+/** A chain as people read it: "Arbitrum Sepolia (421614)", or "chain 31337" for one BounTEE doesn't know. */
+export function chainLabel(chainId: number): string {
+  const name = CHAINS[chainId]?.name;
+  return name ? `${name} (${chainId})` : `chain ${chainId}`;
+}
 
 /** The chain's default public RPC, if BounTEE knows the chain. */
 export function defaultRpc(chainId: number): string | undefined {
