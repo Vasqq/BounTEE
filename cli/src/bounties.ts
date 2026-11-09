@@ -54,7 +54,7 @@ export async function listBounties(near: Near, contract: string): Promise<{ cont
         bounty_amount: b.rules.bounty_amount,
         minimum_theft: b.rules.minimum_theft,
         end_date_ns: b.rules.end_date_ns,
-        chains: [...new Set(b.rules.covered_contracts.map((c) => c.chain_id))],
+        chains: coveredChains(b.rules),
         covered_contracts: b.rules.covered_contracts.length,
       };
     }),
@@ -100,6 +100,11 @@ export function parseBountyId(text: string): BountyId {
   }
 }
 
+/** Every chain a covered contract is on, each once, in the rules' order: each can be a claim's proof chain (D1). */
+export function coveredChains(rules: Rules): number[] {
+  return [...new Set(rules.covered_contracts.map((c) => c.chain_id))];
+}
+
 export async function showBounty(near: Near, contract: string, id: BountyId): Promise<BountyDetail> {
   const b = await near.view<any>(contract, "bounty", { id });
   if (!b) throw new Error(`no bounty ${id.protocol}/${id.name} on ${contract}`);
@@ -109,7 +114,7 @@ export async function showBounty(near: Near, contract: string, id: BountyId): Pr
   ]);
   const rules: Rules = b.rules;
   // Any covered chain can be a claim's proof chain (D1), so each one's pinned RPCs are trusted.
-  const chains = [...new Set(rules.covered_contracts.map((c) => c.chain_id))];
+  const chains = coveredChains(rules);
   return {
     contract,
     id,
@@ -154,7 +159,7 @@ export function formatBounty(d: BountyDetail): string {
     `${d.id.protocol}/${d.id.name} on ${d.contract}: ${d.state}`,
     `  pays ${r.bounty_amount} (USDC, smallest unit) to the first claim whose fresh accounts take at least ${r.minimum_theft} from the covered contracts`,
     `  valued in: ${r.listed_tokens.map((t) => `${t.token} on chain ${t.chain_id} at ${t.price}`).join(", ")}`,
-    `  provable on any covered chain (${[...new Set(r.covered_contracts.map((c) => c.chain_id))].join(", ")}), replayed at a block of that chain at most ${r.recency_limit_secs} s old; ends ${days(r.end_date_ns)}; exploit published ${r.disclosure_delay_days} day(s) after a win`,
+    `  provable on any covered chain (${coveredChains(r).join(", ")}), replayed at a block of that chain at most ${r.recency_limit_secs} s old; ends ${days(r.end_date_ns)}; exploit published ${r.disclosure_delay_days} day(s) after a win`,
     "  covered contracts:",
     ...d.covered_contracts.map((c) => `    ${c.chain} (${c.chain_id}) ${c.address}`),
     `  pause-role address: ${d.pause_role}`,

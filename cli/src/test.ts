@@ -124,7 +124,7 @@ function freshAccount(root: string): { key: string; address: string } {
  * The chain a claim is proven on: the first covered chain, until `--chain` lets the Whitehat
  * name any covered chain (D26, #64). The claim's block carries it (D1).
  */
-export function provingChain(rules: Rules): number {
+export function proofChain(rules: Rules): number {
   const first = rules.covered_contracts[0];
   if (!first) throw new Error("the bounty covers no contract, so no chain to prove a claim on");
   return first.chain_id;
@@ -197,7 +197,7 @@ async function scriptToExploit(o: TestOptions, rules: Rules, forkUrl: string, bl
 export async function testCommand(o: TestOptions): Promise<TestResult> {
   const rules = await loadRules(o);
   const wasm = judgeWasm(o);
-  const chainId = provingChain(rules);
+  const chainId = proofChain(rules);
   const { urls, block } = await pickRpc(chainId, o);
   const { exploit, attacker } = await scriptToExploit(o, rules, urls[0]!, block);
 
