@@ -286,7 +286,7 @@ impl Sandbox {
     fn claim_args(&self, name: &str) -> Value {
         json!({
             "bounty": { "protocol": self.protocol.id(), "name": name },
-            "block": { "number": 1234, "hash": format!("0x{}", "ab".repeat(32)) },
+            "block": { "chain_id": 84532, "number": 1234, "hash": format!("0x{}", "ab".repeat(32)) },
             "header": "0xf90200",
             "proofs": PROOFS,
             "sealed_exploit": sealed(),
@@ -314,11 +314,10 @@ fn rules(s: &Sandbox, end_in_ns: u64, now_ns: u64) -> Value {
         "covered_contracts": [
             { "chain_id": 84532, "address": "0x00000000000000000000000000000000000000aa" },
         ],
-        "proof_chain": 84532,
         "recency_limit_secs": 300,
         "listed_tokens": [
-            { "token": "native", "price": "1" },
-            { "token": "0x00000000000000000000000000000000000000bb", "price": "1000000000000" },
+            { "chain_id": 84532, "token": "native", "price": "1" },
+            { "chain_id": 84532, "token": "0x00000000000000000000000000000000000000bb", "price": "1000000000000" },
         ],
         "seed": { "native": SEED_NATIVE, "tokens": [] },
         "bounty_amount": BOUNTY_AMOUNT.to_string(),
@@ -1400,9 +1399,9 @@ async fn pays_signs_every_pause_from_the_pause_role_address_and_then_pays() -> a
     Ok(())
 }
 
-/// D1, R7.1: a bounty covering Base Sepolia and Arbitrum Sepolia, with Base as its proof
-/// chain. A claim is ONE judge job, carrying the rules with that one proof chain and the
-/// claim's block on it, with nothing asked of the other chain; its PAYS verdict signs a
+/// D1, R7.1: a bounty covering Base Sepolia and Arbitrum Sepolia, with a claim proven on
+/// Base. A claim is ONE judge job, carrying the rules and the claim's block with its chain
+/// (ADR-0020), with nothing asked of the other chain; its PAYS verdict signs a
 /// pause for the covered contract on each chain, each for its own chain ID with that
 /// chain's first nonce, before the payout.
 #[tokio::test]
@@ -1424,7 +1423,7 @@ async fn d1_a_two_chain_bounty_is_judged_once_on_its_proof_chain_and_pauses_both
     assert_eq!(jobs.len(), jobs_before + 1, "one job for the claim");
     let input: Value = serde_json::from_str(jobs.last().unwrap()["input_data"].as_str().unwrap())?;
     let judged = &input["judge_claim"];
-    assert_eq!(judged["rules"]["proof_chain"], 84532);
+    assert_eq!(judged["block"]["chain_id"], 84532);
     assert_eq!(judged["rules"]["covered_contracts"], rules["covered_contracts"]);
     assert_eq!(judged["block"], s.claim_args("vault")["block"]);
 
