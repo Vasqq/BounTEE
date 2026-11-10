@@ -2,6 +2,8 @@
 
 The web app is mainnet-only (ADR-0017), so its bounty list holds the one demo bounty and nobody can try posting without real USDC. Visitors and judges want to click through a bounty in every state and post one themselves at no cost. So the same web app also runs as a second site, built for NEAR testnet, Base Sepolia and Arbitrum Sepolia, on its own `testnet.` subdomain (Liam, Nov 10). The network stays a deployment setting: one environment variable picks it when the site is built, and no page offers a switch.
 
+Amended Nov 10 (Liam): the site's contract is `bounty2.bountee.testnet`, deployed the same way. Its bounties vary their covered chains and minimum thefts, which posted bounties can't change, and `bounty.bountee.testnet` holds no keys, so it stays deployed, unlinked.
+
 ## Decisions
 
 - **Two sites, one codebase.** `NEXT_PUBLIC_NETWORK` is `mainnet` (the default) or `testnet`. It picks one table of every network value the app reads or signs with: NEAR RPCs and explorers, the bounty contract, NEAR's USDC, the MPC root key the pause-role address is derived from, the EVM chains and their explorers and USDC, NEAR's Ethereum-compatible chain (397 or 398), and the network the Verify command names. Every per-endpoint override that exists today still wins over the table.
