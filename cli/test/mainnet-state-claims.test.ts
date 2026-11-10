@@ -36,8 +36,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { defaultRpc, proofRpcs } from "../src/chains.ts";
+import { CHAINS, defaultRpc, proofRpcs } from "../src/chains.ts";
 import { fetchProof, rpc } from "../src/proofs.ts";
+import { BLOCKS_BEHIND } from "../src/test.ts";
 import { loadState } from "./mainnet-state/build.ts";
 import { DEMO_READS, type Role } from "./testnet/claim-budget.ts";
 import { sealedExploit } from "./testnet/sealed-exploit.ts";
@@ -54,11 +55,13 @@ const cast = (...args: string[]) => spawnSync("cast", args, { encoding: "utf8" }
 
 /** The claims rehearsed: the cheat where the run files it, the win on each chain the agent may pick. */
 const CASES = [
-  { kind: "cheat", chain: 8453, name: "base", outcome: "ZERO", requirement: "R4.11" },
-  { kind: "win", chain: 8453, name: "base", outcome: "PAYS", requirement: "R3.10" },
-  { kind: "win", chain: 42161, name: "arbitrum", outcome: "PAYS", requirement: "R3.10" },
+  { kind: "cheat", chain: 8453, outcome: "ZERO", requirement: "R4.11" },
+  { kind: "win", chain: 8453, outcome: "PAYS", requirement: "R3.10" },
+  { kind: "win", chain: 42161, outcome: "PAYS", requirement: "R3.10" },
 ] as const;
 type Case = (typeof CASES)[number];
+/** The name `--chain` takes for a chain, as the agent would type it. */
+const chainName = (chainId: number) => CHAINS[chainId]!.names[0]!;
 
 describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base and Arbitrum One (#59, #35)", () => {
   const manifest = RUN ? JSON.parse(readFileSync(MANIFEST!, "utf8")) : {};
@@ -67,7 +70,7 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base an
   const loaded: Record<number, { proc: ChildProcess; url: string; block: number; manifestChain: any }> = {};
   let rulesFile: string;
   let judge: string;
-  const results: Record<string, unknown> = {};
+  const results: Record<string, unknown> = { label: "Recorded analysis on a local copy of mainnet state, not mainnet evidence (#59, #35)" };
   const record = (k: string, v: unknown) => {
     results[k] = v;
     writeFileSync(join(dir, "claims.json"), `${JSON.stringify(results, null, 2)}\n`);
@@ -90,11 +93,11 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base an
   afterAll(() => Object.values(loaded).forEach((l) => l.proc.kill()));
 
   /** `bountee test` of one case on its chain's copy; returns its result and the job it saved. */
-  function claim({ kind, chain, name }: Case, script: string): Promise<{ result: any; job: any }> {
+  function claim({ kind, chain }: Case, script: string): Promise<{ result: any; job: any }> {
     const out = join(dir, `${kind}-${chain}-job.json`);
     const { url, block, manifestChain } = loaded[chain]!;
     return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [entry, "test", script, "--bounty", rulesFile, "--chain", name, "--rpc", url, "--block", String(block), "--judge", judge, "--out", out, "--json"], {
+      const child = spawn(process.execPath, [entry, "test", script, "--bounty", rulesFile, "--chain", chainName(chain), "--rpc", url, "--block", String(block), "--judge", judge, "--out", out, "--json"], {
         cwd: repo,
         env: { ...process.env, VAULT: manifestChain.vault },
       });
@@ -103,7 +106,7 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base an
       child.stdout.on("data", (d) => (stdout += d));
       child.stderr.on("data", (d) => (stderr += d));
       child.on("close", (code) => {
-        if (code !== 0) return reject(new Error(`bountee test (${kind} on ${name}) exited ${code}:\n${stderr}`));
+        if (code !== 0) return reject(new Error(`bountee test (${kind} on ${chainName(chain)}) exited ${code}:\n${stderr}`));
         resolve({ result: JSON.parse(stdout.trim().split("\n").pop()!), job: JSON.parse(readFileSync(out, "utf8")).replay });
       });
     });
@@ -147,7 +150,7 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base an
   async function timeProofs(job: any, chain: number) {
     const timings: { rpc: string; ms: number }[] = [];
     for (const proofRpc of proofRpcs(chain)) {
-      const head = Number(BigInt(await rpc<string>(proofRpc, "eth_blockNumber", []))) - 3;
+      const head = Number(BigInt(await rpc<string>(proofRpc, "eth_blockNumber", []))) - BLOCKS_BEHIND;
       const start = Date.now();
       for (const p of job.proofs) await fetchProof(proofRpc, p.address, p.storage.map((s: any) => s.key), head);
       timings.push({ rpc: proofRpc, ms: Date.now() - start });
@@ -156,7 +159,8 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base an
   }
 
   for (const c of CASES) {
-    const { kind, chain, name, outcome, requirement } = c;
+    const { kind, chain, outcome, requirement } = c;
+    const name = chainName(chain);
     test(`${requirement} rehearsal: on the copy of mainnet the ${kind} claim proven on ${name} is judged ${outcome} by the pinned judge, its reads match the claim budget's, and its proofs fetch well inside the recency limit`, async () => {
       const script = kind === "cheat" ? join(repo, "demo/script/HonestUser.s.sol") : sealedExploit();
       const { result, job } = await claim(c, script);

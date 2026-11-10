@@ -325,7 +325,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     exploit_public_key: "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
     judge_build_hash: PINNED_JUDGE,
   };
-  const manifest = { bounty: BOUNTY, contract: CONTRACT, pause_role: role, built_at: new Date().toISOString(), rules, chains };
+  const manifest = { label: "A local copy of mainnet state for analysis, not mainnet evidence (#58, #35)", bounty: BOUNTY, contract: CONTRACT, pause_role: role, built_at: new Date().toISOString(), rules, chains };
   writeFileSync(join(OUT, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(JSON.stringify(manifest));
 }
