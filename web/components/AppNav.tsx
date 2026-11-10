@@ -16,6 +16,9 @@ function TestnetBadge() {
   );
 }
 
+/** The landing page's Verify section: this site's own on mainnet; on testnet, the mainnet site's, or none when its address is unset (D31). */
+const verifyHref = net.network === "testnet" ? net.mainnetSite && new URL("/#verify", net.mainnetSite).href : "/#verify";
+
 export function AppNav({ current }: { current?: "bounties" | "post" }) {
   return (
     <NavBar>
@@ -29,9 +32,11 @@ export function AppNav({ current }: { current?: "bounties" | "post" }) {
             Bounties
           </a>
         </li>
-        <li className="verify">
-          <a href="/#verify">Verify</a>
-        </li>
+        {verifyHref && (
+          <li className="verify">
+            <a href={verifyHref}>Verify</a>
+          </li>
+        )}
       </ul>
       <a className="btn btn-ink" href="/post" aria-current={current === "post" ? "page" : undefined}>
         Post a bounty

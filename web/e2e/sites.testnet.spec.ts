@@ -34,3 +34,14 @@ test("D31: on every app page the testnet badge sits beside the wordmark and link
     expect(Math.abs(b.y + b.height / 2 - (mark.y + mark.height / 2)), path).toBeLessThanOrEqual(2);
   }
 });
+
+test("D31: testnet / lands on the bounty list, never the demo story, and the nav's Verify link goes to the mainnet site's Verify section", async ({ page }) => {
+  await paidWorld(page);
+  const demo: string[] = [];
+  page.on("request", (r) => void (new URL(r.url()).pathname === "/api/demo" && demo.push(r.url())));
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/bounties$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Bounties");
+  await expect(page.getByRole("banner").getByRole("link", { name: "Verify" })).toHaveAttribute("href", `${SITES.mainnet}/#verify`);
+  expect(demo).toEqual([]);
+});
