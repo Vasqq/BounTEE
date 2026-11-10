@@ -6,7 +6,9 @@
 // RPC and both Sepolia chains' RPCs pointed at local stand-ins (stand-ins.ts) that hold scripted
 // balances and record every request.
 //   Catches: the seed adding up what its six fresh-instance runs need (D21's preflight, run once
-//   per bounty): the deployer's ETH on Base Sepolia and on Arbitrum Sepolia for six instances;
+//   per bounty, on that bounty's own chains): the deployer's ETH on Base Sepolia and on Arbitrum
+//   Sepolia for the five instances on each (two bounties cover one chain only, Liam's call, Nov 10);
+//   each bounty's covered chains and minimum theft reaching its fresh-instance run;
 //   the funder's Circle testnet USDC for the six bounty amounts (about 12 USDC, less what a
 //   Protocol already holds) and its NEAR for registering each Protocol on the USDC; an existing
 //   Protocol's or Whitehat's NEAR; a Protocol not yet created counted as funded by NEAR's faucet
@@ -25,7 +27,7 @@ import { NEAR_GAS_PRICE, NEAR_PROTOCOL_CONFIG, RpcError, nearView, runScript, se
 
 const seed = fileURLToPath(new URL("./testnet/site-seed.ts", import.meta.url));
 const freshInstance = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
-const CONTRACT = "bounty.bountee.testnet";
+const CONTRACT = "bounty2.bountee.testnet";
 // Circle's USDC on NEAR testnet (spec #71, read Nov 10).
 const USDC = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
 const FUNDER = "bountee.testnet";
@@ -172,12 +174,14 @@ test("D33: with every balance empty, the seed's preflight names every short bala
   const r = await preflight();
   expect(r.status, r.stderr).toBe(3);
   const short = r.out.balances.filter((b: any) => !b.ok).map((b: any) => [b.who, b.chain, kind(b.asset)]);
-  expect(short).toEqual([
+  // In any order: the first bounty planned may cover either chain.
+  expect(short).toHaveLength(4);
+  expect(short).toEqual(expect.arrayContaining([
     [DEPLOYER, "Base Sepolia", "ETH"],
     [DEPLOYER, "Arbitrum Sepolia", "ETH"],
     [FUNDER, "near-testnet", "USDC"],
     [FUNDER, "near-testnet", "NEAR"],
-  ]);
+  ]));
   // One top-up line per short balance, each naming who and where.
   expect(r.out.top_up).toHaveLength(4);
   for (const [who, chain] of short) expect(r.out.top_up.some((t: string) => t.includes(who) && t.includes(chain))).toBe(true);
@@ -191,17 +195,34 @@ test("D33: with every balance empty, the seed's preflight names every short bala
   expectNothingSpent(r.dir);
 });
 
-test("D33: the deployer's ETH on each chain is six fresh instances' worth (D21's preflight, once per bounty)", async () => {
+test("D33: each bounty covers its own chains with its own minimum theft: tallowfen-swap Base Sepolia only, lindquay-vaults Arbitrum Sepolia only", async () => {
   const r = await preflight();
-  // One D21 preflight of a single two-chain instance, run directly.
+  const of = (p: string) => r.out.bounties.find((b: any) => b.protocol === `${p}.testnet`);
+  // Liam's call (Nov 10): two single-chain bounties, the other four on both Sepolia chains.
+  expect(of("tallowfen-swap").chains).toEqual([84532]);
+  expect(of("lindquay-vaults").chains).toEqual([421614]);
+  for (const p of ["brassmoor-lend", "corvane-perps", "osterwick-dex", "pellmar-stable"]) expect(of(p).chains, p).toEqual([84532, 421614]);
+  // Six different minimum thefts, whole USDC (smallest unit), none zero (the contract refuses 0).
+  const minimums = r.out.bounties.map((b: any) => BigInt(b.minimum_theft));
+  expect(new Set(minimums.map(String)).size).toBe(6);
+  for (const m of minimums) expect(m > 0n && m % 1_000_000n === 0n).toBe(true);
+  // The Paid win drains the testnet vault's 1,000,000 USDC seed (demo/script/Deploy.s.sol), so its
+  // minimum must not exceed that; the ZERO cheat steals nothing, so any minimum keeps it ZERO.
+  expect(BigInt(of("brassmoor-lend").minimum_theft)).toBeLessThanOrEqual(1_000_000_000_000n);
+});
+
+test("D33: the deployer's ETH on each chain is the instances on that chain (D21's preflight, once per bounty, on its chains)", async () => {
+  const r = await preflight();
+  // D21 preflights run directly: a two-chain instance, and each single-chain one.
   const { env } = files();
-  const one = await runScript(freshInstance, {
-    ...env, BOUNTEE_DAY3: env.BOUNTEE_SITE, PROTOCOL: PROTOCOLS[0]!, BOUNTY_NAME: "one", BOUNTY_AMOUNT: "1000000", CHAINS: "84532,421614",
+  const d21 = (chains: string) => runScript(freshInstance, {
+    ...env, BOUNTEE_DAY3: env.BOUNTEE_SITE, PROTOCOL: PROTOCOLS[0]!, BOUNTY_NAME: "one", BOUNTY_AMOUNT: "1000000", CHAINS: chains,
   });
-  for (const chain of ["Base Sepolia", "Arbitrum Sepolia"]) {
-    const single = BigInt(row(one.out, DEPLOYER, chain, "ETH").units.need);
-    expect(BigInt(row(r.out, DEPLOYER, chain, "ETH").units.need), chain).toBe(6n * single);
-  }
+  const [both, base, arbitrum] = await Promise.all([d21("84532,421614"), d21("84532"), d21("421614")]);
+  const eth = (out: any, chain: string) => BigInt(row(out, DEPLOYER, chain, "ETH").units.need);
+  // Four two-chain bounties on each chain, plus tallowfen-swap on Base Sepolia and lindquay-vaults on Arbitrum Sepolia.
+  expect(eth(r.out, "Base Sepolia")).toBe(4n * eth(both.out, "Base Sepolia") + eth(base.out, "Base Sepolia"));
+  expect(eth(r.out, "Arbitrum Sepolia")).toBe(4n * eth(both.out, "Arbitrum Sepolia") + eth(arbitrum.out, "Arbitrum Sepolia"));
 });
 
 test("D33: with everything funded the preflight passes and still spends nothing (PREFLIGHT_ONLY)", async () => {
@@ -246,7 +267,7 @@ test("D33: a re-run after every bounty is posted still checks what its claims an
   const r = await preflight({}, (dir) => {
     const site = join(dir, ".bountee-testnet");
     mkdirSync(site, { recursive: true });
-    for (const p of PROTOCOLS) writeFileSync(join(site, `site-${p.replace(/\.testnet$/, "")}-instance.json`), JSON.stringify({ post_tx: "posted" }));
+    for (const p of PROTOCOLS) writeFileSync(join(site, `site2-${p.replace(/\.testnet$/, "")}-instance.json`), JSON.stringify({ post_tx: "posted" }));
   });
   expect(r.status, r.stderr).toBe(3);
   // The Whitehat's claims, on the two bounties that take them, and the Withdrawn bounty's withdrawal.

@@ -1,9 +1,10 @@
 // Seeds the testnet site's bounty contract (D33, ADR-0021): one bounty from each of six fictional
 // Protocols, one per lasting public state, so the testnet site's bounty list reads like a product
-// in use. Every bounty covers a fresh PositionVault on Base Sepolia and on Arbitrum Sepolia (the
-// D21 fresh-instance script, run once per bounty) and is worth 1 to 3 of Circle's testnet USDC,
-// 12 in all, moved to each Protocol from the funder. Testnet only: nothing here is evidence
-// (ADR-0017).
+// in use. Every bounty covers a fresh PositionVault on each of its chains (the D21 fresh-instance
+// script, run once per bounty): four cover Base Sepolia and Arbitrum Sepolia, tallowfen-swap Base
+// Sepolia only and lindquay-vaults Arbitrum Sepolia only (Liam's call, Nov 10). Each is worth 1 to
+// 3 of Circle's testnet USDC, 12 in all, moved to each Protocol from the funder, and names its own
+// minimum theft. Testnet only: nothing here is evidence (ADR-0017).
 //
 //   lindquay-vaults  Ended unclaimed  its end date a few minutes out, then waited out
 //   osterwick-dex    Withdrawn        the same, then `withdraw_bounty` by the Protocol (R10.1)
@@ -31,18 +32,21 @@
 //
 // Each step's result goes into $BOUNTEE_SEED as it lands, and a re-run skips every step already
 // there, so a failure part-way never repeats a spend. Each bounty's instance is its own file
-// (~/.bountee-testnet/site-<protocol>-instance.json); none of the rehearsals' day3-* files is read
-// or written.
+// (~/.bountee-testnet/<SITE_PREFIX>-<protocol>-instance.json), and its exploit key and rules are
+// <SITE_PREFIX>-<name>-exploit-key.pem and -rules.json; none of the rehearsals' day3-* files is
+// read or written.
 //
-// Env: BOUNTEE_SITE (deploy-system.ts's record of the site's contract, default
-// ~/.bountee-testnet/site-deployment.json), BOUNTEE_SEED (this run's record, default
-// ~/.bountee-testnet/site-seed.json), FUNDER (holds the USDC, default bountee.testnet), WHITEHAT
+// Env: SITE_PREFIX (names this site's record files, default site2: bounty2.bountee.testnet's; the
+// first site's site-* files, on bounty.bountee.testnet, stay as they are), BOUNTEE_SITE
+// (deploy-system.ts's record of the site's contract, default
+// ~/.bountee-testnet/<SITE_PREFIX>-deployment.json), BOUNTEE_SEED (this run's record, default
+// ~/.bountee-testnet/<SITE_PREFIX>-seed.json), FUNDER (holds the USDC, default bountee.testnet), WHITEHAT
 // (files the claims, default quellford-sec.testnet), SEALED_EXPLOIT (the sealed exploit script,
 // never in this repo; needed for the Paid bounty), DEPLOYER_ENV, CHAIN_RPCS, NEAR_RPC (passed
 // to fresh-instance.ts), PREFLIGHT_ONLY=1.
 // Run, after deploying the contract keyless from the commit mainnet's is built from:
-//   CONTRACT=bounty.bountee.testnet USDC=<Circle's, below> REV=<commit> \
-//     BOUNTEE_DAY3=~/.bountee-testnet/site-deployment.json node cli/test/testnet/deploy-system.ts
+//   CONTRACT=bounty2.bountee.testnet USDC=<Circle's, below> REV=<commit> \
+//     BOUNTEE_DAY3=~/.bountee-testnet/site2-deployment.json node cli/test/testnet/deploy-system.ts
 //   node cli/test/testnet/site-seed.ts
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -60,8 +64,9 @@ const main = join(root, "cli/src/main.ts");
 const freshInstance = join(root, "cli/test/testnet/fresh-instance.ts");
 const honestUser = join(root, "demo/script/HonestUser.s.sol");
 const dir = join(homedir(), ".bountee-testnet");
-const SITE = process.env.BOUNTEE_SITE ?? join(dir, "site-deployment.json");
-const RECORD = process.env.BOUNTEE_SEED ?? join(dir, "site-seed.json");
+const PREFIX = process.env.SITE_PREFIX ?? "site2";
+const SITE = process.env.BOUNTEE_SITE ?? join(dir, `${PREFIX}-deployment.json`);
+const RECORD = process.env.BOUNTEE_SEED ?? join(dir, `${PREFIX}-seed.json`);
 for (const f of [SITE, RECORD]) if (basename(f).startsWith("day3-")) throw new Error(`${f}: the seed never touches the rehearsals' day3-* files`);
 const deployment = JSON.parse(readFileSync(SITE, "utf8"));
 if (deployment.network !== "testnet") throw new Error(`${SITE} is on ${deployment.network}, not testnet`);
@@ -73,9 +78,17 @@ const USDC: string = deployment.usdc;
 if (USDC !== CIRCLE_TESTNET_USDC) throw new Error(`${SITE} names USDC ${USDC}, not Circle's testnet USDC ${CIRCLE_TESTNET_USDC}`);
 const FUNDER = process.env.FUNDER ?? "bountee.testnet";
 const WHITEHAT = process.env.WHITEHAT ?? "quellford-sec.testnet";
-const CHAINS = [84532, 421614];
+const BASE_SEPOLIA = 84532;
+const ARBITRUM_SEPOLIA = 421614;
+const BOTH = [BASE_SEPOLIA, ARBITRUM_SEPOLIA];
 /** Claims are proven on Base Sepolia, the chain testnet wins have run on (spec #71). */
-const PROOF_CHAIN = 84532;
+const PROOF_CHAIN = BASE_SEPOLIA;
+/**
+ * The USDC each testnet vault is seeded with (demo/script/Deploy.s.sol's SEED_USDC default, which
+ * fresh-instance.ts leaves on testnet): the sealed exploit drains it all, so the Paid bounty's
+ * minimum theft must not exceed it.
+ */
+const TESTNET_VAULT_SEED = 1_000_000n * 1_000_000n;
 /** The Ended and Withdrawn bounties' end date, after their posting is built: a few minutes. */
 const END_SOON_SECS = 300;
 /**
@@ -92,18 +105,20 @@ const DISCLOSURE_DELAY_DAYS = "30";
 const STALE_SECS = 360;
 
 type State = "ended" | "withdrawn" | "live" | "check_failed" | "claims_judged" | "paid";
-interface Bounty { state: State; protocol: string; name: string; usdc: number; claims: number; instance: string }
-const bounty = (state: State, protocol: string, name: string, usdc: number, claims = 0): Bounty => ({
-  state, protocol, name, usdc, claims, instance: join(dir, `site-${protocol.replace(/\.testnet$/, "")}-instance.json`),
+interface Bounty { state: State; protocol: string; name: string; usdc: number; chains: number[]; minimumUsdc: number; claims: number; instance: string }
+const bounty = (state: State, protocol: string, name: string, usdc: number, chains: number[], minimumUsdc: number, claims = 0): Bounty => ({
+  state, protocol, name, usdc, chains, minimumUsdc, claims, instance: join(dir, `${PREFIX}-${protocol.replace(/\.testnet$/, "")}-instance.json`),
 });
-// Ended and Withdrawn first: their end dates pass while the rest are posted and claimed.
+// Ended and Withdrawn first: their end dates pass while the rest are posted and claimed. The
+// minimum thefts differ, as real Protocols' would: the corvane-perps cheat steals nothing, so it
+// stays ZERO under any of them, and the brassmoor-lend win drains its vault's whole seed.
 const PLAN: Bounty[] = [
-  bounty("ended", "lindquay-vaults.testnet", "yield-vault-q4", 2),
-  bounty("withdrawn", "osterwick-dex.testnet", "orderbook-v2", 2),
-  bounty("live", "tallowfen-swap.testnet", "amm-router", 2),
-  bounty("check_failed", "pellmar-stable.testnet", "stable-reserve", 1),
-  bounty("claims_judged", "corvane-perps.testnet", "perps-margin", 2, 2),
-  bounty("paid", "brassmoor-lend.testnet", "lending-pool-v3", 3, 1),
+  bounty("ended", "lindquay-vaults.testnet", "yield-vault-q4", 2, [ARBITRUM_SEPOLIA], 1_000),
+  bounty("withdrawn", "osterwick-dex.testnet", "orderbook-v2", 2, BOTH, 5_000),
+  bounty("live", "tallowfen-swap.testnet", "amm-router", 2, [BASE_SEPOLIA], 500),
+  bounty("check_failed", "pellmar-stable.testnet", "stable-reserve", 1, BOTH, 250),
+  bounty("claims_judged", "corvane-perps.testnet", "perps-margin", 2, BOTH, 2_500, 2),
+  bounty("paid", "brassmoor-lend.testnet", "lending-pool-v3", 3, BOTH, 10_000, 1),
 ];
 const byState = (s: State) => PLAN.find((b) => b.state === s)!;
 const id = (b: Bounty) => ({ protocol: b.protocol, name: b.name });
@@ -114,6 +129,12 @@ const CONTRACT_STATE: Record<State, string> = {
   ended: "live", withdrawn: "withdrawn", live: "live", check_failed: "check_failed", claims_judged: "live", paid: "paid",
 };
 const usdcUnits = (b: Bounty) => BigInt(b.usdc) * 1_000_000n;
+const minimumUnits = (b: Bounty) => BigInt(b.minimumUsdc) * 1_000_000n;
+// Claims are filed on Base Sepolia, so each bounty that takes one covers it.
+for (const b of PLAN.filter((b) => b.claims > 0)) {
+  if (!b.chains.includes(PROOF_CHAIN)) throw new Error(`${b.protocol} takes claims proven on chain ${PROOF_CHAIN}, which it doesn't cover`);
+}
+if (minimumUnits(byState("paid")) > TESTNET_VAULT_SEED) throw new Error("the Paid bounty's minimum theft exceeds what its vault holds: the win would score ZERO");
 
 const record: Record<string, any> = existsSync(RECORD) ? JSON.parse(readFileSync(RECORD, "utf8")) : {};
 const save = () => {
@@ -158,10 +179,13 @@ const fresh = (b: Bounty, preflightOnly: boolean) =>
     NETWORK: "testnet",
     BOUNTEE_DAY3: SITE,
     BOUNTEE_INSTANCE: b.instance,
+    // Its exploit key and rules files, beside the first site's of the same bounty names.
+    FILE_PREFIX: `${PREFIX}-`,
     PROTOCOL: b.protocol,
     BOUNTY_NAME: b.name,
     BOUNTY_AMOUNT: usdcUnits(b).toString(),
-    CHAINS: CHAINS.join(","),
+    MINIMUM_THEFT: minimumUnits(b).toString(),
+    CHAINS: b.chains.join(","),
     DISCLOSURE_DELAY_DAYS,
     END_IN_SECS: b.state === "ended" || b.state === "withdrawn" ? String(END_SOON_SECS) : "",
     SKIP_GRANT: b.state === "check_failed" ? "1" : "",
@@ -208,6 +232,10 @@ const moves: { protocol: string; usdc: bigint; register: boolean }[] = [];
 for (const b of PLAN.filter((b) => todo.includes(b) || claimsLeft(b))) {
   const r = await fresh(b, true);
   if (r.status !== 0 && r.status !== 3) throw new Error(`fresh-instance.ts's preflight for ${b.protocol} failed (exit ${r.status}): ${r.stdout}${r.stderr}`);
+  // What fresh-instance.ts will post: this bounty's own chains and minimum theft.
+  if (r.out.run?.chains?.join(",") !== b.chains.join(",") || r.out.run?.minimum_theft !== minimumUnits(b).toString()) {
+    throw new Error(`fresh-instance.ts would post ${b.protocol} on ${r.out.run?.chains} with minimum theft ${r.out.run?.minimum_theft}, not ${b.chains} and ${minimumUnits(b)}`);
+  }
   // D21's preflight budgets a cheat and a win for CLAIMS=2; Live with claims judged files two
   // cheats, each drawing less than a win, so its budget errs high.
   for (const n of (r.out.balances as Need[]).filter((n) => todo.includes(b) || n.who === WHITEHAT)) {
@@ -233,10 +261,10 @@ if (record[`withdraw ${withdrawn.protocol}`] === undefined) {
 }
 // The win's pauses: `sign_pauses` if the verdict's callback left them, and one `verify_pause` per chain.
 if (claimsLeft(byState("paid")) && nearOf(WHITEHAT)) {
-  const contracts = BigInt(CHAINS.length);
+  const contracts = BigInt(byState("paid").chains.length);
   const pauseCalls: PricedCall[] = [
     { method: "sign_pauses", gas: BigInt(fees.min_sign_pauses_gas_base) + BigInt(fees.min_sign_pauses_gas_per_contract) * contracts + tgas(40), deposit: 0n, argsBytes: 80 },
-    ...CHAINS.map(() => ({ method: "verify_pause", gas: BigInt(fees.min_verify_pause_gas_base) + BigInt(fees.min_verify_pause_gas_per_pause) + tgas(20), deposit: 0n, argsBytes: 200 })),
+    ...byState("paid").chains.map(() => ({ method: "verify_pause", gas: BigInt(fees.min_verify_pause_gas_base) + BigInt(fees.min_verify_pause_gas_per_pause) + tgas(20), deposit: 0n, argsBytes: 200 })),
   ];
   nearOf(WHITEHAT)!.need += roundUpNear(await near.upfrontNear(pauseCalls));
 }
@@ -253,7 +281,7 @@ needs.push(
 );
 stopIfShort(needs, {
   contract: CONTRACT,
-  bounties: PLAN.map((b) => ({ state: b.state, protocol: b.protocol, name: b.name, usdc: b.usdc, posted: posted(b) })),
+  bounties: PLAN.map((b) => ({ state: b.state, protocol: b.protocol, name: b.name, usdc: b.usdc, chains: b.chains, minimum_theft: minimumUnits(b).toString(), posted: posted(b) })),
   created_by_faucet: createdByFaucet,
   moves: moves.map((m) => ({ ...m, usdc: showUsdc(m.usdc) })),
 });
@@ -312,7 +340,7 @@ for (const b of PLAN) {
   if (b.state === "claims_judged") {
     // The stale claim's job, taken now and filed once its block is over 5 minutes old.
     await step("stale job", async () => {
-      const job = join(dir, "site-corvane-perps-stale-job.json");
+      const job = join(dir, `${PREFIX}-corvane-perps-stale-job.json`);
       const r = await bountee(["test", honestUser, "--bounty", ref(b), "--chain", String(PROOF_CHAIN), "--out", job], { VAULT: baseVault(b.state), AMOUNT: "5000000000" });
       if (r.status !== 0) throw new Error(`bountee test of the cheat failed: ${r.stdout}`);
       return { job, local_verdict: r.out.verdict, block: r.out.block, taken_at_ms: Date.now() };
@@ -334,7 +362,7 @@ const win = await step("paid claim", async () => {
   return { claim_id: r.out.claim_id, tx: r.out.tx_hash, verdict: r.out.verdict, receipt: r.out.receipt, verification: r.out.verification };
 });
 await step("paid verified", async () => {
-  const done = (v: any) => v?.chains?.length === CHAINS.length && v.chains.every((c: any) => c.verified);
+  const done = (v: any) => v?.chains?.length === paid.chains.length && v.chains.every((c: any) => c.verified);
   if (done(win.verification)) return win.verification;
   const r = await bountee(["verify-pause", ref(paid), "--as", WHITEHAT, "--wait", "3600"]);
   if (!done(r.out)) throw new Error(`both chains' pauses aren't verified yet: ${r.stdout}`);
@@ -348,8 +376,8 @@ await step("invalid claim", async () => {
   const wait = stale.taken_at_ms + STALE_SECS * 1000 - Date.now();
   if (wait > 0) await sleep(wait);
   const { replay } = JSON.parse(readFileSync(stale.job, "utf8"));
-  const exploit = join(dir, "site-corvane-perps-stale-exploit.json");
-  const evidence = join(dir, "site-corvane-perps-stale-evidence.json");
+  const exploit = join(dir, `${PREFIX}-corvane-perps-stale-exploit.json`);
+  const evidence = join(dir, `${PREFIX}-corvane-perps-stale-evidence.json`);
   writeFileSync(exploit, `${JSON.stringify(replay.exploit)}\n`);
   writeFileSync(evidence, `${JSON.stringify({ block: replay.block, header: replay.header, proofs: replay.proofs })}\n`);
   const r = await bountee(["claim", "--exploit", exploit, "--evidence", evidence, "--bounty", ref(judged), ...claimAs]);
@@ -391,7 +419,7 @@ await step(`end ${unclaimed.protocol}`, async () => {
 const summary = [];
 for (const b of PLAN) {
   const v = await view(b);
-  summary.push({ seeded: b.state, bounty: ref(b), contract_state: v.state, end_date_ns: v.rules.end_date_ns, winning_claim: v.winning_claim });
+  summary.push({ seeded: b.state, bounty: ref(b), chains: b.chains, minimum_theft: v.rules.minimum_theft, contract_state: v.state, end_date_ns: v.rules.end_date_ns, winning_claim: v.winning_claim });
 }
 record.summary = summary;
 save();

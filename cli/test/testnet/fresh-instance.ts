@@ -41,7 +41,9 @@
 // CHAIN_RPCS (<chain id>=<url>,... for any chain; every chain's default is in cli/src/chains.ts),
 // NEAR_RPC, EXPLOIT_PUBLIC_KEY (the rules' exploit key, x25519:<base58>, such as the one
 // `bountee open-exploit --public-key` derives from the Protocol's wallet; default: a new key,
-// written to <dir>/<name>-exploit-key.pem), END_IN_SECS (the end date, this many seconds after
+// written to <dir>/<FILE_PREFIX><name>-exploit-key.pem), FILE_PREFIX (prefixes the exploit key and
+// rules files' names, default none: the testnet site's seed sets its own, so a second site's
+// bounties of the same names don't overwrite the first's), END_IN_SECS (the end date, this many seconds after
 // the posting is built; default 30 days: the testnet site's seed sets a few minutes for its
 // Ended and Withdrawn bounties, D33), SKIP_GRANT=1 (each vault names the deployer as its pauser,
 // so the pause role is never granted and the posting check fails: the bounty ends Check failed
@@ -117,6 +119,7 @@ const circleUsdc = (chain: number) => CHAINS[chain]?.usdc ?? (() => { throw new 
 if (MAINNET) CHAIN_IDS.forEach(circleUsdc);
 const nearChain = `near-${NETWORK}`;
 const OUT = process.env.BOUNTEE_INSTANCE ?? join(dir, "day3-instance.json");
+const FILE_PREFIX = process.env.FILE_PREFIX ?? "";
 const deployerEnv: Record<string, string> = Object.fromEntries(
   readFileSync(process.env.DEPLOYER_ENV ?? join(dir, MAINNET ? "deployer.env" : "base-sepolia-deployer.env"), "utf8")
     .split("\n")
@@ -305,6 +308,8 @@ if (WHITEHAT) {
 const shownBudget = (c: ClaimBudget) => ({ chain_id: c.chain_id, input_bytes: c.input_bytes, draw: showNear(c.draw), refunded: showNear(c.refunded) });
 stopIfShort(needs, {
   run: {
+    chains: CHAIN_IDS,
+    minimum_theft: MINIMUM_THEFT,
     claims: CLAIMS,
     disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
     ...(WHITEHAT ? { claim_budget: claimBudgets.map((c) => ({ kind: c.kind, ...shownBudget(c) })), win_budgets: winBudgets.map(shownBudget) } : {}),
@@ -379,7 +384,7 @@ const exploitPublicKey = process.env.EXPLOIT_PUBLIC_KEY ?? newExploitKey();
 function newExploitKey(): string {
   const x25519 = generateKeyPairSync("x25519");
   const pub = Buffer.from(x25519.publicKey.export({ format: "jwk" }).x!, "base64url");
-  writeFileSync(join(dir, `${NAME}-exploit-key.pem`), x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+  writeFileSync(join(dir, `${FILE_PREFIX}${NAME}-exploit-key.pem`), x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
   return `x25519:${base58.encode(pub)}`;
 }
 const rules = bountyRules(
@@ -388,7 +393,7 @@ const rules = bountyRules(
   chains.map((c) => ({ chain_id: c.chain_id, usdc: c.evm_usdc })),
   exploitPublicKey,
 );
-const rulesFile = join(dir, `${NAME}-rules.json`);
+const rulesFile = join(dir, `${FILE_PREFIX}${NAME}-rules.json`);
 writeFileSync(rulesFile, `${JSON.stringify(rules, null, 2)}\n`, { mode: 0o600 });
 const posted = spawnSync(
   process.execPath,
