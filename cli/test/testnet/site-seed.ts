@@ -117,19 +117,24 @@ async function step<T>(key: string, run: () => Promise<T>): Promise<T> {
   return result;
 }
 
-/** Run a node script, its stderr passed through live, and read the last JSON line it printed. */
-function node(args: string[], env: Record<string, string> = {}): Promise<{ status: number | null; out: any; stdout: string }> {
+/**
+ * Run a node script and read the last JSON line it printed. Its stderr is passed through live,
+ * unless `quiet` (a D21 preflight, whose own "SHORT" lines judge one bounty, not the seed's
+ * totals): then it is kept for the error if the script fails.
+ */
+function node(args: string[], env: Record<string, string> = {}, quiet = false): Promise<{ status: number | null; out: any; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, args, { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
+    let stderr = "";
     child.stdout.on("data", (c) => (stdout += c));
-    child.stderr.on("data", (c) => process.stderr.write(c));
+    child.stderr.on("data", (c) => (quiet ? (stderr += c) : process.stderr.write(c)));
     child.on("close", (status) => {
       let out: any = {};
       try {
         out = JSON.parse(stdout.trim().split("\n").pop() || "{}");
       } catch {}
-      resolve({ status, out, stdout });
+      resolve({ status, out, stdout, stderr });
     });
   });
 }
@@ -151,7 +156,7 @@ const fresh = (b: Bounty, preflightOnly: boolean) =>
     WHITEHAT: b.claims > 0 ? WHITEHAT : "",
     CLAIMS: String(b.claims),
     PREFLIGHT_ONLY: preflightOnly ? "1" : "",
-  });
+  }, preflightOnly);
 
 const posted = (b: Bounty) => existsSync(b.instance) && JSON.parse(readFileSync(b.instance, "utf8")).post_tx !== undefined;
 const showNear = (y: bigint) => `${formatNear(y)} NEAR`;
@@ -179,7 +184,7 @@ const add = (who: string, chain: string, asset: string, have: bigint, want: bigi
 const moves: { protocol: string; usdc: bigint; register: boolean }[] = [];
 for (const b of todo) {
   const r = await fresh(b, true);
-  if (r.status !== 0 && r.status !== 3) throw new Error(`fresh-instance.ts's preflight for ${b.protocol} failed (exit ${r.status}): ${r.stdout}`);
+  if (r.status !== 0 && r.status !== 3) throw new Error(`fresh-instance.ts's preflight for ${b.protocol} failed (exit ${r.status}): ${r.stdout}${r.stderr}`);
   for (const n of r.out.balances as Need[]) {
     const have = BigInt(n.units.have);
     const want = BigInt(n.units.need);
