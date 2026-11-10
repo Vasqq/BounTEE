@@ -131,6 +131,14 @@ pass rerun
 
 There is no live bounty for you to win. A win closes its bounty and pauses its vault, so every winning run uses a fresh instance, deployed and posted by `cli/test/testnet/fresh-instance.ts` (with `NETWORK=mainnet` for the demo).
 
+## Try it on testnet
+
+The same web app also runs as a testnet site, on NEAR testnet, Base Sepolia and Arbitrum Sepolia, with no real money. Its address isn't set yet: it isn't hosted, and this section will name it once it is. Its bounty contract is `bounty.bountee.testnet`, which takes Circle's testnet USDC and holds no keys. Its bounty list holds bounties from made-up Protocols in each state that lasts: Live, Live with claims judged, Paid, Ended unclaimed, Withdrawn and Check failed (seeded by `cli/test/testnet/site-seed.ts`).
+
+To post a bounty there, you need MetaMask, testnet NEAR (`bountee init` creates a testnet account funded by NEAR's faucet), test USDC ([Circle's faucet](https://faucet.circle.com)) and a pausable contract you control on Base Sepolia or Arbitrum Sepolia. To claim from the command line, run `bountee init` for a testnet account, then `bountee test` and `bountee claim` against a Live bounty with `--contract bounty.bountee.testnet --network testnet`.
+
+Nothing on the testnet site is evidence for anything in this README. Every proof cited here is a mainnet transaction.
+
 ## Not production-ready
 
 - Not audited by a third party. Our own audit of the whole contract, on the build first deployed as `bounty.bountee.near`, found no critical or high issues, and its five known issues are listed in [docs/audit.md](docs/audit.md). `bounty2.bountee.near` is that build plus the any-chain changes, which that audit didn't cover. The five stay unfixed in the demo, because the deployed build must be the one the full rehearsal ran.
