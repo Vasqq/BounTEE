@@ -36,8 +36,9 @@
 // <SITE_PREFIX>-<name>-exploit-key.pem and -rules.json; none of the rehearsals' day3-* files is
 // read or written.
 //
-// Env: SITE_PREFIX (names this site's record files, default site2: bounty2.bountee.testnet's; the
-// first site's site-* files, on bounty.bountee.testnet, stay as they are), BOUNTEE_SITE
+// Env: SITE_PREFIX (names this site's record files, default site3: bounty3.bountee.testnet's; the
+// earlier sites' site-* and site2-* files, on bounty.bountee.testnet and bounty2.bountee.testnet,
+// stay as they are), BOUNTEE_SITE
 // (deploy-system.ts's record of the site's contract, default
 // ~/.bountee-testnet/<SITE_PREFIX>-deployment.json), BOUNTEE_SEED (this run's record, default
 // ~/.bountee-testnet/<SITE_PREFIX>-seed.json), FUNDER (holds the USDC, default bountee.testnet), WHITEHAT
@@ -45,8 +46,8 @@
 // never in this repo; needed for the Paid bounty), DEPLOYER_ENV, CHAIN_RPCS, NEAR_RPC (passed
 // to fresh-instance.ts), PREFLIGHT_ONLY=1.
 // Run, after deploying the contract keyless from the commit mainnet's is built from:
-//   CONTRACT=bounty2.bountee.testnet USDC=<Circle's, below> REV=<commit> \
-//     BOUNTEE_DAY3=~/.bountee-testnet/site2-deployment.json node cli/test/testnet/deploy-system.ts
+//   CONTRACT=bounty3.bountee.testnet USDC=<Circle's, below> REV=<commit> \
+//     BOUNTEE_DAY3=~/.bountee-testnet/site3-deployment.json node cli/test/testnet/deploy-system.ts
 //   node cli/test/testnet/site-seed.ts
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -64,7 +65,7 @@ const main = join(root, "cli/src/main.ts");
 const freshInstance = join(root, "cli/test/testnet/fresh-instance.ts");
 const honestUser = join(root, "demo/script/HonestUser.s.sol");
 const dir = join(homedir(), ".bountee-testnet");
-const PREFIX = process.env.SITE_PREFIX ?? "site2";
+const PREFIX = process.env.SITE_PREFIX ?? "site3";
 const SITE = process.env.BOUNTEE_SITE ?? join(dir, `${PREFIX}-deployment.json`);
 const RECORD = process.env.BOUNTEE_SEED ?? join(dir, `${PREFIX}-seed.json`);
 for (const f of [SITE, RECORD]) if (basename(f).startsWith("day3-")) throw new Error(`${f}: the seed never touches the rehearsals' day3-* files`);
@@ -110,15 +111,16 @@ const bounty = ({ claims = 0, ...b }: Omit<Bounty, "claims" | "instance"> & { cl
   ...b, claims, instance: join(dir, `${PREFIX}-${b.protocol.replace(/\.testnet$/, "")}-instance.json`),
 });
 // Ended and Withdrawn first: their end dates pass while the rest are posted and claimed. The
-// minimum thefts differ, as real Protocols' would: the corvane-perps cheat steals nothing, so it
-// stays ZERO under any of them, and the brassmoor-lend win drains its vault's whole seed.
+// minimum thefts differ, as real Protocols' would, and stay in proportion to 1-3 USDC bounties
+// (Liam, Nov 10): the corvane-perps cheat steals nothing, so it stays ZERO under any of them, and
+// the brassmoor-lend win drains its vault's whole seed.
 const PLAN: Bounty[] = [
-  bounty({ state: "ended", protocol: "lindquay-vaults.testnet", name: "yield-vault-q4", usdc: 2, chains: [ARBITRUM_SEPOLIA], minimumUsdc: 1_000 }),
-  bounty({ state: "withdrawn", protocol: "osterwick-dex.testnet", name: "orderbook-v2", usdc: 2, chains: BOTH, minimumUsdc: 5_000 }),
-  bounty({ state: "live", protocol: "tallowfen-swap.testnet", name: "amm-router", usdc: 2, chains: [BASE_SEPOLIA], minimumUsdc: 500 }),
-  bounty({ state: "check_failed", protocol: "pellmar-stable.testnet", name: "stable-reserve", usdc: 1, chains: BOTH, minimumUsdc: 250 }),
-  bounty({ state: "claims_judged", protocol: "corvane-perps.testnet", name: "perps-margin", usdc: 2, chains: BOTH, minimumUsdc: 2_500, claims: 2 }),
-  bounty({ state: "paid", protocol: "brassmoor-lend.testnet", name: "lending-pool-v3", usdc: 3, chains: BOTH, minimumUsdc: 10_000, claims: 1 }),
+  bounty({ state: "ended", protocol: "lindquay-vaults.testnet", name: "yield-vault-q4", usdc: 2, chains: [ARBITRUM_SEPOLIA], minimumUsdc: 10 }),
+  bounty({ state: "withdrawn", protocol: "osterwick-dex.testnet", name: "orderbook-v2", usdc: 2, chains: BOTH, minimumUsdc: 50 }),
+  bounty({ state: "live", protocol: "tallowfen-swap.testnet", name: "amm-router", usdc: 2, chains: [BASE_SEPOLIA], minimumUsdc: 5 }),
+  bounty({ state: "check_failed", protocol: "pellmar-stable.testnet", name: "stable-reserve", usdc: 1, chains: BOTH, minimumUsdc: 2.5 }),
+  bounty({ state: "claims_judged", protocol: "corvane-perps.testnet", name: "perps-margin", usdc: 2, chains: BOTH, minimumUsdc: 25, claims: 2 }),
+  bounty({ state: "paid", protocol: "brassmoor-lend.testnet", name: "lending-pool-v3", usdc: 3, chains: BOTH, minimumUsdc: 100, claims: 1 }),
 ];
 const byState = (s: State) => PLAN.find((b) => b.state === s)!;
 const id = (b: Bounty) => ({ protocol: b.protocol, name: b.name });
@@ -129,7 +131,8 @@ const CONTRACT_STATE: Record<State, string> = {
   ended: "live", withdrawn: "withdrawn", live: "live", check_failed: "check_failed", claims_judged: "live", paid: "paid",
 };
 const usdcUnits = (b: Bounty) => BigInt(b.usdc) * 1_000_000n;
-const minimumUnits = (b: Bounty) => BigInt(b.minimumUsdc) * 1_000_000n;
+/** The minimum theft in USDC's smallest unit (6 decimals): a minimum may be a fraction of a USDC. */
+const minimumUnits = (b: Bounty) => BigInt(Math.round(b.minimumUsdc * 1_000_000));
 // Claims are filed on Base Sepolia, so each bounty that takes one covers it.
 for (const b of PLAN.filter((b) => b.claims > 0)) {
   if (!b.chains.includes(PROOF_CHAIN)) throw new Error(`${b.protocol} takes claims proven on chain ${PROOF_CHAIN}, which it doesn't cover`);

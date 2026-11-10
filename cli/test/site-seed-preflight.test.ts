@@ -27,7 +27,7 @@ import { NEAR_GAS_PRICE, NEAR_PROTOCOL_CONFIG, RpcError, nearView, runScript, se
 
 const seed = fileURLToPath(new URL("./testnet/site-seed.ts", import.meta.url));
 const freshInstance = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
-const CONTRACT = "bounty2.bountee.testnet";
+const CONTRACT = "bounty3.bountee.testnet";
 // Circle's USDC on NEAR testnet (spec #71, read Nov 10).
 const USDC = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
 const FUNDER = "bountee.testnet";
@@ -204,10 +204,12 @@ test("D33: each bounty covers its own chains with its own minimum theft: tallowf
   expect(of("tallowfen-swap").chains).toEqual([84532]);
   expect(of("lindquay-vaults").chains).toEqual([421614]);
   for (const p of ["brassmoor-lend", "corvane-perps", "osterwick-dex", "pellmar-stable"]) expect(of(p).chains, p).toEqual([84532, 421614]);
-  // Six different minimum thefts, whole USDC (smallest unit), none zero (the contract refuses 0).
-  const minimums = r.out.bounties.map((b: any) => BigInt(b.minimum_theft));
-  expect(new Set(minimums.map(String)).size).toBe(6);
-  for (const m of minimums) expect(m > 0n && m % 1_000_000n === 0n).toBe(true);
+  // Minimum thefts in proportion to 1-3 USDC bounties, each different (Liam's call, Nov 10), in
+  // USDC's smallest unit.
+  expect(Object.fromEntries(r.out.bounties.map((b: any) => [b.protocol.replace(/\.testnet$/, ""), b.minimum_theft]))).toEqual({
+    "tallowfen-swap": "5000000", "corvane-perps": "25000000", "brassmoor-lend": "100000000",
+    "lindquay-vaults": "10000000", "osterwick-dex": "50000000", "pellmar-stable": "2500000",
+  });
   // The Paid win drains the testnet vault's 1,000,000 USDC seed (demo/script/Deploy.s.sol), so its
   // minimum must not exceed that; the ZERO cheat steals nothing, so any minimum keeps it ZERO.
   expect(BigInt(of("brassmoor-lend").minimum_theft)).toBeLessThanOrEqual(1_000_000_000_000n);
@@ -269,7 +271,7 @@ test("D33: a re-run after every bounty is posted still checks what its claims an
   const r = await preflight({}, (dir) => {
     const site = join(dir, ".bountee-testnet");
     mkdirSync(site, { recursive: true });
-    for (const p of PROTOCOLS) writeFileSync(join(site, `site2-${p.replace(/\.testnet$/, "")}-instance.json`), JSON.stringify({ post_tx: "posted" }));
+    for (const p of PROTOCOLS) writeFileSync(join(site, `site3-${p.replace(/\.testnet$/, "")}-instance.json`), JSON.stringify({ post_tx: "posted" }));
   });
   expect(r.status, r.stderr).toBe(3);
   // The Whitehat's claims, on the two bounties that take them, and the Withdrawn bounty's withdrawal.
