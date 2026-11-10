@@ -24,7 +24,6 @@ export interface Story {
   delay: number;
   pauses: number;
   chains: string[];
-  proofChain: string;
   /** Each of the eight steps' transactions; empty while a step hasn't happened. */
   steps: StoryTx[][];
   /** The posting check passed: the pause role and pause gas were confirmed on every chain (R7.6). */
@@ -100,7 +99,6 @@ export async function readDemo(): Promise<Demo | null> {
       delay: page.disclosureDelayDays,
       pauses: page.chains.reduce((n, ch) => n + ch.contracts.length, 0),
       chains,
-      proofChain: page.proofChain,
       steps: [
         near(posted?.tx),
         near(sealed?.tx),

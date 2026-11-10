@@ -41,7 +41,15 @@
 // CHAIN_RPCS (<chain id>=<url>,... for any chain; every chain's default is in cli/src/chains.ts),
 // NEAR_RPC, EXPLOIT_PUBLIC_KEY (the rules' exploit key, x25519:<base58>, such as the one
 // `bountee open-exploit --public-key` derives from the Protocol's wallet; default: a new key,
-// written to <dir>/<name>-exploit-key.pem), PREFLIGHT_ONLY=1 to stop after step 0.
+// written to <dir>/<FILE_PREFIX><name>-exploit-key.pem), FILE_PREFIX (prefixes the exploit key and
+// rules files' names, default none: the testnet site's seed sets its own, so a second site's
+// bounties of the same names don't overwrite the first's), END_IN_SECS (the end date, this many seconds after
+// the posting is built; default 30 days: the testnet site's seed sets a few minutes for its
+// Ended and Withdrawn bounties, D33), SKIP_GRANT=1 (each vault names the deployer as its pauser,
+// so the pause role is never granted and the posting check fails: the bounty ends Check failed
+// with its USDC refunded, which the script then expects instead of Live, D33), PREFLIGHT_ONLY=1
+// to stop after step 0. The deployment it reads and the instance it writes are BOUNTEE_DAY3 and
+// BOUNTEE_INSTANCE.
 import { execFileSync, spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -96,6 +104,12 @@ if (process.env.EXPLOIT_PUBLIC_KEY) {
 // that scores zero and the winning claim. A run that files more (the Day-3 checkpoint's three)
 // says so.
 const CLAIMS = wholeNumber("CLAIMS", 2);
+// The end date, END_IN_SECS after the rules are built (R1.4 refuses one not in the future).
+const END_IN_SECS = wholeNumber("END_IN_SECS", 30 * 86_400);
+if (END_IN_SECS === 0) throw new Error("END_IN_SECS is 0: the end date must be in the future (R1.4)");
+// D33's Check failed: the vaults never grant the pause role, so the posting check refuses.
+const SKIP_GRANT = process.env.SKIP_GRANT === "1";
+const EXPECTED_STATE = SKIP_GRANT ? "check_failed" : "live";
 const CHAIN_IDS = (process.env.CHAINS ?? (MAINNET ? "8453,42161" : "84532")).split(",").map(Number);
 const CHAIN = CHAIN_IDS[0]!;
 const chainRpcs = { ...parseRpcFlags(process.env.CHAIN_RPCS ? process.env.CHAIN_RPCS.split(",") : []), ...(process.env.RPC ? { [CHAIN]: process.env.RPC } : {}) };
@@ -105,6 +119,7 @@ const circleUsdc = (chain: number) => CHAINS[chain]?.usdc ?? (() => { throw new 
 if (MAINNET) CHAIN_IDS.forEach(circleUsdc);
 const nearChain = `near-${NETWORK}`;
 const OUT = process.env.BOUNTEE_INSTANCE ?? join(dir, "day3-instance.json");
+const FILE_PREFIX = process.env.FILE_PREFIX ?? "";
 const deployerEnv: Record<string, string> = Object.fromEntries(
   readFileSync(process.env.DEPLOYER_ENV ?? join(dir, MAINNET ? "deployer.env" : "base-sepolia-deployer.env"), "utf8")
     .split("\n")
@@ -165,7 +180,7 @@ function bountyRules(config: any, vaults: { chain_id: number; address: string }[
     seed: config.seed,
     bounty_amount: BOUNTY_AMOUNT,
     minimum_theft: MINIMUM_THEFT,
-    end_date_ns: String(BigInt(Date.now() + 30 * 86_400_000) * 1_000_000n),
+    end_date_ns: String(BigInt(Date.now() + END_IN_SECS * 1000) * 1_000_000n),
     disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
     exploit_public_key: exploitPublicKey,
     judge_build_hash: config.judge_build_hash,
@@ -293,6 +308,8 @@ if (WHITEHAT) {
 const shownBudget = (c: ClaimBudget) => ({ chain_id: c.chain_id, input_bytes: c.input_bytes, draw: showNear(c.draw), refunded: showNear(c.refunded) });
 stopIfShort(needs, {
   run: {
+    chains: CHAIN_IDS,
+    minimum_theft: MINIMUM_THEFT,
     claims: CLAIMS,
     disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
     ...(WHITEHAT ? { claim_budget: claimBudgets.map((c) => ({ kind: c.kind, ...shownBudget(c) })), win_budgets: winBudgets.map(shownBudget) } : {}),
@@ -330,15 +347,16 @@ for (const chain of CHAIN_IDS) {
   const forge = foundry("forge", ["script", "script/Deploy.s.sol", "--rpc-url", rpc, "--broadcast", "--sender", DEPLOYER, "--slow"], {
     signs: true,
     cwd: demoDir,
-    env: { PAUSE_ROLE: role.address, ...(MAINNET ? { USDC: circleUsdc(chain), SEED_USDC: VAULT_USDC.toString() } : {}) },
+    env: { PAUSE_ROLE: SKIP_GRANT ? DEPLOYER : role.address, ...(MAINNET ? { USDC: circleUsdc(chain), SEED_USDC: VAULT_USDC.toString() } : {}) },
   });
   const deployed = JSON.parse(forge.slice(forge.indexOf("DEMO_DEPLOY_JSON:") + "DEMO_DEPLOY_JSON:".length).trim().split("\n")[0]!);
   const vault = String(deployed.vault).toLowerCase();
   const evmUsdc = String(deployed.usdc).toLowerCase();
   const runLog = JSON.parse(readFileSync(join(root, `demo/broadcast/Deploy.s.sol/${chain}/run-latest.json`), "utf8"));
   const deployTxs: string[] = runLog.receipts.map((r: { transactionHash: string }) => r.transactionHash);
-  if (cast("call", vault, "pauser()(address)", "--rpc-url", rpc).toLowerCase() !== role.address) {
-    throw new Error(`the PositionVault's pauser on chain ${chain} isn't ${role.address}`);
+  const pauser = SKIP_GRANT ? DEPLOYER.toLowerCase() : role.address;
+  if (cast("call", vault, "pauser()(address)", "--rpc-url", rpc).toLowerCase() !== pauser) {
+    throw new Error(`the PositionVault's pauser on chain ${chain} isn't ${pauser}`);
   }
 
   // ---- 3. Pause gas --------------------------------------------------------------------------------
@@ -366,7 +384,7 @@ const exploitPublicKey = process.env.EXPLOIT_PUBLIC_KEY ?? newExploitKey();
 function newExploitKey(): string {
   const x25519 = generateKeyPairSync("x25519");
   const pub = Buffer.from(x25519.publicKey.export({ format: "jwk" }).x!, "base64url");
-  writeFileSync(join(dir, `${NAME}-exploit-key.pem`), x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+  writeFileSync(join(dir, `${FILE_PREFIX}${NAME}-exploit-key.pem`), x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
   return `x25519:${base58.encode(pub)}`;
 }
 const rules = bountyRules(
@@ -375,7 +393,7 @@ const rules = bountyRules(
   chains.map((c) => ({ chain_id: c.chain_id, usdc: c.evm_usdc })),
   exploitPublicKey,
 );
-const rulesFile = join(dir, `${NAME}-rules.json`);
+const rulesFile = join(dir, `${FILE_PREFIX}${NAME}-rules.json`);
 writeFileSync(rulesFile, `${JSON.stringify(rules, null, 2)}\n`, { mode: 0o600 });
 const posted = spawnSync(
   process.execPath,
@@ -388,9 +406,10 @@ const posted = spawnSync(
   { encoding: "utf8" },
 );
 const postResult = JSON.parse(posted.stdout.trim().split("\n").pop() || posted.stderr.trim().split("\n").pop() || "{}");
-if (posted.status !== 0 || postResult.state !== "live") {
+// `post` exits 1 on a failed check, which SKIP_GRANT expects; the state read back decides.
+if (postResult.state !== EXPECTED_STATE || (EXPECTED_STATE === "live" && posted.status !== 0)) {
   save({ posted: false, rules, post: postResult });
-  throw new Error(`the bounty isn't live: ${posted.stdout}${posted.stderr}`);
+  throw new Error(`the bounty isn't ${EXPECTED_STATE}: ${posted.stdout}${posted.stderr}`);
 }
 
 const instance = {
@@ -409,6 +428,7 @@ const instance = {
   pause_gas_tx: proof.pause_gas_tx,
   chains,
   post_tx: postResult.post_tx,
+  state: postResult.state,
   rules,
   balances: needs,
 };

@@ -1,5 +1,9 @@
 // A covered chain's official mark, unaltered (DESIGN.md, Brand marks): Base's Square on Base
 // Blue, and Arbitrum One's all-white logomark on Navy. Paths as the landing page draws them.
+// The mark is the chain family's, from the network table (D30), so a test chain shows its
+// mainnet's.
+import { coveredChain } from "@/lib/network.ts";
+
 const BASE_SQUARE =
   "M0,101.12c0-34.64,0-51.95,6.53-65.28,6.25-12.76,16.56-23.07,29.32-29.32C49.17,0,66.48,0,101.12,0h1077.76C1213.51,0,1230.84,0,1244.16,6.53c12.75,6.25,23.06,16.56,29.32,29.32,6.52,13.32,6.52,30.64,6.52,65.28v1077.76c0,34.63,0,51.96-6.52,65.28-6.26,12.75-16.57,23.06-29.32,29.32-13.32,6.52-30.65,6.52-65.28,6.52H101.12c-34.64,0-51.95,0-65.28-6.52-12.76-6.26-23.07-16.57-29.32-29.32-6.53-13.32-6.53-30.65-6.53-65.28V101.12Z";
 const ARB_MARK = [
@@ -8,14 +12,15 @@ const ARB_MARK = [
 ];
 
 export function ChainMark({ chainId, name }: { chainId: number; name: string }) {
-  if (chainId === 8453) {
+  const family = coveredChain(chainId)?.family;
+  if (family === "base") {
     return (
       <svg className="mark16" viewBox="0 0 1280 1280" role="img" aria-label={name}>
         <path d={BASE_SQUARE} fill="#0000ff" />
       </svg>
     );
   }
-  if (chainId === 42161) {
+  if (family === "arbitrum") {
     return (
       <svg className="mark16" viewBox="-40 -30 454 480" role="img" aria-label={name}>
         <rect x="-40" y="-30" width="454" height="480" rx="80" fill="#213147" />

@@ -115,6 +115,9 @@ a.chip { transition: background-color var(--t2) var(--ease), color var(--t2) var
 a.chip:hover { background: var(--line); color: var(--ink); }
 .chip.ok { color: var(--ok); background: var(--ok-wash); }
 .chip.mute { color: var(--ink-3); background: var(--ground-2); }
+/* The network badge (D31): NEAR green as a wash behind the word, its one non-proof use (DESIGN.md). */
+.chip.net-badge { background: var(--ok-wash); }
+a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); }
 .js .track { height: calc(100svh + 8 * 62svh); }
 .js .stage { position: sticky; top: 0; height: 100svh; display: flex; align-items: center; padding-top: 76px; padding-bottom: 100px; }
 .js .stage-in { width: 100%; }

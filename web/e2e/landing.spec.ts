@@ -4,6 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { ARBITRUM, BASE, DEMO, emptyWorld, finishedDemo, judge, post, setWorld, win } from "./stand-ins/world.ts";
+import { SITES } from "./stand-ins/sites.ts";
 
 const ORDER = ["Posted", "Sealed", "Checked", "Signed", "Paid", "Landed", "Verified", "Published"];
 const panel = (page: Page, i: number) => page.locator("#panels > li").nth(i);
@@ -67,14 +68,14 @@ test("D4: a step that hasn't happened yet links no transaction: it says tx pendi
   await expect(panel(page, 7)).toContainText("pending · after 1 day");
 });
 
-test("R15.6: the story's amounts and delay are the bounty's on chain", async ({ page }) => {
+test("R15.6, D27: the story's amounts and delay are the bounty's on chain, and it names no one proof chain", async ({ page }) => {
   const w = finishedDemo();
   const b = w.bounties[0]!;
   b.rules = { ...b.rules, bounty_amount: "25000000", minimum_theft: "2000000", disclosure_delay_days: 3 };
   await setWorld(page, w);
   await page.goto("/");
   await expect(panel(page, 0)).toContainText("locked 25 USDC behind rules nobody can change");
-  await expect(panel(page, 2)).toContainText("more than the 2 USDC minimum theft");
+  await expect(panel(page, 2)).toContainText("The Enclave replayed the exploit with revm against a covered chain's recent state. It took more than the 2 USDC minimum theft.");
   await expect(panel(page, 7)).toContainText("After the 3-day disclosure delay");
   await expect(page.getByRole("definition").filter({ hasText: "25 USDC" })).toContainText("25 USDC, once");
 });
@@ -83,25 +84,28 @@ test("D4, ADR-0017: no testnet string or explorer link ships in the mainnet buil
   await setWorld(page, finishedDemo());
   await page.goto("/");
   await expect(panel(page, 0).locator("a").first()).toHaveAttribute("href", /nearblocks/);
+  // The one exception is D31's link to the testnet site: its address (set on this build) and its words.
+  const withoutTheLink = (text: string) => text.replaceAll(SITES.testnet, "").replaceAll("Try it on testnet", "");
   const html = await page.content();
-  expect(html).not.toMatch(/testnet|sepolia/i);
+  expect(html).toContain(SITES.testnet);
+  expect(withoutTheLink(html)).not.toMatch(/testnet|sepolia/i);
   // And none in any file the browser is sent.
   const files: string[] = [];
   const walk = (dir: string) => readdirSync(dir).forEach((f) => (statSync(join(dir, f)).isDirectory() ? walk(join(dir, f)) : files.push(join(dir, f))));
   walk(join(import.meta.dirname, "../.next/static"));
   walk(join(import.meta.dirname, "../public"));
-  const hits = files.filter((f) => /testnet|sepolia/i.test(readFileSync(f, "utf8")));
+  const hits = files.filter((f) => /testnet|sepolia/i.test(withoutTheLink(readFileSync(f, "utf8"))));
   expect(hits).toEqual([]);
 });
 
-test("D6: the landing page's Verify lists the demo bounty's checks, read live", async ({ page }) => {
+test("D6, D30: the landing page's Verify lists the demo bounty's checks, read live, under a command naming mainnet's contract", async ({ page }) => {
   await setWorld(page, finishedDemo());
   await page.goto("/");
   await page.locator("#verify").scrollIntoViewIfNeeded();
   const run = page.getByRole("list", { name: "Check results" });
   await expect(run.getByRole("listitem").filter({ hasText: "Payout on NEAR" })).toContainText("PASS");
   await expect(run.getByRole("listitem").filter({ hasText: "Pauses verified on NEAR" })).toContainText("PASS");
-  await expect(page.locator("#cmd")).toHaveText(`$bountee verify ${DEMO.protocol}/${DEMO.name} --network mainnet`);
+  await expect(page.locator("#cmd")).toHaveText(`$bountee verify ${DEMO.protocol}/${DEMO.name} --contract bounty.bountee.near --network mainnet`);
 });
 
 test("D4, R15.6: the story says an AI agent won with a claim key only when NEAR shows the claim was filed with one", async ({ page }) => {

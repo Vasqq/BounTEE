@@ -17,7 +17,7 @@ const X = { near: 'https://nearblocks.io/', base: 'https://basescan.org/', arb: 
 // anything not on chain yet, a value is an en dash and a transaction is "tx pending".
 const DASH = '–';
 const CHAIN_EXPLORER = { Base: X.base, 'Arbitrum One': X.arb };
-const live = { protocol: null, name: null, amount: DASH, min: DASH, delay: null, pauses: null, chains: null, proofChain: null, steps: [], checked: false, claimKey: null, verdict: null, cheat: false, paidOnce: false, landed: null, verified: null, published: false };
+const live = { protocol: null, name: null, amount: DASH, min: DASH, delay: null, pauses: null, chains: null, steps: [], checked: false, claimKey: null, verdict: null, cheat: false, paidOnce: false, landed: null, verified: null, published: false };
 const BOUNTY = {
   actor: 'agent', who: 'Whitehat',
   get name() { return live.name || DASH; }
@@ -42,8 +42,8 @@ function stepsFor() {
         : 'The Whitehat seals the exploit so only the bounty contract\'s enclave job can read it, and files the claim.',
       tx: tx(1, [t('NEAR', X.near)]) },
     { d: (live.verdict === 'PAYS'
-          ? `The Enclave replayed the exploit with revm against recent ${live.proofChain || DASH} state. It took more than the ${live.min} minimum theft.`
-          : `The Enclave replays the exploit with revm against recent ${live.proofChain || DASH} state, and pays only a theft of at least the ${live.min} minimum.`) +
+          ? `The Enclave replayed the exploit with revm against a covered chain's recent state. It took more than the ${live.min} minimum theft.`
+          : `The Enclave replays the exploit with revm against a covered chain's recent state, and pays only a theft of at least the ${live.min} minimum.`) +
         (live.cheat ? ' An earlier cheat claim, passed off as theft, scored zero and nothing moved.' : ''),
       chips: [...(live.verdict === 'PAYS' ? [['ok', 'Verdict PAYS']] : []), ...(live.cheat ? [['mute', 'Cheat claim: ZERO']] : [])], tx: tx(2, [t('NEAR', X.near)]) },
     { d: `NEAR's MPC network ${ex[3] && ex[3].length ? 'signed' : 'signs'} a pause for every covered contract. Only the bounty contract can ask it to, and only after a PAYS verdict.`, tx: tx(3, [t('NEAR MPC', X.near)]) },
@@ -53,7 +53,7 @@ function stepsFor() {
     { d: `After the ${days(live.delay)} disclosure delay the winning exploit is published, so anyone can re-run it. Until then only the Protocol can open it.`, tx: tx(7, []), pending: live.published ? null : `pending · after ${live.delay == null ? DASH : live.delay === 1 ? '1 day' : live.delay + ' days'}` }
   ];
 }
-const cmdFor = () => `bountee verify ${live.name ? live.protocol + '/' + live.name : '<protocol>/<name>'} --network mainnet`;
+const cmdFor = () => `bountee verify ${live.name ? live.protocol + '/' + live.name : '<protocol>/<name>'} --contract bounty.bountee.near --network mainnet`;
 const ext = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4 2h6v6M10 2 3 9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
 const short = h => h.length > 12 ? `${h.slice(0, 6)}…${h.slice(-4)}` : h;
 const copyIco = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M8.5 1.5h-6a1 1 0 0 0-1 1v6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';

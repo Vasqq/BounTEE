@@ -259,7 +259,7 @@ BounTEE pays a Whitehat once an enclave proves an exploit, and pauses the covere
 
 **Principles.** Each one decides something.
 
-1. **Green means proven.** `ok` `#00ec97` appears only on something a chain or the Enclave has confirmed: a PAYS verdict, a payout, a landed or verified pause, a passing check, a completed step. If it isn't proven yet, it's grey. Green is never decoration, never a brand fill, and never on a button. Red (`fail`) means a check failed or a read failed. Amber (`warn`) means the Protocol must act before it matters (low pause gas). Each hue keeps its one meaning, and an object carries at most one hue.
+1. **Green means proven.** `ok` `#00ec97` appears only on something a chain or the Enclave has confirmed: a PAYS verdict, a payout, a landed or verified pause, a passing check, a completed step. If it isn't proven yet, it's grey. Green is never decoration, never a brand fill, and never on a button. The one exception is the testnet badge's wash (Nov 10): a 12% tint behind grey text, never the green itself. Red (`fail`) means a check failed or a read failed. Amber (`warn`) means the Protocol must act before it matters (low pause gas). Each hue keeps its one meaning, and an object carries at most one hue.
 2. **Data is shown as data.** A transaction, command, address, hash or bounty id is set in IBM Plex Mono inside a chip, terminal or diagram tag, and links to its explorer. Everything else uses the text face. A value the page can't read from a chain isn't shown (R15.6).
 3. **Tone and space separate things, not lines.** Surfaces step from `ground` to `ground-2` to `surface`. The only lines are inside the terminal and between FAQ items.
 4. **Sober and exact.** One ink action per view, no glow, no emoji, no adjectives that a number could replace. The serif display carries the voice. The UI chrome stays quiet.
@@ -404,6 +404,8 @@ Focus: a 2px `ok` outline with a 3px offset and a 6px radius. **Skill conflict:*
 
 **Nav bar.** Fixed, 68px, transparent over the hero, then `nav-solid` with blur after 8px of scroll. It holds the wordmark (a 24px hex-and-bars mark plus "BounTEE" in `wordmark`), links in `ink-2` 16px spaced 26px apart (`ink` on hover), and one `button-nav` on the right. No divider line. **Extension:** on app screens the links are "Bounties" (the list) and "Verify" (the landing page's Verify section), and the action is "Post a bounty". The current page's link turns `ink`. The landing page keeps its own links and "Open the app", which goes to Bounties.
 
+**Testnet badge (Extension, D31).** On the testnet site only, "Testnet" sits 12px (`cta-gap`) right of the wordmark: the `chip`'s shape (`chip` radius, 30px tall, 0 11px) on `ok-wash`, NEAR green at 12%, with `label-sm` in `ink-2`, since it is a word, not data. It links to the mainnet site; on hover the wash rises to 20% and the word turns `ink`. With no mainnet address set it is plain text. It is the only mark of the testnet site, and the testnet nav's Verify goes to the mainnet site's Verify section. The mainnet site links back with a quiet "Try it on testnet" (`body-sm`, `ink-2`), under the bounty list and among the landing footer's links.
+
 **Chips** (30px tall, `data`, `chip` radius, `flex: none; white-space: nowrap`):
 - Transaction: two chips side by side, the chain name (`chip`) and the link (`a.chip`, hover `chip-hover`), with an 11px external-link glyph. Until the transaction exists the link reads "tx pending" and points at the explorer root (nearblocks.io, basescan.org, arbiscan.io).
 - **Extension:** once the transaction exists, the link chip shows its shortened hash (the first 6 characters, "…", the last 4: `0x8f3a…9b2c`, `8Fq3Zk…9xKp`) and links to that transaction on the chain's explorer. The full hash is the link's `title`. After the external glyph, inside the same chip, sits a 12px copy glyph as its own `button` (accessible name "Copy transaction hash", `ink-3`, `ink` on hover). It copies the full hash. For 1600ms it swaps to a check in `ink` and announces "Copied" through an `aria-live` region. The copy action is never green, because copying proves nothing.
@@ -450,17 +452,17 @@ On a phone each row becomes two lines, 72px tall: the bounty and its status chip
 
 **Forms** (posting flow, open-exploit). Label above the field, `label-sm` in `ink-2`, 8px gap. The field is a `surface` fill with no border, `sm` radius, 48px tall to match the buttons, `body-md` text in `ink`, and the 2px `ok` focus ring. Fields are 16px apart. Help text is `body-sm` in `ink-3` under the field. Addresses and ids are typed in `data`. Disabled controls stay legible and say why in a line beneath.
 
-**Posting flow** (#31). The flow's steps are the dock's steps: the dock floats at the bottom and moves between them, with done steps' numbers turning `ok` only once their transaction lands. The exact step list is settled with Liam when #31 starts. Field and checklist rules below apply whatever the steps are. The coverage limit (R4.12) is one `body-sm` `ink-2` sentence under the covered-contracts field: "Only contracts that pay nothing to callers by design can be covered."
+**Posting flow** (#31). The flow's steps are the dock's steps: the dock floats at the bottom and moves between them, with done steps' numbers turning `ok` only once their transaction lands. The steps, settled with Liam on Nov 10, 2026: **Set rules**, **Set up pause**, **Add funds**, **Post bounty**. Each label starts with a verb, so the dock reads as a to-do list, and the step's heading uses the same words. Set up pause holds both the grants and the pause gas, since both act on the one pause-role address; Add funds asks for everything the posting costs (the bounty's USDC and the NEAR fees) in one place, right before posting. Continue never waits on a chain: Post bounty checks everything anyway. The coverage limit (R4.12) is one `body-sm` sentence above the covered-contracts rows: "Each needs a pause() you can grant. Only contracts that pay callers nothing can be covered, so no liquidations."
 
 **Posting checklist** (D5, D14, D17, D20). Numbered items "1." onward, laid out like the per-chain pause rows. Each item has:
 - Its number, which turns `ok` once the item lands on chain.
-- A `title`.
-- The explanation in `ink-2`. The pause-gas text is D5's, word for word in meaning.
-- A primary action, e.g. "Grant on Base".
-- "Copy for your multisig" as `button-secondary`.
+- A `title`, with the item's state at the right of the same row ("not granted", "ready", "received"), `ok` only once proven on chain.
+- At most one short line in `ink-2`; the longer why sits in a hover tooltip on its key phrase. The pause-gas tooltip is D5's, word for word in meaning.
+- A primary action, e.g. "Grant". Only the next thing to do on the page is `ink`.
+- "Copy for multisig" as `button-secondary`, only where there is a grant transaction to copy.
 - The tx chip once it lands.
 
-The NEAR step shows the Protocol's `0x…` account in a command block with Copy. The exploit-key step's action is "Sign with MetaMask". If the two signatures differ, the item shows one `ink` sentence saying so and offers a key-file field in its place (D20).
+Set up pause has one card per chain, holding a row per covered contract's grant and a row for that chain's pause gas, split by a `line` hairline. Add funds shows the Protocol's `0x…` account in a command block with Copy, then the bounty's USDC and the NEAR fees as items. Post bounty's first item is the exploit key, whose action is "Sign with MetaMask". If the two signatures differ, the item shows one `ink` sentence saying so and offers a key-file field in its place (D20).
 
 **"What you're risking" panel** (D15). A `panel` in the right column, built as the ledger without glyphs: `title-ledger` items, each with one sentence, listing D15's points and the R15.5 trusted parties. It stays in view beside the final two prompts. On a phone it sits directly above the two prompts.
 
@@ -521,7 +523,7 @@ Screens and panels on objects are `#19191a`.
 - Transactions are written as a chain chip plus a link. Once the transaction exists, the link shows the shortened hash and has a copy button. Before then, it says "tx pending" and points at the explorer root: nearblocks.io for NEAR, basescan.org for Base, arbiscan.io for Arbitrum One. Pending states give their reason after a middle dot: "pending · after 1 day".
 - Chain names are written in full: "Arbitrum One", never "Arbitrum" or "Arb". Amounts are written "10 USDC". Chains are listed as "NEAR, Base and Arbitrum One".
 - "Paused" means the pause transaction succeeded on that chain. Use "verified" only for what NEAR's MPC network confirmed. Never imply anything about the contract's code.
-- Mainnet only. No "testnet", "Sepolia", "rehearsal" or network toggle in any mainnet build. The network is a build setting, not a control. D17's faucet link exists only in a testnet rehearsal build.
+- Mainnet only. No "testnet", "Sepolia", "rehearsal" or network toggle in any mainnet build. The network is a build setting, not a control. D17's faucet link exists only in the testnet build, the second site for trying BounTEE (ADR-0021).
 - Wallets: "Posting connects MetaMask. Reading and verifying never do." No wallet prompt on public pages.
 
 ## Do's and Don'ts

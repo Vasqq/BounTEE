@@ -47,25 +47,27 @@ export interface GasStatus {
   ok: boolean;
 }
 
-export interface PostingStatus {
+/** What the rules step needs before a wallet connects: the same for every Protocol. */
+export interface PostingBasics {
   contract: string;
   usdc: string;
   usdcDecimals: number;
+  postingFee: string;
+  /** Rules BounTEE sets, not the Protocol (R1.1, R1.3). */
+  fixed: { recency_limit_secs: number; seed: unknown; judge_build_hash: string };
+  nearEth: { chainId: number; rpc: string };
+}
+
+export interface PostingStatus extends PostingBasics {
   nameTaken: boolean;
   /** The bounty's state once posted under this name; null before. */
   bountyState: string | null;
-  /** The chains a bounty can cover, and the USDC each values theft in. */
-  chains: { id: number; name: string; usdc: string; explorerTx: string }[];
   pauseRole: string;
-  postingFee: string;
   /** NEAR the account needs: what the posting fee balance lacks, plus gas for the two prompts. */
   nearNeeded: string;
   account: { near: string; postingFeeBalance: string; usdc: string; onboarded: boolean; relayerKey: string };
   covered: CoveredStatus[];
   gas: GasStatus[];
-  /** Rules BounTEE sets, not the Protocol (R1.1, R1.3). */
-  fixed: { recency_limit_secs: number; seed: unknown; judge_build_hash: string };
-  nearEth: { chainId: number; rpc: string };
 }
 
 /** Gas for the two posting prompts: MetaMask checks a fee of about 0.15 NEAR for a 270 Tgas call (spec, posting flow). */
@@ -93,19 +95,39 @@ async function usesAccessControl(url: string, to: string, account: string): Prom
   );
 }
 
+/** What the bounty contract fixes for every posting, and the pause gas it asks per pause. */
+async function readContractTerms(c: ReturnType<typeof config>) {
+  const [cfg, fees] = await Promise.all([
+    view<{ usdc: string; seed: unknown; judge_build_hash: string }>(c, c.contract, "config"),
+    view<{ posting_fee: string; pause_gas_per_pause: string }>(c, c.contract, "fees"),
+  ]);
+  const meta = await view<{ decimals: number }>(c, cfg.usdc, "ft_metadata");
+  const basics: PostingBasics = {
+    contract: c.contract,
+    usdc: cfg.usdc,
+    usdcDecimals: meta.decimals,
+    postingFee: fees.posting_fee,
+    fixed: { recency_limit_secs: 300, seed: cfg.seed, judge_build_hash: cfg.judge_build_hash },
+    nearEth: c.nearEth,
+  };
+  return { basics, pauseGasPerPause: BigInt(fees.pause_gas_per_pause) };
+}
+
+export async function readBasics(): Promise<PostingBasics> {
+  return (await readContractTerms(config())).basics;
+}
+
 export async function readPosting(protocol: string, name: string, covered: { chainId: number; address: string }[]): Promise<PostingStatus> {
   const c = config();
   const id = { protocol, name };
-  const [cfg, fees, existing, role] = await Promise.all([
-    view<{ usdc: string; seed: unknown; judge_build_hash: string }>(c, c.contract, "config"),
-    view<{ posting_fee: string; pause_gas_per_pause: string }>(c, c.contract, "fees"),
+  const [{ basics, pauseGasPerPause }, existing, role] = await Promise.all([
+    readContractTerms(c),
     view<{ state: string } | null>(c, c.contract, "bounty", { id }),
     view<{ address: string }>(c, c.contract, "pause_role", { id }),
   ]);
-  const [meta, feeBalance, usdc, account, relayer] = await Promise.all([
-    view<{ decimals: number }>(c, cfg.usdc, "ft_metadata"),
+  const [feeBalance, usdc, account, relayer] = await Promise.all([
     view<string>(c, c.contract, "posting_fee_balance", { account_id: protocol }).catch(() => "0"),
-    view<string>(c, cfg.usdc, "ft_balance_of", { account_id: protocol }).catch(() => "0"),
+    view<string>(c, basics.usdc, "ft_balance_of", { account_id: protocol }).catch(() => "0"),
     rpc<{ amount: string }>(c.nearRpc, "query", { request_type: "view_account", finality: "final", account_id: protocol }).catch(() => null),
     rpc<{ public_key: string }>(c.nearEth.rpc, "near_getPublicKey", []),
   ]);
@@ -132,26 +154,20 @@ export async function readPosting(protocol: string, name: string, covered: { cha
     [...perChain].filter(([id]) => c.chains[id]).map(async ([chainId, n]) => {
       const chain = c.chains[chainId]!;
       const held = await balance(chain.rpc, role.address);
-      const needed = BigInt(fees.pause_gas_per_pause) * BigInt(n);
+      const needed = pauseGasPerPause * BigInt(n);
       return { chainId, chain: chain.name, token: chain.gasToken, held: held.toString(), needed: needed.toString(), short: (needed > held ? needed - held : 0n).toString(), ok: held >= needed };
     }),
   );
-  const postingFee = BigInt(fees.posting_fee);
+  const postingFee = BigInt(basics.postingFee);
   const lacking = postingFee > BigInt(feeBalance) ? postingFee - BigInt(feeBalance) : 0n;
   return {
-    contract: c.contract,
-    usdc: cfg.usdc,
-    usdcDecimals: meta.decimals,
+    ...basics,
     nameTaken: existing !== null,
     bountyState: existing?.state ?? null,
-    chains: Object.values(c.chains).map((x) => ({ id: x.id, name: x.name, usdc: x.usdc, explorerTx: x.explorerTx })),
     pauseRole: role.address,
-    postingFee: postingFee.toString(),
     nearNeeded: (lacking + GAS_MARGIN).toString(),
     account: { near: account?.amount ?? "0", postingFeeBalance: String(feeBalance), usdc: String(usdc), onboarded, relayerKey },
     covered: coveredStatus,
     gas,
-    fixed: { recency_limit_secs: 300, seed: cfg.seed, judge_build_hash: cfg.judge_build_hash },
-    nearEth: c.nearEth,
   };
 }
