@@ -11,7 +11,7 @@
 import { defineChain, type Transport } from "viem";
 import { createConfig, http } from "wagmi";
 import { injected } from "wagmi/connectors";
-import { net, type CoveredChainId } from "./network.ts";
+import { net, type CoveredChainId, type EvmChain } from "./network.ts";
 
 /** NEAR's Ethereum-compatible chain, as NEAR's ethereum-wallets module defines it. */
 export const nearEvm = defineChain({
@@ -22,17 +22,30 @@ export const nearEvm = defineChain({
   blockExplorers: { default: { name: "NEAR Explorer", url: net.nearEvm.explorer } },
 });
 
+/**
+ * A covered chain, as MetaMask is asked to add it. Built from the table's plain values rather
+ * than taken from viem/chains, so the build carries only its own network's chains: the other
+ * row is dropped as dead code, and an import from viem/chains would not be (e2e/landing.spec.ts).
+ * The app only sends plain transactions there (grants and top-ups), so no chain formatters.
+ */
+const coveredEvm = (c: EvmChain) =>
+  defineChain({
+
+    id: c.id,
+    name: c.name,
+    nativeCurrency: { decimals: 18, name: "Ether", symbol: c.gasToken },
+    rpcUrls: { default: { http: [c.browserRpc ?? c.rpc] } },
+    blockExplorers: { default: { name: `${c.name} explorer`, url: c.explorer } },
+  });
+
 // wagmi types its chains as a non-empty tuple and its transports by those chains' IDs: built
 // from the table, both need saying so.
-const [first, ...rest] = net.chains.map((c) => c.viem);
+const [first, ...rest] = net.chains.map(coveredEvm);
 
 export const wagmiConfig = createConfig({
   chains: [first, ...rest, nearEvm],
   connectors: [injected({ target: "metaMask" })],
-  transports: {
-    ...(Object.fromEntries(net.chains.map((c) => [c.id, http(c.browserRpc)])) as Record<CoveredChainId, Transport>),
-    [nearEvm.id]: http(),
-  },
+  transports: Object.fromEntries([...net.chains, net.nearEvm].map((c) => [c.id, http()])) as Record<CoveredChainId | typeof nearEvm.id, Transport>,
   // Rendered on the server first: keep wallet state out of the first paint, restore it after.
   // Its storage stays in the browser (localStorage), never in a cookie sent to the server.
   ssr: true,

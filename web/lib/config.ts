@@ -7,14 +7,14 @@
 import { ARCHIVAL_RPC, KEYSTORE_API, NEAR_EXPLORER, NEAR_EXPLORER_TX, NEAR_RPC, TX_API } from "@bountee/cli/src/endpoints.ts";
 import { net, type EvmChain } from "./network.ts";
 
-export type ChainInfo = Omit<EvmChain, "viem" | "browserRpc">;
+export type ChainInfo = Omit<EvmChain, "browserRpc">;
 
 const env = (name: string, fallback: string) => process.env[name] || fallback;
 
 /** The chains a bounty can cover, each RPC overridable by `EVM_RPC_<chain ID>`. */
 export function chains(): Record<number, ChainInfo> {
   return Object.fromEntries(
-    net.chains.map(({ viem: _, browserRpc: __, ...c }): [number, ChainInfo] => [c.id, { ...c, rpc: env(`EVM_RPC_${c.id}`, c.rpc) }]),
+    net.chains.map(({ browserRpc: _, ...c }): [number, ChainInfo] => [c.id, { ...c, rpc: env(`EVM_RPC_${c.id}`, c.rpc) }]),
   );
 }
 
