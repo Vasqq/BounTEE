@@ -14,6 +14,13 @@ export function Hint({ tip, children }: { tip: ReactNode; children: ReactNode })
   const [instant, setInstant] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
+  // Escape closes it wherever focus is, so a tooltip opened by hover can be dismissed too.
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && hide();
+    document.addEventListener("keydown", esc);
+    return () => document.removeEventListener("keydown", esc);
+  });
 
   const show = (now: boolean) => {
     clearTimeout(timer.current);

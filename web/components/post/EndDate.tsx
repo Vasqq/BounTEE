@@ -5,11 +5,13 @@ import { useEffect, useId, useState } from "react";
 
 const TERMS = [1, 3, 6];
 
-/** The UTC day n months from today, as the date field writes it: "2027-02-07". */
+/** The UTC day n months from today, as the date field writes it: "2027-02-07". Jan 31 plus a month is Feb 28, not Mar 3. */
 export function monthsFromNow(n: number): string {
-  const d = new Date();
-  d.setUTCMonth(d.getUTCMonth() + n);
-  return d.toISOString().slice(0, 10);
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth() + n;
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m, Math.min(now.getUTCDate(), last))).toISOString().slice(0, 10);
 }
 
 const spoken = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });

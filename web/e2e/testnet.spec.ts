@@ -143,6 +143,7 @@ for (const [what, swap] of [
     await metamask(page, PROTOCOL_KEY, { network: "testnet" });
     await setWorld(page, postingWorld(ACCOUNT, { onboarded: true, network: "testnet" }));
     await page.route("**/api/post", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
       const answer = await (await route.fetch()).json();
       await route.fulfill({ json: { status: { ...answer.status, ...swap } } });
     });
@@ -162,6 +163,7 @@ test("D30: on testnet the posting flow refuses a covered contract on Base or Arb
   // The app's server, misconfigured or not, answers with grants and top-ups on mainnet's chains.
   const MAINNET_CHAINS = [[M.base, "Base", VAULT_BASE], [M.arbitrum, "Arbitrum One", VAULT_ARB]] as const;
   await page.route("**/api/post", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
     const { status } = await (await route.fetch()).json();
     await route.fulfill({
       json: {

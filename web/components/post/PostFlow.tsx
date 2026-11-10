@@ -87,6 +87,7 @@ function trusted(s: PostingStatus, protocol: string, name: string): PostingStatu
   if (s.contract !== BOUNTY_CONTRACT || s.usdc !== NEAR_USDC || s.pauseRole.toLowerCase() !== role.toLowerCase()) {
     throw new Error("The app's server named another bounty contract, USDC or pause-role address than this page expects, so nothing will be signed.");
   }
+  if (s.gas.some((g) => BigInt(g.short) > BigInt(g.needed))) throw new Error("The app's server asked for more pause gas than a pause needs, so nothing will be signed.");
   return {
     ...s,
     pauseRole: role,
@@ -116,7 +117,11 @@ export function PostFlow() {
   const account = address?.toLowerCase();
   const basicsQuery = useBasics();
   const q = usePostingStatus(account, draft);
-  const s = q.data;
+  // While a new name or contract list loads, the last answer is another bounty's: its pause-role
+  // address and buttons would grant or fund the wrong address, so nothing shows until it lands.
+  const s = q.isPlaceholderData ? undefined : q.data;
+  // A name posted in this visit stays this bounty's, not one "used before" (D25).
+  const [postedAs, setPostedAs] = useState<string | null>(null);
   const basics = s ?? basicsQuery.data;
   // The exploit key is derived from a message naming the bounty (D20): a new name needs a new signature.
   useEffect(() => setKey(null), [draft.name]);
@@ -139,7 +144,8 @@ export function PostFlow() {
 
   const problems = useMemo(() => (basics ? draftProblems(draft, basics.usdcDecimals) : { pending: "" }), [draft, basics]);
   // A name is taken only within the Protocol's own bounties, so it is known once the wallet is.
-  const rulesOk = Object.keys(problems).length === 0 && !s?.nameTaken;
+  const taken = !!s?.nameTaken && postedAs !== draft.name;
+  const rulesOk = Object.keys(problems).length === 0 && !taken;
   const bounty = s ? bountyUnits(draft, s.usdcDecimals) : null;
   const funded = !!s && BigInt(s.account.near) >= BigInt(s.nearNeeded) && bounty !== null && BigInt(s.account.usdc) >= bounty;
   const posted = s?.bountyState === "live";
@@ -150,7 +156,7 @@ export function PostFlow() {
   // Why the pause-role steps can't start yet. A name is taken only within the Protocol's own
   // bounties, so that is learned once the wallet connects, and offered a fresh name in one click.
   const renamed = nextLabel(draft.label);
-  const rulesFirst = rulesOk ? null : s?.nameTaken ? (
+  const rulesFirst = rulesOk ? null : taken ? (
     <>
       <p className="step-lead">You've posted a bounty named {draft.name} before, and a name is never reused.</p>
       <div className="send">
@@ -176,10 +182,10 @@ export function PostFlow() {
               </p>
             ) : null,
           )}
-          {step === 1 && <RulesStep basics={basics} s={s} account={account} draft={draft} setDraft={setDraft} problems={problems} ok={rulesOk} next={() => go(2)} />}
+          {step === 1 && <RulesStep basics={basics} taken={taken} account={account} draft={draft} setDraft={setDraft} problems={problems} ok={rulesOk} next={() => go(2)} />}
           {step === 2 && <PauseStep account={account} s={rulesOk ? s : undefined} rulesFirst={rulesFirst} done={pauseReady} next={() => go(3)} />}
           {step === 3 && <FundStep s={s} account={account} draft={draft} done={funded} next={() => go(4)} />}
-          {step === 4 && <PostStep s={s} account={account} draft={draft} keyState={key} setKey={setKey} ready={complete.slice(0, 3).every(Boolean)} />}
+          {step === 4 && <PostStep s={s} account={account} draft={draft} keyState={key} setKey={setKey} onPosted={() => setPostedAs(draft.name)} ready={complete.slice(0, 3).every(Boolean)} />}
         </div>
         <RiskPanel className="risk-side" />
       </div>
@@ -221,10 +227,10 @@ function Item({ n, title, done, status, children }: { n: number; title: ReactNod
   );
 }
 
-function Next({ ok, next, why }: { ok: boolean; next: () => void; why?: string }) {
+function Next({ ok, next, why, primary = true }: { ok: boolean; next: () => void; why?: string; primary?: boolean }) {
   return (
     <div className="send">
-      <button type="button" className="btn btn-ink" onClick={next} disabled={!ok}>
+      <button type="button" className={ink(primary)} onClick={next} disabled={!ok}>
         Continue
       </button>
       {!ok && why && <p>{why}</p>}
@@ -277,7 +283,7 @@ function Field({ label, error, help, children }: { label: string; error?: string
   );
 }
 
-function RulesStep(p: { basics?: PostingBasics; s?: PostingStatus; account?: string; draft: Draft; setDraft: (d: Draft) => void; problems: Record<string, string>; ok: boolean; next: () => void }) {
+function RulesStep(p: { basics?: PostingBasics; taken: boolean; account?: string; draft: Draft; setDraft: (d: Draft) => void; problems: Record<string, string>; ok: boolean; next: () => void }) {
   const { draft: d, setDraft } = p;
   const set = (patch: Partial<Draft>) => setDraft({ ...d, ...patch });
   // The chains offered are this build's (the network table), never the server's: a bounty here
@@ -300,7 +306,7 @@ function RulesStep(p: { basics?: PostingBasics; s?: PostingStatus; account?: str
       <div className="form">
         <Field
           label="What does this bounty protect?"
-          error={err("name") ?? (p.s?.nameTaken && d.name ? "You've posted a bounty with this name before, and a name is never reused." : undefined)}
+          error={err("name") ?? (p.taken && d.name ? "You've posted a bounty with this name before, and a name is never reused." : undefined)}
           help={
             <>
               Whitehats find it at <span className="datum">/bounties/{p.account ? shortHash(p.account) : "your-address"}/{d.name || "…"}</span>
@@ -312,8 +318,8 @@ function RulesStep(p: { basics?: PostingBasics; s?: PostingStatus; account?: str
         <fieldset className="covered">
           <legend>Covered contracts</legend>
           <p className="fine">
-            Contracts that hold user funds, each with a <Hint tip="Next, you let the bounty's own address call it. It can only pause: no unpause, no other power.">pause() you can grant</Hint>. Skip any
-            that <Hint tip="A liquidation or keeper reward pays whoever calls it, so normal use would look like theft and pause you.">pay callers</Hint>, like liquidations.
+            Each needs a <Hint tip="Next, you let the bounty's own address call it. It can only pause: no unpause, no other power.">pause() you can grant</Hint>. Only contracts that{" "}
+            <Hint tip="A liquidation or keeper reward pays whoever calls it, so normal use would look like theft and pause you.">pay callers nothing</Hint> can be covered, so no liquidations.
           </p>
           {d.covered.map((c, i) => (
             <div className="covered-row" key={i}>
@@ -399,7 +405,7 @@ function PauseStep({ account, s, rulesFirst, done, next }: { account?: string; s
             ))}
         </ol>
         {/* Continue never waits: a multisig grant can take days, and Post checks everything anyway. */}
-        <Next ok next={next} />
+        <Next ok next={next} primary={!!s && todo.length === 0} />
         {s && !done && <p className="fine">Posting waits until every chain is ready. You can carry on meanwhile.</p>}
       </WithWallet>
     </Step>
@@ -492,15 +498,15 @@ function GrantTask({ c, explorerTx, primary }: { c: PostingStatus["covered"][num
   );
 }
 
-// D5's four points live in the tooltip: the pause is a real transaction paid from this address;
-// NEAR funds can't pay it; only the bounty can sign for it, so nobody can take the gas back; and a
+// D5's points live in the tooltip: the pause is a real transaction paid from this address, so it
+// needs that chain's token in advance; NEAR funds can't pay it; only the bounty can sign for it, so nobody can take the gas back; and a
 // proven exploit, not a person, triggers the pause.
 function GasTask({ g, pauseRole, explorerTx, primary }: { g: PostingStatus["gas"][number]; pauseRole: string; explorerTx?: string; primary: boolean }) {
   const top = useMutation({ mutationFn: () => sendOn({ chainId: g.chainId, to: pauseRole, data: "0x", value: g.short }) });
   const label = (
     <>
       <Hint
-        tip={`Pausing is a real ${g.chain} transaction, paid from the address above, and your bounty's funds on NEAR can't pay for it. Only the bounty contract can sign for that address, so nobody can take the gas back, you included. Nobody presses pause: a proven exploit triggers it.`}
+        tip={`Pausing is a real ${g.chain} transaction, paid from the address above, so it needs a few cents of ${g.token} there in advance: your bounty's funds on NEAR can't pay for it. Only the bounty contract can sign for that address, so nobody can take the gas back, you included. Nobody presses pause: a proven exploit triggers it.`}
       >
         Pause gas
       </Hint>{" "}
@@ -532,7 +538,7 @@ function GasTask({ g, pauseRole, explorerTx, primary }: { g: PostingStatus["gas"
   );
 }
 
-/** USDC in its smallest unit, for reading: "2,000". */
+/** USDC's smallest unit as people read it: 2000000000n with 6 decimals is "2,000". */
 const usdcText = (raw: string | bigint, decimals: number) => Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", { maximumFractionDigits: decimals });
 
 /** The bounty amount from step 1 in USDC's smallest unit, or null while it isn't a valid amount. */
@@ -643,6 +649,7 @@ function PostStep(p: {
   draft: Draft;
   keyState: { publicKey: string; from: string } | null;
   setKey: (k: { publicKey: string; from: "wallet" | "key-file" }) => void;
+  onPosted: () => void;
   ready: boolean;
 }) {
   const { s, account, draft, ready } = p;
@@ -692,6 +699,7 @@ function PostStep(p: {
         gas: MAX_GAS,
         deposit: 1n,
       }),
+    onSuccess: p.onPosted,
   });
   const enable = useMutation({ mutationFn: () => enableNearSigning(account as Address, s!.account.relayerKey) });
   const onboarded = !!s?.account.onboarded;
@@ -727,6 +735,12 @@ function PostStep(p: {
       <WithWallet account={account} why="Your wallet signs the NEAR prompts as your NEAR account.">
         <ol className="checklist">
           <Item n={1} title="Your exploit key" done={false} status={keyed ? "signed" : "not signed"}>
+            {keyed && (
+              <>
+                <p>Goes into the rules, so only you can open the winning exploit.</p>
+                <CommandBlock text={exploitKey} />
+              </>
+            )}
             {!keyed &&
               (differs ? (
                 <>
@@ -757,7 +771,7 @@ function PostStep(p: {
                     .
                   </p>
                   <div className="send">
-                    <button type="button" className={ink(ready)} onClick={() => sign.mutate()} disabled={!s || !draft.name || sign.isPending}>
+                    <button type="button" className={ink(ready && !keyed)} onClick={() => sign.mutate()} disabled={!s || !draft.name || sign.isPending}>
                       {sign.isPending ? "Signing" : "Sign with MetaMask"}
                     </button>
                   </div>
@@ -771,7 +785,7 @@ function PostStep(p: {
               <>
                 <p>Lets MetaMask sign for your NEAR account. Free, and needed once.</p>
                 <div className="send">
-                  <button type="button" className={ink(ready && keyed)} onClick={() => enable.mutate()} disabled={!ready || enable.isPending || enable.isSuccess}>
+                  <button type="button" className={ink(ready && keyed && !onboarded)} onClick={() => enable.mutate()} disabled={!ready || enable.isPending || enable.isSuccess}>
                     {enable.isPending ? "Enabling" : enable.isSuccess ? "Confirming" : "Enable NEAR signing"}
                   </button>
                   {finishFirst}
@@ -785,7 +799,7 @@ function PostStep(p: {
               <>
                 <p>{near(feeShort)}, not refunded even if the posting check fails.</p>
                 <div className="send">
-                  <button type="button" className={ink(ready && keyed && onboarded)} onClick={() => prepay.mutate()} disabled={!ready || !onboarded || prepay.isPending || prepay.isSuccess}>
+                  <button type="button" className={ink(ready && keyed && onboarded && !prepaid)} onClick={() => prepay.mutate()} disabled={!ready || !onboarded || prepay.isPending || prepay.isSuccess}>
                     {prepay.isPending ? "Signing" : prepay.isSuccess ? "Confirming" : "Prepay the posting fee"}
                   </button>
                   {ready && !onboarded && <p>Enable NEAR signing first.</p>}
@@ -809,7 +823,7 @@ function PostStep(p: {
                 <p>Sends {bounty !== null && s ? `${usdcText(bounty, s.usdcDecimals)} USDC` : "the bounty amount"} with the rules. It goes live once the posting check confirms every grant and the pause gas.</p>
                 {usdcShort && <p className="ink">Your account holds {usdcText(s!.account.usdc, s!.usdcDecimals)} USDC on NEAR; the bounty needs more.</p>}
                 <div className="send">
-                  <button type="button" className={ink(ready && keyed && prepaid)} onClick={() => post.mutate()} disabled={!ready || !keyed || !prepaid || !rules || usdcShort || post.isPending || post.isSuccess}>
+                  <button type="button" className={ink(ready && keyed && onboarded && prepaid)} onClick={() => post.mutate()} disabled={!ready || !keyed || !prepaid || !rules || usdcShort || post.isPending || post.isSuccess}>
                     {post.isPending ? "Signing" : post.isSuccess ? "Checking" : "Post the bounty"}
                   </button>
                   {ready && !keyed && <p>Sign your exploit key first.</p>}

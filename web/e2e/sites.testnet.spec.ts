@@ -57,7 +57,8 @@ test("D31: the bounty list, a bounty page and the posting flow have the same hea
   const pages: [string, (p: Page) => Promise<void>][] = [
     ["/bounties", (p) => expect(p.getByText("1 bounty")).toBeVisible()],
     [`/bounties/${id.protocol}/${id.name}`, (p) => expect(p.getByRole("region", { name: "Verify" }).getByText("PASS").first()).toBeVisible()],
-    ["/post", (p) => expect(p.getByRole("button", { name: "Connect MetaMask" })).toBeVisible()],
+    // The rules step needs no wallet; it's ready once the chain picker shows the build's first chain.
+    ["/post", (p) => expect(p.getByRole("combobox", { name: "Chain" })).toBeVisible()],
   ];
   for (const [path, ready] of pages) {
     await setWorld(page, paid("mainnet"));

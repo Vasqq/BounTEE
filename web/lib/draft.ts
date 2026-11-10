@@ -49,14 +49,19 @@ export function nameProblem(name: string): string | null {
 
 const isAddress = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a);
 
-/** An amount as typed, in USDC's smallest unit: "2,000" and "2000" alike. Commas only group digits. */
+/**
+ * An amount as typed, in USDC's smallest unit: "2,000" and "2000" alike. A comma only groups
+ * thousands, so "1,5" (a decimal comma) is refused rather than read as 15.
+ */
+const TYPED_USDC = /^(\d+|\d{1,3}(,\d{3})+)(\.\d+)?$/;
 export function usdcUnits(typed: string, decimals: number): bigint {
+  if (!TYPED_USDC.test(typed)) throw new Error(`Not an amount: ${typed}`);
   return parseUnits(typed.replace(/,/g, ""), decimals);
 }
 
 function usdcProblem(typed: string, decimals: number): string | null {
+  if (!TYPED_USDC.test(typed)) return "An amount of USDC above zero, with a dot for decimals.";
   const plain = typed.replace(/,/g, "");
-  if (!/^\d+(\.\d+)?$/.test(plain)) return "An amount of USDC above zero.";
   if ((plain.split(".")[1] ?? "").length > decimals) return `USDC has at most ${decimals} decimal places.`;
   return usdcUnits(plain, decimals) > 0n ? null : "An amount of USDC above zero.";
 }

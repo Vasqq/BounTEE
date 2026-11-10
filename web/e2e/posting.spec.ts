@@ -26,9 +26,9 @@ async function pickChain(page: Page, n: number, chain: string) {
 }
 
 /** The rules need no wallet; MetaMask connects at the pause-role step, the first that needs its address. */
-async function connect(page: Page) {
+async function connect(page: Page, role = PAUSE_ROLE) {
   await step(page, 2).getByRole("button", { name: "Connect MetaMask" }).click();
-  await expect(step(page, 2)).toContainText(PAUSE_ROLE, { ignoreCase: true });
+  await expect(step(page, 2)).toContainText(role, { ignoreCase: true });
 }
 
 async function fillRules(page: Page) {
@@ -56,7 +56,8 @@ test("D13, D5, D17, D20, D15: one MetaMask sets up the pause, adds funds and pos
   await page.goto("/post");
 
   // 1. Set rules, with the coverage limit stated (R4.12).
-  await expect(step(page, 1)).toContainText("Skip any that pay callers");
+  await expect(step(page, 1).getByRole("button", { name: "pay callers nothing" })).toBeVisible();
+  await expect(step(page, 1)).toContainText("can be covered, so no liquidations.");
   await fillRules(page);
 
   // 2. Set up pause: a card per chain, its grant and its pause gas each ticked off as it lands (D5).
@@ -73,9 +74,11 @@ test("D13, D5, D17, D20, D15: one MetaMask sets up the pause, adds funds and pos
     const grant = sent[chain]!.find((t) => t.to?.toLowerCase() === vault)!;
     expect(decodeFunctionData({ abi: role, data: grant.data as `0x${string}` }).args).toEqual([keccak256(toHex("PAUSER_ROLE")), expect.stringMatching(new RegExp(PAUSE_ROLE, "i"))]);
   }
-  // The pause gas, with D5's plain explanation behind its phrase.
+  // The pause gas, with D5's plain explanation behind its phrase, shown when the phrase is focused.
   const gas = task(page, /Base/, /Pause gas/);
-  await expect(gas).toContainText("Pausing is a real Base transaction, paid from the address above");
+  await gas.getByRole("button", { name: "Pause gas" }).focus();
+  await expect(gas.getByRole("tooltip")).toBeVisible();
+  await expect(gas).toContainText("Pausing is a real Base transaction, paid from the address above, so it needs a few cents of ETH there in advance");
   await expect(gas).toContainText("your bounty's funds on NEAR can't pay for it");
   await expect(gas).toContainText("nobody can take the gas back, you included");
   await expect(gas).toContainText("Nobody presses pause: a proven exploit triggers it.");
@@ -201,7 +204,8 @@ test("R4.12: the posting flow states the coverage limit @phone", async ({ page }
   await metamask(page, PROTOCOL_KEY);
   await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
   await page.goto("/post");
-  await expect(page.getByText("Skip any that pay callers")).toBeVisible();
+  await expect(page.getByRole("button", { name: "pay callers nothing" })).toBeVisible();
+  await expect(page.getByText(/can be covered, so no liquidations\./)).toBeVisible();
 });
 
 test("R12.1: a mistyped address with no code never ticks as granted", async ({ page }) => {
@@ -252,10 +256,14 @@ test("D25: a name the Protocol already used is named as the reason once the wall
   await expect(step(page, 2)).toContainText(pauseRole.address(pauseRole.MAINNET_ROOT_PUBLIC_KEY, CONTRACT, { protocol: ACCOUNT, name: `${NAME}-2` }), { ignoreCase: true });
 });
 
-test("D25: the bounty's name is asked in plain words and shown as the link Whitehats will use", async ({ page }) => {
+test("D25: the name the pause-role address comes from is typed in plain words and shown as the link Whitehats will use", async ({ page }) => {
   await metamask(page, PROTOCOL_KEY);
   await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
   await page.goto("/post");
   await step(page, 1).getByLabel("What does this bounty protect?").fill("Lending Pool v1!");
   await expect(step(page, 1)).toContainText("Whitehats find it at /bounties/your-address/lending-pool-v1");
+  await step(page, 1).getByLabel("Contract address").first().fill(VAULT_BASE);
+  await step(page, 1).getByLabel("Bounty amount").fill("10");
+  await step(page, 1).getByRole("button", { name: "Continue" }).click();
+  await connect(page, pauseRole.address(pauseRole.MAINNET_ROOT_PUBLIC_KEY, CONTRACT, { protocol: ACCOUNT, name: "lending-pool-v1" }));
 });
