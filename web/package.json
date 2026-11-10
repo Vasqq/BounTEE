@@ -1,7 +1,7 @@
 {
   "name": "@bountee/web",
   "version": "0.1.0",
-  "description": "BounTEE's web app (scaffold only; design is tickets #29-#32)",
+  "description": "BounTEE's web app",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,10 +12,18 @@
     "typecheck": "tsc -p . --noEmit"
   },
   "dependencies": {
+    "@bountee/cli": "workspace:*",
     "@bountee/formats": "workspace:*",
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@scure/base": "^2.4.0",
+    "@tanstack/react-query": "^5.106.1",
     "next": "16.4.3",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "viem": "^2.57.16",
+    "wagmi": "2.19.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
