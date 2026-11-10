@@ -7,8 +7,8 @@ import { NavBar } from "./NavBar.tsx";
 import { Wordmark } from "./Wordmark.tsx";
 
 function TestnetBadge() {
-  return net.mainnetSite ? (
-    <a className="net-badge" href={net.mainnetSite}>
+  return net.otherSite ? (
+    <a className="net-badge" href={net.otherSite}>
       Testnet
     </a>
   ) : (
@@ -17,7 +17,7 @@ function TestnetBadge() {
 }
 
 /** The landing page's Verify section: this site's own on mainnet; on testnet, the mainnet site's, or none when its address is unset (D31). */
-const verifyHref = net.network === "testnet" ? net.mainnetSite && new URL("/#verify", net.mainnetSite).href : "/#verify";
+const verifyHref = net.network === "testnet" ? net.otherSite && new URL("/#verify", net.otherSite).href : "/#verify";
 
 export function AppNav({ current }: { current?: "bounties" | "post" }) {
   return (

@@ -61,12 +61,12 @@ interface Row {
   /** Circle's faucet for test USDC, linked beside the Protocol's USDC balance (D32): testnet's only. */
   usdcFaucet: string | undefined;
   /**
-   * The other site's address (D31), each shown only when set: the mainnet site, which a testnet
-   * build's badge and Verify link go to (`NEXT_PUBLIC_MAINNET_SITE`), and the testnet site,
-   * which a mainnet build's "Try it on testnet" links go to (`NEXT_PUBLIC_TESTNET_SITE`).
+   * The other network's site (D31), linked only when its address is set: on testnet the mainnet
+   * site, which the badge and the nav's Verify link go to (`NEXT_PUBLIC_MAINNET_SITE`); on
+   * mainnet the testnet site, which the bounty list and the landing footer link to
+   * (`NEXT_PUBLIC_TESTNET_SITE`).
    */
-  mainnetSite: string | undefined;
-  testnetSite: string | undefined;
+  otherSite: string | undefined;
 }
 
 const MAINNET = {
@@ -108,8 +108,7 @@ const MAINNET = {
   },
   nearFaucet: process.env.NEXT_PUBLIC_NEAR_FAUCET || undefined,
   usdcFaucet: undefined,
-  mainnetSite: undefined,
-  testnetSite: process.env.NEXT_PUBLIC_TESTNET_SITE || undefined,
+  otherSite: process.env.NEXT_PUBLIC_TESTNET_SITE || undefined,
 } as const satisfies Row;
 
 const TESTNET = {
@@ -154,8 +153,7 @@ const TESTNET = {
   },
   nearFaucet: process.env.NEXT_PUBLIC_NEAR_FAUCET || "https://docs.near.org/getting-started/faucet",
   usdcFaucet: "https://faucet.circle.com",
-  mainnetSite: process.env.NEXT_PUBLIC_MAINNET_SITE || undefined,
-  testnetSite: undefined,
+  otherSite: process.env.NEXT_PUBLIC_MAINNET_SITE || undefined,
 } as const satisfies Row;
 
 /**

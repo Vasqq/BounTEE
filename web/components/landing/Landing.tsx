@@ -2,7 +2,7 @@
 // The landing page: the locked prototype's markup (landing C3), with the demo bounty's values
 // read live (lib/demo.ts) in place of the prototype's placeholders. The pictures, story panels,
 // dock and hero motion are the prototype's own script (runtime.js).
-import { useEffect, useMemo, type CSSProperties } from "react";
+import { useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
 import { listOf } from "@/lib/format.ts";
 import { useDemo, useVerify } from "@/lib/live.ts";
 import { VerifyRun } from "../Verify.tsx";
@@ -13,8 +13,11 @@ const DASH = "–";
 /** The prototype's staggered entrance: `--d` delays a `.rise`. */
 const delay = (d: string) => ({ "--d": d }) as CSSProperties;
 
-/** `nearExplorer`: the explorer the proof links point at before the demo bounty is read. */
-export function Landing({ nearExplorer }: { nearExplorer: string }) {
+/**
+ * `nearExplorer`: the explorer the proof links point at before the demo bounty is read.
+ * `footerLinks`: links the server adds to the footer (the link to the testnet site, D31).
+ */
+export function Landing({ nearExplorer, footerLinks }: { nearExplorer: string; footerLinks?: ReactNode }) {
   const { data: demo = null } = useDemo();
   const demoId = useMemo(() => (demo ? { protocol: demo.story.protocol, name: demo.story.name } : null), [demo?.story.protocol, demo?.story.name]); // eslint-disable-line react-hooks/exhaustive-deps
   const { data: result } = useVerify(demoId);
@@ -200,7 +203,7 @@ export function Landing({ nearExplorer }: { nearExplorer: string }) {
           </div>
           <div className="foot">
             <span>BounTEE · NEAR hackathon, security track. Every proof here is a mainnet transaction.</span>
-            <nav aria-label="Footer"><a href="#story">The demo</a><a href="#verify">Verify</a><a href="#trust">Trust</a><a href="https://github.com/Vasqq/bountee">Source</a></nav>
+            <nav aria-label="Footer"><a href="#story">The demo</a><a href="#verify">Verify</a><a href="#trust">Trust</a><a href="https://github.com/Vasqq/bountee">Source</a>{footerLinks}</nav>
           </div>
         </div>
       </footer>

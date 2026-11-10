@@ -4,6 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { ARBITRUM, BASE, DEMO, emptyWorld, finishedDemo, judge, post, setWorld, win } from "./stand-ins/world.ts";
+import { SITES } from "./stand-ins/sites.ts";
 
 const ORDER = ["Posted", "Sealed", "Checked", "Signed", "Paid", "Landed", "Verified", "Published"];
 const panel = (page: Page, i: number) => page.locator("#panels > li").nth(i);
@@ -83,14 +84,17 @@ test("D4, ADR-0017: no testnet string or explorer link ships in the mainnet buil
   await setWorld(page, finishedDemo());
   await page.goto("/");
   await expect(panel(page, 0).locator("a").first()).toHaveAttribute("href", /nearblocks/);
+  // The one exception is D31's link to the testnet site: its address (set on this build) and its words.
+  const withoutTheLink = (text: string) => text.replaceAll(SITES.testnet, "").replaceAll("Try it on testnet", "");
   const html = await page.content();
-  expect(html).not.toMatch(/testnet|sepolia/i);
+  expect(html).toContain(SITES.testnet);
+  expect(withoutTheLink(html)).not.toMatch(/testnet|sepolia/i);
   // And none in any file the browser is sent.
   const files: string[] = [];
   const walk = (dir: string) => readdirSync(dir).forEach((f) => (statSync(join(dir, f)).isDirectory() ? walk(join(dir, f)) : files.push(join(dir, f))));
   walk(join(import.meta.dirname, "../.next/static"));
   walk(join(import.meta.dirname, "../public"));
-  const hits = files.filter((f) => /testnet|sepolia/i.test(readFileSync(f, "utf8")));
+  const hits = files.filter((f) => /testnet|sepolia/i.test(withoutTheLink(readFileSync(f, "utf8"))));
   expect(hits).toEqual([]);
 });
 

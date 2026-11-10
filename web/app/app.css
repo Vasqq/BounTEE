@@ -20,6 +20,9 @@
   color: var(--ink-2); font: 500 var(--fs-sm)/1 var(--text); white-space: nowrap; text-decoration: none; }
 a.net-badge { transition: background-color var(--t2) var(--ease), color var(--t2) var(--ease); }
 a.net-badge:hover { background: var(--line); color: var(--ink); }
+/* the mainnet bounty list's link to the testnet site (D31): one quiet line under the list, as the footer's links */
+.cross-site { display: inline-block; margin-top: 40px; font-size: var(--fs-sm); color: var(--ink-2); text-decoration: none; transition: color var(--t1) var(--ease); }
+.cross-site:hover { color: var(--ink); }
 /* the app bar keeps its links at every width (DESIGN.md, Layout: Extension) */
 .nav ul.app-links { display: flex; }
 @media (max-width: 560px) { .nav ul.app-links { gap: 18px; } .nav .wrap { gap: 16px; } }

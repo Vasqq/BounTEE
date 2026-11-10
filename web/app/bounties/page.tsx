@@ -5,6 +5,7 @@ import { AppNav } from "@/components/AppNav.tsx";
 import { ChainMark } from "@/components/ChainMark.tsx";
 import { StatusChip } from "@/components/Chips.tsx";
 import { ReadFailed } from "@/components/ReadFailed.tsx";
+import { TryTestnet } from "@/components/TryTestnet.tsx";
 import { listBounties, type BountyRow } from "@/lib/bounties.ts";
 import { plural } from "@/lib/format.ts";
 
@@ -85,6 +86,7 @@ export default async function Bounties() {
             )}
           </>
         )}
+        <TryTestnet className="cross-site" />
       </main>
     </>
   );
