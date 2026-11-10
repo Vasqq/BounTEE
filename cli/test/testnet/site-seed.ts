@@ -132,7 +132,11 @@ const CONTRACT_STATE: Record<State, string> = {
 };
 const usdcUnits = (b: Bounty) => BigInt(b.usdc) * 1_000_000n;
 /** The minimum theft in USDC's smallest unit (6 decimals): a minimum may be a fraction of a USDC. */
-const minimumUnits = (b: Bounty) => BigInt(Math.round(b.minimumUsdc * 1_000_000));
+const minimumUnits = (b: Bounty) => {
+  const units = Math.round(b.minimumUsdc * 1_000_000);
+  if (Math.abs(units - b.minimumUsdc * 1_000_000) > 1e-6) throw new Error(`${b.protocol}'s minimum theft ${b.minimumUsdc} USDC has more than USDC's 6 decimals`);
+  return BigInt(units);
+};
 // Claims are filed on Base Sepolia, so each bounty that takes one covers it.
 for (const b of PLAN.filter((b) => b.claims > 0)) {
   if (!b.chains.includes(PROOF_CHAIN)) throw new Error(`${b.protocol} takes claims proven on chain ${PROOF_CHAIN}, which it doesn't cover`);
