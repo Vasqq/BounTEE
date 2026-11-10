@@ -10,8 +10,9 @@ import { useAccount, useConnect, useSignMessage } from "wagmi";
 import { sendTransaction, switchChain, waitForTransactionReceipt } from "wagmi/actions";
 import { draftProblems, emptyDraft, rulesOf, type Draft } from "@/lib/draft.ts";
 import { exploitKeyMessage, keyFromFile, keyFromSignature, publicKeyText } from "@/lib/exploit-key.ts";
-import { units } from "@/lib/format.ts";
+import { listOf, units } from "@/lib/format.ts";
 import { enableNearSigning, MAX_GAS, nearFunctionCall } from "@/lib/near-eth.ts";
+import { coveredChain, net } from "@/lib/network.ts";
 import type { EvmCall, PostingStatus } from "@/lib/posting.ts";
 import { BOUNTY_CONTRACT, NEAR_USDC, pauseRoleOf } from "@/lib/pinned.ts";
 import { rulesInPlainEnglish } from "@/lib/rules.ts";
@@ -19,6 +20,8 @@ import { wagmiConfig } from "@/lib/wagmi.ts";
 import { CommandBlock } from "../CommandBlock.tsx";
 import { RiskPanel } from "./RiskPanel.tsx";
 
+/** The chains this build's bounties can cover, as the copy names them. */
+const CHAIN_NAMES = net.chains.map((c) => c.name);
 const STEPS = ["Connect", "Rules", "Pause role", "Pause gas", "Add NEAR", "Exploit key", "Post"] as const;
 /** What a first posting-fee prepayment adds for its balance entry's storage, with room to spare (as `bountee post` does). */
 const ENTRY_STORAGE = 10n ** 22n;
@@ -72,9 +75,11 @@ function trusted(s: PostingStatus, protocol: string, name: string): PostingStatu
 
 /** Send one EVM transaction from MetaMask on its chain and wait for it to land. */
 async function sendOn(call: EvmCall) {
-  await switchChain(wagmiConfig, { chainId: call.chainId as 8453 | 42161 });
-  const hash = await sendTransaction(wagmiConfig, { chainId: call.chainId as 8453 | 42161, to: call.to as Address, data: call.data as `0x${string}`, value: BigInt(call.value) });
-  const r = await waitForTransactionReceipt(wagmiConfig, { hash, chainId: call.chainId as 8453 | 42161 });
+  const chainId = coveredChain(call.chainId)?.id;
+  if (chainId === undefined) throw new Error(`This app can't send on chain ${call.chainId}.`);
+  await switchChain(wagmiConfig, { chainId });
+  const hash = await sendTransaction(wagmiConfig, { chainId, to: call.to as Address, data: call.data as `0x${string}`, value: BigInt(call.value) });
+  const r = await waitForTransactionReceipt(wagmiConfig, { hash, chainId });
   if (r.status !== "success") throw new Error("The transaction reverted.");
   return hash;
 }
@@ -117,7 +122,7 @@ export function PostFlow() {
   return (
     <>
       <h1 className="page-title">Post a bounty</h1>
-      <p className="lead">Posting connects MetaMask. It signs every step, on Base, Arbitrum One and NEAR.</p>
+      <p className="lead">Posting connects MetaMask. It signs every step, on {listOf([...CHAIN_NAMES, "NEAR"])}.</p>
       <div className="post-grid">
         <div>
           {q.isError && (
@@ -203,7 +208,7 @@ function ConnectStep({ s, account, done, next }: { s?: PostingStatus; account?: 
   const enable = useMutation({ mutationFn: () => enableNearSigning(account as Address, s!.account.relayerKey) });
   return (
     <Step n={1} title="Connect">
-      <p className="step-lead">One MetaMask signs everything: the pause-role grants on Base and Arbitrum One, and the bounty on NEAR as your account named after your address.</p>
+      <p className="step-lead">One MetaMask signs everything: the pause-role grants on {listOf(CHAIN_NAMES)}, and the bounty on NEAR as your account named after your address.</p>
       <ol className="checklist">
         <Item n={1} title="Your NEAR account" done={done}>
           {account ? (
@@ -546,7 +551,8 @@ function PostStep({ s, account, draft, exploitKey, ready }: { s?: PostingStatus;
         amount: `${formatUnits(BigInt(rules.bounty_amount), s.usdcDecimals)} USDC`,
         minimumTheft: `${formatUnits(BigInt(rules.minimum_theft), s.usdcDecimals)} USDC`,
         covered: rules.covered_contracts.map((c) => ({ chain: s.chains.find((x) => x.id === c.chain_id)?.name ?? String(c.chain_id), address: c.address })),
-        proofChain: s.chains.find((x) => x.id === rules.proof_chain)?.name ?? String(rules.proof_chain),
+        // The rules name no proof chain any more (D27); until #65 drops the field, the read-back names the one picked.
+        proofChain: s.chains.find((x) => x.id === draft.proofChain)?.name ?? String(draft.proofChain),
         recencyMinutes: rules.recency_limit_secs / 60,
         ends: draft.endDate,
         disclosureDelayDays: rules.disclosure_delay_days,

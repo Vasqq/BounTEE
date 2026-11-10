@@ -4,6 +4,8 @@
 import { useState } from "react";
 import type { BountyId } from "@/lib/bounties.ts";
 import { useVerify } from "@/lib/live.ts";
+import { verifyCommand } from "@/lib/network.ts";
+import { BOUNTY_CONTRACT } from "@/lib/pinned.ts";
 import type { VerifyRow } from "@/lib/verify.ts";
 import { ReadFailed } from "./ReadFailed.tsx";
 
@@ -60,7 +62,8 @@ export function VerifyRun({ rows }: { rows: VerifyRow[] }) {
 export function VerifyTerminal({ id }: { id: BountyId }) {
   const q = useVerify(id);
   const result = q.data ?? null;
-  const command = `bountee verify ${id.protocol}/${id.name} --network mainnet`;
+  // The server names the contract it read the checks from; until it answers, this build's.
+  const command = result?.command ?? verifyCommand(`${id.protocol}/${id.name}`, BOUNTY_CONTRACT);
   const [label, setLabel] = useState("Copy");
   const copy = async () => {
     await navigator.clipboard.writeText(command).then(() => setLabel("Copied"), () => setLabel("Copy failed"));
