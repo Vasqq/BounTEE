@@ -68,14 +68,14 @@ test("D4: a step that hasn't happened yet links no transaction: it says tx pendi
   await expect(panel(page, 7)).toContainText("pending · after 1 day");
 });
 
-test("R15.6: the story's amounts and delay are the bounty's on chain", async ({ page }) => {
+test("R15.6, D27: the story's amounts and delay are the bounty's on chain, and it names no one proof chain", async ({ page }) => {
   const w = finishedDemo();
   const b = w.bounties[0]!;
   b.rules = { ...b.rules, bounty_amount: "25000000", minimum_theft: "2000000", disclosure_delay_days: 3 };
   await setWorld(page, w);
   await page.goto("/");
   await expect(panel(page, 0)).toContainText("locked 25 USDC behind rules nobody can change");
-  await expect(panel(page, 2)).toContainText("more than the 2 USDC minimum theft");
+  await expect(panel(page, 2)).toContainText("The Enclave replayed the exploit with revm against a covered chain's recent state. It took more than the 2 USDC minimum theft.");
   await expect(panel(page, 7)).toContainText("After the 3-day disclosure delay");
   await expect(page.getByRole("definition").filter({ hasText: "25 USDC" })).toContainText("25 USDC, once");
 });

@@ -150,7 +150,6 @@ export function rules(over: Partial<any> = {}, network: Network = "mainnet") {
       { chain_id: n.base, address: VAULT_BASE },
       { chain_id: n.arbitrum, address: VAULT_ARB },
     ],
-    proof_chain: n.base,
     recency_limit_secs: 300,
     listed_tokens: [{ token: n.baseUsdc, price: "1" }],
     seed: { native: "1000000000000000000", tokens: [] },

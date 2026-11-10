@@ -16,7 +16,6 @@ type ContractState = "checking" | "live" | "check_failed" | "signing" | "paying"
 
 interface Rules {
   covered_contracts: { chain_id: number; address: string }[];
-  proof_chain: number;
   recency_limit_secs: number;
   listed_tokens: { token: string; price: string }[];
   bounty_amount: string;
@@ -145,7 +144,6 @@ export interface BountyPage {
   minimumTheft: string;
   ends: string;
   claimsJudged: number;
-  proofChain: string;
   recencyMinutes: number;
   disclosureDelayDays: number;
   judgeBuild: string;
@@ -252,7 +250,6 @@ export async function readBounty(id: BountyId): Promise<BountyPage | null> {
     minimumTheft: usdc(r.minimum_theft, decimals),
     ends: isoDate(r.end_date_ns),
     claimsJudged: judged,
-    proofChain: c.chains[r.proof_chain]?.name ?? `chain ${r.proof_chain}`,
     recencyMinutes: r.recency_limit_secs / 60,
     disclosureDelayDays: r.disclosure_delay_days,
     judgeBuild: r.judge_build_hash,

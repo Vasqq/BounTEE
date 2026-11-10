@@ -228,6 +228,17 @@ test("D30: on testnet every link on the bounty list and a bounty page is a testn
   for (const host of hosts) expect(TESTNET_HOSTS, host).toContain(host);
 });
 
+test("D27, D31: on testnet a bounty page's rules read as mainnet's: a theft proven on any covered chain wins", async ({ page }) => {
+  const w = emptyWorld("testnet");
+  post(w, ID);
+  await setWorld(page, w);
+  await page.goto(`/bounties/${ID.protocol}/${ID.name}`);
+  const rules = page.getByRole("region", { name: "Rules" });
+  await expect(rules).toContainText("A theft proven on any covered chain wins: the Enclave replays each claim against that chain's state at a block at most 5 minutes old, under the judge build fixed at posting.");
+  await expect(rules).toContainText("Covers 2 contracts on Base Sepolia and Arbitrum Sepolia. A winning claim pauses every one of them.");
+  await expect(rules).not.toContainText(/undefined|chain \d/);
+});
+
 test("D30: on testnet /api/demo answers 404: the mainnet demo story is never read", async ({ page }) => {
   // DEMO_BOUNTY is set for the testnet build too (playwright.config.ts), and the bounty is on chain.
   const w = emptyWorld("testnet");

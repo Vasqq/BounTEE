@@ -99,6 +99,17 @@ test("R15.6: the rules and amounts shown are the chain's", async ({ page }) => {
   await expect(page.getByText(/14 days after the payout/)).toBeVisible();
 });
 
+test("D27: the rules say a theft proven on any covered chain wins, naming no one proof chain", async ({ page }) => {
+  const w = emptyWorld();
+  post(w, ID);
+  await setWorld(page, w);
+  await open(page);
+  const rules = page.getByRole("region", { name: "Rules" });
+  await expect(rules).toContainText("A theft proven on any covered chain wins: the Enclave replays each claim against that chain's state at a block at most 5 minutes old, under the judge build fixed at posting.");
+  await expect(rules).toContainText("Covers 2 contracts on Base and Arbitrum One. A winning claim pauses every one of them.");
+  await expect(rules).not.toContainText(/undefined|chain \d/);
+});
+
 test("R15.6: a bounty the contract doesn't hold says so @phone", async ({ page }) => {
   await setWorld(page, emptyWorld());
   await open(page, { protocol: "nobody.near", name: "nothing" });

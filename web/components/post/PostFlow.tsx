@@ -554,8 +554,6 @@ function PostStep({ s, account, draft, exploitKey, ready }: { s?: PostingStatus;
         amount: `${formatUnits(BigInt(rules.bounty_amount), s.usdcDecimals)} USDC`,
         minimumTheft: `${formatUnits(BigInt(rules.minimum_theft), s.usdcDecimals)} USDC`,
         covered: rules.covered_contracts.map((c) => ({ chain: coveredChain(c.chain_id)?.name ?? String(c.chain_id), address: c.address })),
-        // The rules name no proof chain any more (D27); until #65 drops the field, the read-back names the one picked.
-        proofChain: coveredChain(draft.proofChain)?.name ?? String(draft.proofChain),
         recencyMinutes: rules.recency_limit_secs / 60,
         ends: draft.endDate,
         disclosureDelayDays: rules.disclosure_delay_days,
