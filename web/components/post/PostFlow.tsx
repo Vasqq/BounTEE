@@ -75,7 +75,8 @@ function trusted(s: PostingStatus, protocol: string, name: string): PostingStatu
 
 /** Send one EVM transaction from MetaMask on its chain and wait for it to land. */
 async function sendOn(call: EvmCall) {
-  const chainId = coveredChain(call.chainId)?.id;
+  // Widened to number: wagmi types a send by the wallet setup's chains, which are built from the table untyped by ID.
+  const chainId: number | undefined = coveredChain(call.chainId)?.id;
   if (chainId === undefined) throw new Error(`This app can't send on chain ${call.chainId}.`);
   await switchChain(wagmiConfig, { chainId });
   const hash = await sendTransaction(wagmiConfig, { chainId, to: call.to as Address, data: call.data as `0x${string}`, value: BigInt(call.value) });
@@ -257,7 +258,9 @@ function Field({ label, error, help, children }: { label: string; error?: string
 function RulesStep(p: { s?: PostingStatus; account?: string; draft: Draft; setDraft: (d: Draft) => void; problems: Record<string, string>; ok: boolean; next: () => void }) {
   const { draft: d, setDraft } = p;
   const set = (patch: Partial<Draft>) => setDraft({ ...d, ...patch });
-  const chains = p.s?.chains ?? [];
+  // The chains offered are this build's (the network table), never the server's: a bounty here
+  // can't cover a contract on another network's chain (D30).
+  const chains = net.chains;
   const setCovered = (i: number, patch: Partial<Draft["covered"][number]>) => set({ covered: d.covered.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
   const coveredChains = [...new Set(d.covered.map((c) => c.chainId))];
   // A typo shows once its field has been left.
@@ -431,7 +434,7 @@ function GasItem({ n, g, pauseRole, primary }: { n: number; g: PostingStatus["ga
 }
 
 function NearStep({ s, account, done, next }: { s?: PostingStatus; account?: string; done: boolean; next: () => void }) {
-  const faucet = process.env.NEXT_PUBLIC_NEAR_FAUCET;
+  const faucet = net.nearFaucet;
   return (
     <Step n={5} title="Add NEAR">
       <p className="step-lead">Your NEAR account pays the posting fee and the gas of the two posting prompts. Send NEAR to it from an exchange or another wallet.</p>
@@ -443,7 +446,7 @@ function NearStep({ s, account, done, next }: { s?: PostingStatus; account?: str
             </p>
           )}
           {account && <CommandBlock text={account} />}
-          {/* D17: a faucet exists only for a testnet rehearsal build. */}
+          {/* D17: NEAR has a faucet only on testnet (the network table). */}
           {faucet && (
             <p>
               <a href={faucet} target="_blank" rel="noopener">
@@ -550,9 +553,9 @@ function PostStep({ s, account, draft, exploitKey, ready }: { s?: PostingStatus;
     ? rulesInPlainEnglish({
         amount: `${formatUnits(BigInt(rules.bounty_amount), s.usdcDecimals)} USDC`,
         minimumTheft: `${formatUnits(BigInt(rules.minimum_theft), s.usdcDecimals)} USDC`,
-        covered: rules.covered_contracts.map((c) => ({ chain: s.chains.find((x) => x.id === c.chain_id)?.name ?? String(c.chain_id), address: c.address })),
+        covered: rules.covered_contracts.map((c) => ({ chain: coveredChain(c.chain_id)?.name ?? String(c.chain_id), address: c.address })),
         // The rules name no proof chain any more (D27); until #65 drops the field, the read-back names the one picked.
-        proofChain: s.chains.find((x) => x.id === draft.proofChain)?.name ?? String(draft.proofChain),
+        proofChain: coveredChain(draft.proofChain)?.name ?? String(draft.proofChain),
         recencyMinutes: rules.recency_limit_secs / 60,
         ends: draft.endDate,
         disclosureDelayDays: rules.disclosure_delay_days,

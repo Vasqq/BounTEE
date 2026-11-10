@@ -11,7 +11,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { base58 } from "@scure/base";
 import { decodeFunctionData, encodeAbiParameters, keccak256, parseAbi, toHex } from "viem";
 import { pauseRole } from "@bountee/formats";
-import { CONTRACT, hashOfRaw as txHash, nearHash, type World } from "./world.ts";
+import { hashOfRaw as txHash, nearHash, NETWORKS, type World } from "./world.ts";
 
 let world: World | null = null;
 /** Raw transactions sent to each EVM chain, in order, for a spec to read back. */
@@ -51,7 +51,7 @@ function view(w: World, method: string, args: any): unknown {
       return w.claims.find((c) => c.id === args.claim_id)?.record ?? null;
     case "pause_role":
       // As the contract derives it (D25), unless the spec pinned one.
-      return w.pauseRoles[bountyKey(args.id)] ?? { path: bountyKey(args.id), address: pauseRole.address(pauseRole.MAINNET_ROOT_PUBLIC_KEY, w.contract, args.id) };
+      return w.pauseRoles[bountyKey(args.id)] ?? { path: bountyKey(args.id), address: pauseRole.address(NETWORKS[w.network].mpcRootPublicKey, w.contract, args.id) };
     case "pause_verifications":
       return w.verifications[bountyKey(args.id)] ?? [];
     case "published_exploit":
@@ -233,7 +233,7 @@ function apply(w: World, tx: { chainId: number; from: string; to?: string; data?
   const chain = w.evm[tx.chainId]!;
   let ok = true;
   let nearTransactionHash: string | undefined;
-  if (tx.chainId === 397) {
+  if (tx.chainId === NETWORKS[w.network].nearEvm) {
     nearTransactionHash = nearHash(`relayed${sentCount}`);
     const call = decodeFunctionData({ abi: NEAR_ACCOUNT, data: tx.data as `0x${string}` });
     const p = w.posting!;
@@ -258,7 +258,7 @@ function apply(w: World, tx: { chainId: number; from: string; to?: string; data?
           p.feeBalances[from] = String(BigInt(p.feeBalances[from]!) - fee);
           w.bounties.push({ id, rules: msg.rules, state: "live", winning_claim: null, signed_pauses: [], signing_pauses: false, paying_out: false, payout_waits_until_ns: null, posting_fee_left: String(fee) });
           const ev = (event: string, data: unknown) => `EVENT_JSON:${JSON.stringify({ standard: "bountee", version: "1.0.0", event, data: [data] })}`;
-          w.nearTxs.push({ hash: nearTransactionHash, signer: from, receipts: [{ executor: CONTRACT, logs: [ev("bounty_posted", { bounty: id, amount: args.amount }), ev("bounty_live", { bounty: id })], ok: true }] });
+          w.nearTxs.push({ hash: nearTransactionHash, signer: from, receipts: [{ executor: w.contract, logs: [ev("bounty_posted", { bounty: id, amount: args.amount }), ev("bounty_live", { bounty: id })], ok: true }] });
         }
       } else ok = false;
     }
