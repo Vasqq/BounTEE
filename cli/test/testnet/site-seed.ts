@@ -191,6 +191,12 @@ const createdByFaucet = [...exists].filter(([, e]) => !e).map(([who]) => who);
 const fees = await near.view(CONTRACT, "fees");
 /** Each balance the bounties' D21 preflights ask for, added up per payer, chain and asset. */
 const totals = new Map<string, { who: string; chain: string; asset: string; have: bigint; need: bigint }>();
+/**
+ * `withdraw_bounty`'s gas. fees()'s `min_withdraw_bounty_gas` is what the payout's own calls take;
+ * the method refuses unless that much is left after its own run and a 10 Tgas tail ("attach more
+ * gas", seen live Nov 10 with exactly the minimum), so 30 Tgas more, as `retry_payout` (payout.ts).
+ */
+const WITHDRAW_GAS = BigInt(fees.min_withdraw_bounty_gas) + tgas(30);
 const add = (who: string, chain: string, asset: string, have: bigint, want: bigint) => {
   const key = `${who}|${chain}|${asset}`;
   const t = totals.get(key) ?? { who, chain, asset, have, need: 0n };
@@ -221,7 +227,7 @@ const nearOf = (who: string) => [...totals.values()].find((t) => t.who === who &
 // The Withdrawn bounty's Protocol also calls `withdraw_bounty`, with the gas fees() names.
 const withdrawn = byState("withdrawn");
 if (record[`withdraw ${withdrawn.protocol}`] === undefined) {
-  const gas = roundUpNear(await near.upfrontNear([{ method: "withdraw_bounty", gas: BigInt(fees.min_withdraw_bounty_gas), deposit: 0n, argsBytes: 80 }]));
+  const gas = roundUpNear(await near.upfrontNear([{ method: "withdraw_bounty", gas: WITHDRAW_GAS, deposit: 0n, argsBytes: 80 }]));
   const free = exists.get(withdrawn.protocol) ? ((await near.freeNear(withdrawn.protocol)) ?? 0n) : FAUCET_NEAR;
   add(withdrawn.protocol, nearChain, "NEAR", free, gas);
 }
@@ -364,7 +370,7 @@ await step(`withdraw ${withdrawn.protocol}`, async () => {
   await ended(withdrawn);
   const r = await near.account(withdrawn.protocol).signAndSendTransaction({
     receiverId: CONTRACT,
-    actions: [actions.functionCall("withdraw_bounty", { id: id(withdrawn) }, BigInt(fees.min_withdraw_bounty_gas), 0n)],
+    actions: [actions.functionCall("withdraw_bounty", { id: id(withdrawn) }, WITHDRAW_GAS, 0n)],
     waitUntil: "FINAL",
   });
   for (let i = 0; (await view(withdrawn)).state !== "withdrawn"; i++) {
