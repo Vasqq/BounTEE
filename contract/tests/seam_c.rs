@@ -1175,11 +1175,12 @@ async fn a_claim_with_live_sized_proofs_is_judged() -> anyhow::Result<()> {
     assert!(proofs.len() > 110_000, "{}", proofs.len());
     let mut args = s.claim_args("vault");
     args["proofs"] = Value::String(proofs);
+    let needed = s.named_claim_gas(&args).await?;
     let id: u64 = s
         .whitehat
         .call(s.contract.id(), "submit_claim")
         .args_json(args)
-        .gas(tgas(300))
+        .gas(tgas(needed))
         .transact()
         .await?
         .into_result()?
@@ -3269,12 +3270,38 @@ impl Sandbox {
 
     /// File a claim with exactly these arguments, without waiting for its receipts.
     async fn file(&self, by: &Account, args: &Value) -> anyhow::Result<Pending> {
+        let gas = self.tool_claim_gas(args).await?;
         Ok(by
             .call(self.contract.id(), "submit_claim")
             .args_json(args)
-            .gas(tgas(300))
+            .gas(gas)
             .transact_async()
             .await?)
+    }
+
+    /// The gas the command-line tool attaches to a claim with `args` (`claimGas` in
+    /// `cli/src/claim-flow.ts`): `fees()`'s formula on an upper bound of the job input, its
+    /// proofs, header and block plus 4096 bytes (`claimInputBytes`).
+    async fn tool_claim_gas(&self, args: &Value) -> anyhow::Result<Gas> {
+        let fees = self.view("fees", json!({})).await?;
+        let num = |k: &str| -> u64 {
+            let v = &fees[k];
+            v.as_str().map(|t| t.parse().unwrap()).or(v.as_u64()).unwrap()
+        };
+        let name = args["bounty"]["name"].as_str().unwrap();
+        let covered = self.bounty(name).await?["rules"]["covered_contracts"]
+            .as_array()
+            .unwrap()
+            .len() as u64;
+        let input = args["proofs"].as_str().unwrap().len()
+            + args["header"].as_str().unwrap().len()
+            + args["block"].to_string().len()
+            + 4096;
+        Ok(Gas::from_gas(
+            num("claim_gas_base")
+                + covered * num("claim_gas_per_covered_contract")
+                + input as u64 * num("claim_gas_per_input_byte"),
+        ))
     }
 
     /// File a claim with exactly these arguments and wait for every receipt.
@@ -4233,5 +4260,116 @@ async fn r10_2_r11_a_claim_whose_callback_never_lands_stops_blocking_the_withdra
     assert_eq!(s.usdc_balance(s.contract.id()).await?, 0);
     assert_eq!(s.usdc_balance(s.whitehat.id()).await?, 0);
     assert_eq!(s.usdc_balance(s.protocol.id()).await?, start);
+    Ok(())
+}
+
+// ---- claim size (#35's mainnet run) ----------------------------------------------------
+//
+// Seam C here catches the contract's own gas at every claim size: a claim attached what the
+// contract names for its input is judged and, on PAYS, signs every pause in the same
+// transaction (R11.2, R7.1), from a few KB to past mainnet's largest (a Base cheat filed on
+// Nov 10 carried 286 KB of proofs and was left `storing`, its job never requested); a claim
+// attached less is refused with nothing drawn (R11.1). The sandbox runs NEAR's own fee
+// schedule (it matched mainnet's gas to 1% on that claim). It misses real OutLayer's gas,
+// which its stand-in barely spends; the testnet rehearsal covers that.
+
+/// Proofs of about `kb` KB: one account with as many 532-byte trie nodes as fit.
+fn proofs_of(kb: usize) -> String {
+    let nodes = kb * 1024 / 1069;
+    let proof = json!({ "address": "0x00000000000000000000000000000000000000aa",
+        "account_proof": vec![format!("0x{}", "ab".repeat(532)); nodes] });
+    Value::Array(vec![proof]).to_string()
+}
+
+/// The bounty the size tests claim on: live, covering one contract on Base Sepolia and one
+/// on Arbitrum Sepolia, as the mainnet demo covers one on each chain.
+const TWO_CHAIN: &str = "vault";
+
+async fn two_chain_live() -> anyhow::Result<Sandbox> {
+    let s = Sandbox::start().await?;
+    let mut rules = valid_rules(&s).await?;
+    rules["covered_contracts"] = json!([
+        { "chain_id": BASE_SEPOLIA, "address": "0x00000000000000000000000000000000000000aa" },
+        { "chain_id": ARBITRUM_SEPOLIA, "address": "0x00000000000000000000000000000000000000aa" },
+    ]);
+    list_on_arbitrum_sepolia(&mut rules);
+    s.post(TWO_CHAIN, &rules).await?.into_result()?;
+    Ok(s)
+}
+
+impl Sandbox {
+    /// `name`'s claim args with `proofs` and a mainnet-sized header (1276 hex characters).
+    fn sized_claim_args(&self, name: &str, proofs: &str) -> Value {
+        let mut args = self.claim_args(name);
+        args["proofs"] = Value::String(proofs.to_owned());
+        args["header"] = Value::String(format!("0x{}", "ab".repeat(637)));
+        args
+    }
+
+    /// File `args` with `tgas` attached, waiting for every receipt.
+    async fn file_with(&self, args: &Value, tgas_: u64) -> anyhow::Result<ExecutionFinalResult> {
+        Ok(self
+            .whitehat
+            .call(self.contract.id(), "submit_claim")
+            .args_json(args)
+            .gas(tgas(tgas_))
+            .transact()
+            .await?)
+    }
+
+    /// The gas the contract names for `args`: filed with too little, it is refused, naming
+    /// what to attach, and nothing is drawn (R11.1).
+    async fn named_claim_gas(&self, args: &Value) -> anyhow::Result<u64> {
+        let before = self.claim_balance(self.whitehat.id()).await?;
+        let r = self.file_with(args, 150).await?;
+        let text = failure_text(&r);
+        assert_eq!(self.claim_balance(self.whitehat.id()).await?, before, "{text}");
+        let needed = text
+            .split("attach at least ")
+            .nth(1)
+            .and_then(|t| t.split(' ').next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("no gas named: {text}"));
+        Ok(needed)
+    }
+}
+
+/// R11.2, R7.1, R11.1: from 2 KB to 1 MB of proofs, a PAYS claim attached exactly the gas
+/// the contract names has its job requested and signs both chains' pauses in the same
+/// transaction; 1 Tgas less is refused with nothing drawn.
+#[tokio::test]
+async fn r11_2_claims_of_every_size_are_judged_and_sign_every_pause() -> anyhow::Result<()> {
+    for kb in [2usize, 60, 140, 160, 300, 600, 1000] {
+        let s = two_chain_live().await?;
+        s.top_up(&s.whitehat, NearToken::from_near(20)).await?;
+        let args = s.sized_claim_args(TWO_CHAIN, &proofs_of(kb));
+        let needed = s.named_claim_gas(&args).await?;
+        assert!(needed <= 1000, "{kb} KB needs {needed} Tgas, over a transaction's 1000");
+        let tool = s.tool_claim_gas(&args).await?.as_gas().div_ceil(1_000_000_000_000);
+        assert!(tool >= needed, "{kb} KB: the tool attaches {tool} Tgas, under the {needed} named");
+
+        let before = s.claim_balance(s.whitehat.id()).await?;
+        let short = s.file_with(&args, needed - 1).await?;
+        assert!(failure_text(&short).contains("attach at least"), "{kb} KB: {}", failure_text(&short));
+        assert_eq!(s.claim_balance(s.whitehat.id()).await?, before, "{kb} KB: drawn when refused");
+
+        let signed_before = s.sign_requests().await?.len();
+        s.script(json!({ "output": PAYS })).await?;
+        let claim = s
+            .whitehat
+            .call(s.contract.id(), "submit_claim")
+            .args_json(&args)
+            .gas(tgas(needed))
+            .transact_async()
+            .await?;
+        let requests = s.wait_for_sign_requests(signed_before + 2).await?;
+        s.answer_from(&requests, signed_before, &s.pause_key(TWO_CHAIN), false).await?;
+        let r = claim.await?;
+        assert!(r.receipt_failures().is_empty(), "{kb} KB: {:?}", r.receipt_failures());
+        let id: u64 = r.json()?;
+        assert_eq!(s.claim(id).await?["state"], "judged", "{kb} KB");
+        s.wait_for_bounty_state(TWO_CHAIN, "paid").await?;
+        println!("SIZE {kb} KB: named {needed} Tgas (tool {tool}), judged, both pauses signed, paid");
+    }
     Ok(())
 }

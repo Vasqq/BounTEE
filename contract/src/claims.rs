@@ -78,6 +78,17 @@ fn judge_input(
     .to_string()
 }
 
+/// Refuse a claim or retry attached less than `needed` (see [`gas::claim`]), naming it, so
+/// the caller can attach enough and file again.
+fn require_claim_gas(needed: Gas) {
+    if env::prepaid_gas() < needed {
+        env::panic_str(&format!(
+            "attach at least {} Tgas to this claim",
+            needed.as_gas().div_ceil(1_000_000_000_000)
+        ));
+    }
+}
+
 /// The job deposit for `input`: the fixed deposit plus OutLayer's hold on large input.
 fn job_deposit(input: &str) -> NearToken {
     fees::JOB_DEPOSIT.saturating_add(fees::storage_cost(
@@ -155,10 +166,7 @@ impl Contract {
         proofs: String,
         sealed_exploit: bountee_formats::Base64,
     ) -> u64 {
-        require!(
-            env::prepaid_gas() >= gas::MIN_CLAIM,
-            "attach at least 200 Tgas to a claim"
-        );
+        require_claim_gas(gas::CLAIM_BASE);
         let record = self
             .bounties
             .get(&bounty)
@@ -212,6 +220,9 @@ impl Contract {
             &proofs,
             now,
         );
+        // R11.2: a claim whose gas can't carry its job is refused here, with nothing drawn,
+        // never left without a job.
+        require_claim_gas(gas::claim(input.len(), record.rules.covered_contracts.len()));
 
         let storage_before = env::storage_usage();
         self.claims.insert(
@@ -275,12 +286,10 @@ impl Contract {
     /// job runs on the claim's own secret, never stored again, with the original submission
     /// time; its deposit is drawn from the claim balance. Refused once the claim can no
     /// longer win: the bounty is paid or paying out, an earlier claim has won, or the claim's
-    /// place has lapsed behind a later winner. Attach at least 200 Tgas.
+    /// place has lapsed behind a later winner. Attach what `fees()` names for the claim's
+    /// input size (`claim_gas`).
     pub fn retry_claim(&mut self, claim_id: u64, proofs: String) -> PromiseOrValue<()> {
-        require!(
-            env::prepaid_gas() >= gas::MIN_CLAIM,
-            "attach at least 200 Tgas to a claim"
-        );
+        require_claim_gas(gas::CLAIM_BASE);
         let claim = self
             .claims
             .get(&claim_id)
@@ -317,6 +326,7 @@ impl Contract {
             &proofs,
             submitted,
         );
+        require_claim_gas(gas::claim(input.len(), bounty.rules.covered_contracts.len()));
         let job_deposit = job_deposit(&input);
         // A claim whose place lapsed was dropped from the open claims; while its new job
         // runs it is open again, so the bounty can't be withdrawn beside it (R10.2). Its
@@ -494,8 +504,12 @@ impl Contract {
             .bounties
             .get(&claim.bounty)
             .map_or(0, |b| b.rules.covered_contracts.len());
+        // The job's request and its callback are built when this method returns, and their
+        // per-byte costs, which grow with the input, are charged then: keep those back too.
+        let building = gas::receipt_bytes(input.len());
+        let job = gas::job(input.len());
         let with_pauses = gas::ON_CLAIM_JUDGED.saturating_add(gas::pause_signing(covered));
-        let judged_gas = if Self::gas_left(with_pauses.saturating_add(gas::TAIL)) >= gas::MIN_JOB {
+        let judged_gas = if Self::gas_left(with_pauses.saturating_add(building)) >= job {
             with_pauses
         } else {
             gas::ON_CLAIM_JUDGED
@@ -506,7 +520,7 @@ impl Contract {
             Some(&profile),
             &whitehat,
             job_deposit,
-            || Self::gas_left(judged_gas.saturating_add(gas::TAIL)),
+            job,
         )
         .then(
             Self::ext(env::current_account_id())
