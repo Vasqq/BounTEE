@@ -2,9 +2,11 @@
 // run as a test: the app's source outside the table names no chain ID, network host
 // (explorer or RPC), NEAR account or MPC root key, so a second network is one more row in the
 // table and never an edit scattered through the pages. It reads the source; no browser.
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { expect, test } from "@playwright/test";
+import { pauseRole } from "@bountee/formats";
 
 const WEB = join(import.meta.dirname, "..");
 const TABLE = "lib/network.ts";
@@ -62,4 +64,42 @@ test("D30: the grep finds what it looks for, in the table and the listed excepti
   const landing = code(readFileSync(join(WEB, EXCEPTIONS[0]!), "utf8"));
   expect(finds(landing, "a network host")).toBeGreaterThan(0);
   expect(finds(landing, "a NEAR account")).toBeGreaterThan(0);
+});
+
+/** The table's row as a build for `network` sees it: the table loaded in its own process with the setting set. */
+function rowOf(network: "mainnet" | "testnet"): Record<string, unknown> {
+  const load = `const { net } = await import("./${TABLE}"); console.log(JSON.stringify(net));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", load], { cwd: WEB, env: { PATH: process.env.PATH, NODE_ENV: "production", NEXT_PUBLIC_NETWORK: network }, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+/** Every value in a row: its strings and numbers, and each URL's host. */
+function leaves(x: unknown): (string | number)[] {
+  if (typeof x === "string") return /^https?:\/\//.test(x) ? [x, new URL(x).host] : [x];
+  if (typeof x === "number") return [x];
+  if (x && typeof x === "object") return Object.values(x).flatMap(leaves);
+  return [];
+}
+
+test("D30: the testnet table names no mainnet host, account or chain ID", () => {
+  const testnet = rowOf("testnet");
+  expect(testnet.network).toBe("testnet");
+  const values = leaves(testnet);
+  const hosts = values.filter((v): v is string => typeof v === "string" && /^[a-z0-9.-]+\.[a-z]+$/.test(v));
+  expect(hosts.length).toBeGreaterThan(0);
+  // Mainnet's, written out: its explorers and RPCs, its accounts, its chains (Base, Arbitrum One, NEAR's 397, Ethereum).
+  const MAINNET_HOSTS = ["basescan.org", "arbiscan.io", "nearblocks.io", "mainnet.base.org", "arb1.arbitrum.io", "eth-rpc.mainnet.near.org", "eth-explorer.near.org"];
+  for (const host of hosts) expect(MAINNET_HOSTS, host).not.toContain(host);
+  for (const v of values) if (typeof v === "string") expect(v, "a mainnet NEAR account").not.toMatch(/\.near$/);
+  for (const id of [8453, 42161, 397, 1]) expect(values, `chain ${id}`).not.toContain(id);
+  // Nor anything else the mainnet row names, beyond the words both share (the gas token, the chain families).
+  const SHARED = new Set<string | number>(["ETH", "base", "arbitrum"]);
+  const mainnet = new Set(leaves(rowOf("mainnet")));
+  expect(values.filter((v) => mainnet.has(v) && !SHARED.has(v))).toEqual([]);
+});
+
+test("D30, D25: each row's MPC root key is the formats' key for its network", () => {
+  expect(rowOf("mainnet").mpcRootPublicKey).toBe(pauseRole.MAINNET_ROOT_PUBLIC_KEY);
+  expect(rowOf("testnet").mpcRootPublicKey).toBe(pauseRole.TESTNET_ROOT_PUBLIC_KEY);
 });

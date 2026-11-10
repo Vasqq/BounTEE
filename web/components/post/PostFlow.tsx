@@ -75,6 +75,7 @@ function trusted(s: PostingStatus, protocol: string, name: string): PostingStatu
 
 /** Send one EVM transaction from MetaMask on its chain and wait for it to land. */
 async function sendOn(call: EvmCall) {
+  // Widened to number: wagmi types a send by the wallet setup's chains, which are built from the table untyped by ID.
   const chainId: number | undefined = coveredChain(call.chainId)?.id;
   if (chainId === undefined) throw new Error(`This app can't send on chain ${call.chainId}.`);
   await switchChain(wagmiConfig, { chainId });

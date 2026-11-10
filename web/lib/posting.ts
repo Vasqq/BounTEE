@@ -54,8 +54,6 @@ export interface PostingStatus {
   nameTaken: boolean;
   /** The bounty's state once posted under this name; null before. */
   bountyState: string | null;
-  /** The chains a bounty can cover, and the USDC each values theft in. */
-  chains: { id: number; name: string; usdc: string; explorerTx: string }[];
   pauseRole: string;
   postingFee: string;
   /** NEAR the account needs: what the posting fee balance lacks, plus gas for the two prompts. */
@@ -144,7 +142,6 @@ export async function readPosting(protocol: string, name: string, covered: { cha
     usdcDecimals: meta.decimals,
     nameTaken: existing !== null,
     bountyState: existing?.state ?? null,
-    chains: Object.values(c.chains).map((x) => ({ id: x.id, name: x.name, usdc: x.usdc, explorerTx: x.explorerTx })),
     pauseRole: role.address,
     postingFee: postingFee.toString(),
     nearNeeded: (lacking + GAS_MARGIN).toString(),

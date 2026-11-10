@@ -25,12 +25,12 @@ export const nearEvm = defineChain({
 /**
  * A covered chain, as MetaMask is asked to add it. Built from the table's plain values rather
  * than taken from viem/chains, so the build carries only its own network's chains: the other
- * row is dropped as dead code, and an import from viem/chains would not be (e2e/landing.spec.ts).
+ * row is dropped as dead code, and an import from viem/chains would not be (e2e/build.spec.ts
+ * and e2e/landing.spec.ts check each build's bundle for the other network's values).
  * The app only sends plain transactions there (grants and top-ups), so no chain formatters.
  */
 const coveredEvm = (c: EvmChain) =>
   defineChain({
-
     id: c.id,
     name: c.name,
     nativeCurrency: { decimals: 18, name: "Ether", symbol: c.gasToken },

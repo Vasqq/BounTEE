@@ -56,7 +56,7 @@ interface Row {
   chains: readonly [EvmChain, ...EvmChain[]];
   /** NEAR's Ethereum-compatible chain (NEP-518), through which MetaMask signs as a 0x… NEAR account. */
   nearEvm: { id: number; name: string; rpc: string; browserRpc: string | undefined; explorer: string };
-  /** NEAR's faucet, linked beside the NEAR the posting flow asks for (D17): testnet only. */
+  /** NEAR's faucet, linked beside the NEAR the posting flow asks for (D17): testnet's, or `NEXT_PUBLIC_NEAR_FAUCET`. */
   nearFaucet: string | undefined;
 }
 
@@ -97,7 +97,7 @@ const MAINNET = {
     browserRpc: process.env.NEXT_PUBLIC_NEAR_ETH_RPC || undefined,
     explorer: "https://eth-explorer.near.org",
   },
-  nearFaucet: undefined,
+  nearFaucet: process.env.NEXT_PUBLIC_NEAR_FAUCET || undefined,
 } as const satisfies Row;
 
 const TESTNET = {
@@ -140,7 +140,7 @@ const TESTNET = {
     browserRpc: process.env.NEXT_PUBLIC_NEAR_ETH_RPC || undefined,
     explorer: "https://eth-explorer-testnet.near.org",
   },
-  nearFaucet: "https://docs.near.org/getting-started/faucet",
+  nearFaucet: process.env.NEXT_PUBLIC_NEAR_FAUCET || "https://docs.near.org/getting-started/faucet",
 } as const satisfies Row;
 
 /**

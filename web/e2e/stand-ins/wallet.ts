@@ -8,7 +8,7 @@ import { deflateRawSync } from "node:zlib";
 import type { Page } from "@playwright/test";
 import { exploitKeyFromWallet, personalSign, publicKeyText } from "../../../cli/src/open-exploit.ts";
 import { privateKeyToAccount } from "viem/accounts";
-import { CONTRACT, STAND_IN, type BountyId } from "./world.ts";
+import { NETWORKS, STAND_IN, type BountyId, type Network } from "./world.ts";
 
 /** Ethereum keys for tests only, derived from fixed labels so no key is written down; they never hold funds. */
 const testKey = (label: string) => createHash("sha256").update(`bountee web test key: ${label}`).digest();
@@ -16,7 +16,7 @@ export const PROTOCOL_KEY = testKey("protocol");
 export const OTHER_KEY = testKey("another wallet");
 
 /** The exploit public key a wallet's signature derives for this bounty, as the rules spell it. */
-export const exploitPublicKey = (walletKey: Uint8Array, id: BountyId) => publicKeyText(exploitKeyFromWallet(walletKey, CONTRACT, id));
+export const exploitPublicKey = (walletKey: Uint8Array, id: BountyId, network: Network = "mainnet") => publicKeyText(exploitKeyFromWallet(walletKey, NETWORKS[network].contract, id));
 
 export const EXPLOIT = {
   transactions: [
@@ -61,9 +61,10 @@ export const addressOf = (walletKey: Uint8Array) => privateKeyToAccount(`0x${Buf
  * wallet: accounts, the current chain and switching it, `personal_sign` (or, with `unstable`, a
  * different signature each time, as a wallet that randomises its signatures would), and
  * `eth_sendTransaction`, which the chain stand-in applies as the chain would. Every request's
- * method is recorded.
+ * method is recorded, and so is each chain it is asked to switch to or add. It starts on the
+ * network's Base-family chain.
  */
-export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?: boolean } = {}) {
+export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?: boolean; network?: Network } = {}) {
   let n = 0;
   const address = addressOf(walletKey);
   await page.exposeFunction("__personalSign", (hexMessage: string) => {
@@ -75,10 +76,12 @@ export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?
     const r = await page.request.post(`${STAND_IN}/apply`, { data: { chainId, from: address, to: tx.to, data: tx.data, value: tx.value } });
     return (await r.json()).hash as string;
   });
-  await page.addInitScript((account: string) => {
+  await page.addInitScript(({ account, start }: { account: string; start: string }) => {
     const w = window as any;
     w.__walletCalls = [];
-    let chainId = "0x2105";
+    w.__chainsAsked = [];
+    let chainId = start;
+    const known = new Set([start]);
     const listeners: Record<string, ((x: unknown) => void)[]> = {};
     w.ethereum = {
       isMetaMask: true,
@@ -96,8 +99,15 @@ export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?
           case "wallet_requestPermissions":
           case "wallet_getPermissions":
             return [{ parentCapability: "eth_accounts" }];
+          // As MetaMask: a chain it hasn't been given yet must be added, with its name and RPC,
+          // before it can be switched to (EIP-3326's 4902).
           case "wallet_switchEthereumChain":
           case "wallet_addEthereumChain":
+            w.__chainsAsked.push({ method, ...params![0] });
+            if (method === "wallet_switchEthereumChain" && !known.has(params![0].chainId)) {
+              throw Object.assign(new Error(`Unrecognized chain ID ${params![0].chainId}`), { code: 4902 });
+            }
+            known.add(params![0].chainId);
             chainId = params![0].chainId;
             (listeners.chainChanged ?? []).forEach((f) => f(chainId));
             return null;
@@ -116,7 +126,12 @@ export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?
         listeners[event] = (listeners[event] ?? []).filter((g) => g !== f);
       },
     };
-  }, address);
+  }, { account: address, start: `0x${NETWORKS[o.network ?? "mainnet"].base.toString(16)}` });
+}
+
+/** Each chain the page asked MetaMask to switch to or add, in order, with what it said of the chain. */
+export async function chainsAsked(page: Page): Promise<{ method: string; chainId: string; chainName?: string; rpcUrls?: string[] }[]> {
+  return page.evaluate(() => (window as any).__chainsAsked);
 }
 
 /** Every transaction the stand-in MetaMask sent, by chain ID. */
