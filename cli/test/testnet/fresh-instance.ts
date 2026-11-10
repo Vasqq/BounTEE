@@ -54,7 +54,7 @@ import { parseRpcFlags } from "../../src/broadcast.ts";
 import { CHAINS, defaultRpc, proofRpcs } from "../../src/chains.ts";
 import { rpc } from "../../src/proofs.ts";
 import { DEMO_READS, budgetClaims, whitehatNeed, type ClaimBudget, type ClaimPlan, type Read, type Role } from "./claim-budget.ts";
-import { CLAIM_GAS } from "../../src/claim.ts";
+import { claimGas as claimGasFor } from "../../src/claim-flow.ts";
 import { formatNear, roundUpNear } from "../../src/near.ts";
 import { postingNeed } from "../../src/post.ts";
 import { DEMO_DEPLOY_GAS, MPC_ROOT, near, network as NETWORK, need, stopIfShort, VAULT_USDC, wholeNumber, type Need } from "./deploy.ts";
@@ -282,13 +282,19 @@ if (WHITEHAT) {
     const cheat = CLAIMS === 1 ? [] : await budgetClaims(proofRpcOf(CHAIN), fees, [await claimPlan(CHAIN, "cheat")]);
     claimBudgets = [...cheat, ...Array.from({ length: CLAIMS - cheat.length }, () => win)];
   }
-  // Plus one claim's gas in hand (#57): `submit_claim` attaches CLAIM_GAS, bought up front, and the
-  // claims go one at a time, so the largest claim's call is the most ever held at once.
+  // Plus one claim's gas in hand (#57): `submit_claim` attaches the gas the contract names for its
+  // size (`claimGas`), bought up front, and the claims go one at a time, so the largest claim's
+  // call is the most ever held at once.
   const claimGas = await Promise.all(
-    claimBudgets.map((c) => near.upfrontNear([{ method: "submit_claim", gas: CLAIM_GAS, deposit: 0n, argsBytes: c.input_bytes }])),
+    claimBudgets.map((c) =>
+      near.upfrontNear([{ method: "submit_claim", gas: claimGasFor(fees, c.input_bytes, CHAIN_IDS.length), deposit: 0n, argsBytes: c.input_bytes }]),
+    ),
   );
   const claimGasNear = claimGas.reduce((m, x) => (x > m ? x : m), 0n);
-  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.freeNear(WHITEHAT)) ?? 0n, roundUpNear(whitehatNeed(claimBudgets) + claimGasNear), showNear));
+  // Claims draw from the claim balance; only what it lacks must still be free NEAR to top it up.
+  const inClaimBalance = BigInt(await near.view<string>(CONTRACT, "claim_balance", { account_id: WHITEHAT }));
+  const toTopUp = whitehatNeed(claimBudgets) > inClaimBalance ? whitehatNeed(claimBudgets) - inClaimBalance : 0n;
+  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.freeNear(WHITEHAT)) ?? 0n, roundUpNear(toTopUp + claimGasNear), showNear));
 }
 const shownBudget = (c: ClaimBudget) => ({ chain_id: c.chain_id, input_bytes: c.input_bytes, draw: showNear(c.draw), refunded: showNear(c.refunded) });
 stopIfShort(needs, {

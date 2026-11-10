@@ -108,6 +108,8 @@ const STEPS: { shows: string; then: () => void }[] = [
       else world.sealedBeforeFiling = true;
     },
   },
+  // Filed: the claim's ID and transaction, shown before following it (#35).
+  { shows: `sealed ${CLAIM_TX}`, then: () => (world.claim.state = "judging") },
   {
     shows: "checking",
     then: () => {
@@ -183,7 +185,7 @@ const VIEWS: Record<string, (args: any) => unknown> = {
       return { chain_id, verified: all.every((p: any) => verified_pauses.includes(p.tx_hash)), verified_pauses, attempts: verified_pauses.length ? 1 : 0, prepaid_attempts_left: verified_pauses.length ? 2 : 3, verifying: false };
     }),
   config: () => ({ outlayer: "outlayer.testnet", usdc: "usdc.testnet", judge_build_hash: `0x${JUDGE_HASH}` }),
-  fees: () => ({ job_deposit: "0", storage_price_per_byte: "0", job_input_free_bytes: 0, secret_row_overhead_bytes: 0 }),
+  fees: () => ({ job_deposit: "0", storage_price_per_byte: "0", job_input_free_bytes: 0, secret_row_overhead_bytes: 0 , claim_gas_base: "220000000000000", claim_gas_per_covered_contract: "20000000000000", claim_gas_per_input_byte: "600000000"}),
   claim_balance: () => "10000000000000000000000000",
 };
 
@@ -293,8 +295,8 @@ function follow(args: string[], env: Record<string, string> = {}, cwd?: string) 
         }
         const name = stage.tx_hash && stage.stage !== "pauses_signed" ? `${stage.stage} ${stage.tx_hash}` : stage.stage;
         shown.push(name);
-        const step = STEPS[shown.length - 1];
-        if (step && step.shows === name) step.then();
+        const step = STEPS.find((st) => st.shows === name);
+        if (step) step.then();
       }
     });
     child.on("close", (code) => resolve({ code, stdout, shown, stderr }));
@@ -302,6 +304,8 @@ function follow(args: string[], env: Record<string, string> = {}, cwd?: string) 
 }
 
 const EXPECTED = [...STEPS.map((s) => s.shows), LAST];
+/** What `status --watch` shows: the same, less the filing, which only `claim` sees. */
+const EXPECTED_WATCH = EXPECTED.filter((name) => name !== `sealed ${CLAIM_TX}`);
 
 function expectReceipt(out: any) {
   expect(out.receipt).toMatchObject({
@@ -327,7 +331,7 @@ test("D23 D24 R14.5: status --watch shows each stage while the claim is at it, t
     "--outlayer-api", `${base}/outlayer`, "--tx-api", `${base}/txapi`, "--tx", CLAIM_TX, "--json",
   ]);
   expect(r.code, `${r.stderr}\n${unhandled.join("\n")}`).toBe(0);
-  expect(r.shown).toStrictEqual(EXPECTED);
+  expect(r.shown).toStrictEqual(EXPECTED_WATCH);
   const out = JSON.parse(r.stdout);
   expect(out.done).toBe(true);
   expectReceipt(out);
@@ -361,11 +365,12 @@ test("D23 D24 R14.5: claim shows its own progress live after filing, then gives 
 }, 60_000);
 
 /**
- * R11.1, #57: `submit_claim` attaches 300 Tgas, which NEAR takes up front at its 1e9 yoctoNEAR
- * minimum price, about 0.3 NEAR. A Whitehat holding less is refused before the claim is filed.
+ * R11.1, #57: `submit_claim` attaches the gas the contract names for the claim's size, at least
+ * 220 Tgas (`claimGas`), which NEAR takes up front at its 1e9 yoctoNEAR minimum price, at least
+ * 0.22 NEAR. A Whitehat holding less is refused before the claim is filed.
  */
 test("R11.1: claim refuses, filing nothing, when the Whitehat can't hold submit_claim's gas, and names what to add", async () => {
-  world.near = (3n * 10n ** 24n) / 10n;
+  world.near = (2n * 10n ** 24n) / 10n;
   const dir = mkdtempSync(join(tmpdir(), "bountee-poor-"));
   writeFileSync(join(dir, `${WHITEHAT}.json`), JSON.stringify({ account_id: WHITEHAT, public_key: keystore.getPublicKey().toString(), private_key: keystore.toString() }));
   const state = JSON.parse(readFileSync(new URL("state.json", judgeFixtures), "utf8"));
@@ -382,7 +387,7 @@ test("R11.1: claim refuses, filing nothing, when the Whitehat can't hold submit_
     dir,
   );
   expect(r.code).toBe(1);
-  expect(r.stderr).toMatch(/holds 0\.29\d* NEAR free of its storage stake and this claim needs 0\.3\d* in hand .*: add 0\.0\d+ NEAR \(nothing was spent\)/);
+  expect(r.stderr).toMatch(/holds 0\.19\d* NEAR free of its storage stake and this claim needs 0\.2[2-9]\d* in hand .*: add 0\.0\d+ NEAR \(nothing was spent\)/);
   expect(world.claim).toBeNull();
 }, 60_000);
 

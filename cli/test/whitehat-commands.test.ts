@@ -185,6 +185,9 @@ const VIEWS: Record<string, (args: any) => unknown> = {
     storage_price_per_byte: String(10n ** 19n),
     job_input_free_bytes: 32768,
     secret_row_overhead_bytes: 1024,
+    claim_gas_base: "220000000000000",
+    claim_gas_per_covered_contract: "20000000000000",
+    claim_gas_per_input_byte: "600000000",
     min_sign_pauses_gas_base: "50000000000000",
     min_sign_pauses_gas_per_contract: "30000000000000",
     min_retry_payout_gas: MIN_RETRY_PAYOUT_GAS.toString(),
@@ -434,21 +437,22 @@ test("R2.6: claim --retry refuses, sending nothing, proofs other than the claim'
 
 /**
  * R11.1 R14.1, #57: NEAR takes a call's attached gas up front at its 1e9 yoctoNEAR minimum price,
- * so `retry_claim`'s 300 Tgas wants about 0.3 NEAR in hand, and a claim key's allowance pays it.
+ * so `retry_claim`'s gas, at least 220 Tgas for the claim's size (`claimGas`), wants at least
+ * 0.22 NEAR in hand, and a claim key's allowance pays it.
  * The tool checks both before anything is sent, and names what to add.
  */
 test("R11.1 R14.1: claim --retry refuses, sending nothing, when the Whitehat can't hold the call's gas or a claim key's allowance can't cover it", async () => {
   world.permission = CLAIM_KEY;
-  world.near = (YOCTO * 3n) / 10n; // 0.3 NEAR, just under 300 Tgas at 1e9 plus the call's receipt costs
+  world.near = (YOCTO * 2n) / 10n; // 0.2 NEAR, under the least claim gas (220 Tgas) at 1e9
   const poor = await bountee(RETRY());
   expect(poor.code).toBe(1);
-  expect(JSON.parse(poor.stderr.split("\n")[0]!).error).toMatch(/^alice\.testnet holds 0\.29\d* NEAR free of its storage stake and this claim needs 0\.30\d+ in hand .*: add 0\.00\d+ NEAR \(nothing was spent\)$/);
+  expect(JSON.parse(poor.stderr.split("\n")[0]!).error).toMatch(/^alice\.testnet holds 0\.19\d* NEAR free of its storage stake and this claim needs 0\.2[2-9]\d* in hand .*: add 0\.0\d+ NEAR \(nothing was spent\)$/);
 
   world.near = 10n * YOCTO;
-  world.permission = { FunctionCall: { ...CLAIM_KEY.FunctionCall, allowance: String(YOCTO / 4n) } };
+  world.permission = { FunctionCall: { ...CLAIM_KEY.FunctionCall, allowance: String(YOCTO / 5n) } };
   const spent = await bountee(RETRY());
   expect(spent.code).toBe(1);
-  expect(JSON.parse(spent.stderr.split("\n")[0]!).error).toMatch(/^the claim key's allowance holds 0\.25 NEAR and retry_claim takes 0\.30\d+ of it up front: add a claim key with a larger --allowance \(nothing was spent\)$/);
+  expect(JSON.parse(spent.stderr.split("\n")[0]!).error).toMatch(/^the claim key's allowance holds 0\.2 NEAR and retry_claim takes 0\.2[2-9]\d* of it up front: add a claim key with a larger --allowance \(nothing was spent\)$/);
   expect(sent).toHaveLength(0);
 }, 60_000);
 

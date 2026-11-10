@@ -92,6 +92,26 @@ export function claimInputBytes(proofsJsonBytes: number, headerBytes: number, bl
   return proofsJsonBytes + headerBytes + blockJsonBytes + 4096;
 }
 
+/** The most gas one NEAR transaction may attach (protocol 88, mainnet and testnet). */
+export const MAX_TX_GAS = 1_000_000_000_000_000n;
+
+/**
+ * The gas a claim (or a retry) attaches: what the contract's `fees()` names for a job input of
+ * `inputBytes` (an upper bound, `claimInputBytes`) on a bounty covering `covered` contracts, so
+ * its job is requested and a PAYS signs every pause in the same transaction (R11.2). Refused,
+ * before any fee, when no transaction can carry that much.
+ */
+export function claimGas(fees: any, inputBytes: number, covered: number): bigint {
+  const gas =
+    BigInt(fees.claim_gas_base) +
+    BigInt(covered) * BigInt(fees.claim_gas_per_covered_contract) +
+    BigInt(inputBytes) * BigInt(fees.claim_gas_per_input_byte);
+  if (gas > MAX_TX_GAS) {
+    throw new Error(`this claim's proofs are too large to file: it needs ${gas / 1_000_000_000_000n} Tgas, more than a transaction's 1000`);
+  }
+  return gas;
+}
+
 /** What `submit_claim` will draw from the claim balance (contract `claims.rs`), with slack. */
 export function claimCost(fees: any, inputBytes: number, sealedBytes: number): bigint {
   const perByte = BigInt(fees.storage_price_per_byte);
