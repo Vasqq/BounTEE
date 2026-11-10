@@ -120,7 +120,7 @@ const MAINNET = {
 
 const TESTNET = {
   network: "testnet",
-  bountyContract: "bounty2.bountee.testnet",
+  bountyContract: "bounty3.bountee.testnet",
   /** Circle's USDC on NEAR testnet (6 decimals, read Nov 10). */
   nearUsdc: "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
   /** The root key `v1.signer-prod.testnet` derives from. */

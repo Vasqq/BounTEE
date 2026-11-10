@@ -70,7 +70,7 @@ test("D30, D31: next build with only web/.env.testnet.example succeeds, and buil
   // and carries none of mainnet's signing values: its USDC, root key, RPCs or NEAR's chain 397.
   // (The landing page's script, mainnet's story, names mainnet's contract and explorers.)
   const sent = staticText(join(WEB, DIST, "static"));
-  expect(sent).toContain("bounty2.bountee.testnet");
+  expect(sent).toContain("bounty3.bountee.testnet");
   expect(sent).toContain("NEAR Protocol Testnet");
   for (const mainnet of [NETWORKS.mainnet.usdc, pauseRole.MAINNET_ROOT_PUBLIC_KEY, "eth-rpc.mainnet.near.org", "mainnet.base.org", "arb1.arbitrum.io"]) expect(sent).not.toContain(mainnet);
   // D31: with no mainnet address, the badge links nowhere and the nav has no Verify link.
