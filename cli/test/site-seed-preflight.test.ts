@@ -15,7 +15,7 @@
 //   Misses: the real testnet balances and gas prices (read by the live preflight, recorded on
 //   #75), the faucet's real grant, and every step after the preflight (each spends; the seed's
 //   recorded run, method A).
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -148,8 +148,9 @@ function files() {
   };
 }
 
-async function preflight(extra: Record<string, string> = {}) {
+async function preflight(extra: Record<string, string> = {}, setup: (dir: string) => void = () => {}) {
   const { dir, env } = files();
+  setup(dir);
   stands.requests.length = 0;
   requests = stands.requests;
   const r = await runScript(seed, { ...env, ...extra });
@@ -234,5 +235,27 @@ test("D33: an existing Protocol short of NEAR is named, and USDC a Protocol alre
   expect(r.out.top_up).toEqual([expect.stringContaining(`to ${osterwick} on near-testnet`)]);
   expect(row(r.out, FUNDER, "near-testnet", "USDC").need).toBe("11 USDC");
   expect(r.out.created_by_faucet).not.toContain(osterwick);
+  expectNothingSpent(r.dir);
+});
+
+test("D33: a re-run after every bounty is posted still checks what its claims and withdrawal spend, and asks no USDC again", async () => {
+  world.near.set(FUNDER, 1n * YOCTO);
+  for (const who of [...PROTOCOLS, WHITEHAT]) world.near.set(who, 0n);
+  for (const chain of [84532, 421614]) world.eth.set(chain, ETH / 10n);
+  // Every bounty posted (its instance file names its posting), no claim filed yet.
+  const r = await preflight({}, (dir) => {
+    const site = join(dir, ".bountee-testnet");
+    mkdirSync(site, { recursive: true });
+    for (const p of PROTOCOLS) writeFileSync(join(site, `site-${p.replace(/\.testnet$/, "")}-instance.json`), JSON.stringify({ post_tx: "posted" }));
+  });
+  expect(r.status, r.stderr).toBe(3);
+  // The Whitehat's claims, on the two bounties that take them, and the Withdrawn bounty's withdrawal.
+  expect(r.out.balances.filter((b: any) => !b.ok).map((b: any) => [b.who, b.asset])).toEqual([
+    [WHITEHAT, "NEAR"],
+    ["osterwick-dex.testnet", "NEAR"],
+  ]);
+  // Nothing more is moved to the Protocols, whose USDC went into their bounties.
+  expect(row(r.out, FUNDER, "near-testnet", "USDC").need).toBe("0 USDC");
+  expect(r.out.moves).toEqual([]);
   expectNothingSpent(r.dir);
 });

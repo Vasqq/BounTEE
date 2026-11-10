@@ -40,7 +40,10 @@
 // (files the claims, default quellford-sec.testnet), SEALED_EXPLOIT (the sealed exploit script,
 // never in this repo; needed for the Paid bounty), DEPLOYER_ENV, CHAIN_RPCS, NEAR_RPC (passed
 // to fresh-instance.ts), PREFLIGHT_ONLY=1.
-// Run: node cli/test/testnet/site-seed.ts
+// Run, after deploying the contract keyless from the commit mainnet's is built from:
+//   CONTRACT=bounty.bountee.testnet USDC=<Circle's, below> REV=<commit> \
+//     BOUNTEE_DAY3=~/.bountee-testnet/site-deployment.json node cli/test/testnet/deploy-system.ts
+//   node cli/test/testnet/site-seed.ts
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -63,7 +66,11 @@ for (const f of [SITE, RECORD]) if (basename(f).startsWith("day3-")) throw new E
 const deployment = JSON.parse(readFileSync(SITE, "utf8"));
 if (deployment.network !== "testnet") throw new Error(`${SITE} is on ${deployment.network}, not testnet`);
 const CONTRACT: string = deployment.contract;
+/** Circle's USDC on NEAR testnet (spec #71, read Nov 10): what visitors get from Circle's faucet. */
+const CIRCLE_TESTNET_USDC = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
 const USDC: string = deployment.usdc;
+// deploy-system.ts falls back to the rehearsals' stand-in token; the site's contract must take Circle's.
+if (USDC !== CIRCLE_TESTNET_USDC) throw new Error(`${SITE} names USDC ${USDC}, not Circle's testnet USDC ${CIRCLE_TESTNET_USDC}`);
 const FUNDER = process.env.FUNDER ?? "bountee.testnet";
 const WHITEHAT = process.env.WHITEHAT ?? "quellford-sec.testnet";
 const CHAINS = [84532, 421614];
@@ -100,6 +107,12 @@ const PLAN: Bounty[] = [
 ];
 const byState = (s: State) => PLAN.find((b) => b.state === s)!;
 const id = (b: Bounty) => ({ protocol: b.protocol, name: b.name });
+/** The bounty as the command line names it: `<protocol>/<name>`. */
+const ref = (b: Bounty) => `${b.protocol}/${b.name}`;
+/** The state the contract holds once each is seeded: Ended unclaimed is a live bounty past its end date. */
+const CONTRACT_STATE: Record<State, string> = {
+  ended: "live", withdrawn: "withdrawn", live: "live", check_failed: "check_failed", claims_judged: "live", paid: "paid",
+};
 const usdcUnits = (b: Bounty) => BigInt(b.usdc) * 1_000_000n;
 
 const record: Record<string, any> = existsSync(RECORD) ? JSON.parse(readFileSync(RECORD, "utf8")) : {};
@@ -166,7 +179,11 @@ const show = (asset: string) => (asset === "ETH" ? showEth : asset === "NEAR" ? 
 
 // ---- 0. Preflight ------------------------------------------------------------------------------
 
+// What is left to do, so a re-run checks what its remaining steps spend: a bounty not yet posted
+// needs everything; one posted with its claims still to file needs only the Whitehat's share.
 const todo = PLAN.filter((b) => !posted(b));
+const claimsDone: Partial<Record<State, string>> = { claims_judged: "invalid claim", paid: "paid verified" };
+const claimsLeft = (b: Bounty) => b.claims > 0 && record[claimsDone[b.state]!] === undefined;
 const exists = new Map<string, boolean>();
 for (const who of [...new Set([...PLAN.map((b) => b.protocol), WHITEHAT])]) exists.set(who, (await near.balance(who)) !== null);
 const createdByFaucet = [...exists].filter(([, e]) => !e).map(([who]) => who);
@@ -182,10 +199,12 @@ const add = (who: string, chain: string, asset: string, have: bigint, want: bigi
 };
 /** What each Protocol is sent from the funder: its bounty amount less what it holds. */
 const moves: { protocol: string; usdc: bigint; register: boolean }[] = [];
-for (const b of todo) {
+for (const b of PLAN.filter((b) => todo.includes(b) || claimsLeft(b))) {
   const r = await fresh(b, true);
   if (r.status !== 0 && r.status !== 3) throw new Error(`fresh-instance.ts's preflight for ${b.protocol} failed (exit ${r.status}): ${r.stdout}${r.stderr}`);
-  for (const n of r.out.balances as Need[]) {
+  // D21's preflight budgets a cheat and a win for CLAIMS=2; Live with claims judged files two
+  // cheats, each drawing less than a win, so its budget errs high.
+  for (const n of (r.out.balances as Need[]).filter((n) => todo.includes(b) || n.who === WHITEHAT)) {
     const have = BigInt(n.units.have);
     const want = BigInt(n.units.need);
     if (n.who === b.protocol && n.asset.includes("USDC")) {
@@ -201,13 +220,13 @@ const nearChain = "near-testnet";
 const nearOf = (who: string) => [...totals.values()].find((t) => t.who === who && t.asset === "NEAR");
 // The Withdrawn bounty's Protocol also calls `withdraw_bounty`, with the gas fees() names.
 const withdrawn = byState("withdrawn");
-if (todo.includes(withdrawn) && nearOf(withdrawn.protocol)) {
-  nearOf(withdrawn.protocol)!.need += roundUpNear(
-    await near.upfrontNear([{ method: "withdraw_bounty", gas: BigInt(fees.min_withdraw_bounty_gas), deposit: 0n, argsBytes: 80 }]),
-  );
+if (record[`withdraw ${withdrawn.protocol}`] === undefined) {
+  const gas = roundUpNear(await near.upfrontNear([{ method: "withdraw_bounty", gas: BigInt(fees.min_withdraw_bounty_gas), deposit: 0n, argsBytes: 80 }]));
+  const free = exists.get(withdrawn.protocol) ? ((await near.freeNear(withdrawn.protocol)) ?? 0n) : FAUCET_NEAR;
+  add(withdrawn.protocol, nearChain, "NEAR", free, gas);
 }
 // The win's pauses: `sign_pauses` if the verdict's callback left them, and one `verify_pause` per chain.
-if (todo.includes(byState("paid")) && nearOf(WHITEHAT)) {
+if (claimsLeft(byState("paid")) && nearOf(WHITEHAT)) {
   const contracts = BigInt(CHAINS.length);
   const pauseCalls: PricedCall[] = [
     { method: "sign_pauses", gas: BigInt(fees.min_sign_pauses_gas_base) + BigInt(fees.min_sign_pauses_gas_per_contract) * contracts + tgas(40), deposit: 0n, argsBytes: 80 },
@@ -233,7 +252,7 @@ stopIfShort(needs, {
   moves: moves.map((m) => ({ ...m, usdc: showUsdc(m.usdc) })),
 });
 // The win needs the sealed exploit: checked before anything is spent.
-if (todo.includes(byState("paid"))) sealedExploit();
+if (record["paid claim"] === undefined) sealedExploit();
 
 // ---- 1. Accounts -------------------------------------------------------------------------------
 
@@ -261,8 +280,8 @@ for (const m of moves) {
 
 // ---- 3. The bounties ---------------------------------------------------------------------------
 
-const instances = new Map<State, any>();
-const instance = (s: State) => instances.get(s) ?? JSON.parse(readFileSync(byState(s).instance, "utf8"));
+const instance = (s: State) => JSON.parse(readFileSync(byState(s).instance, "utf8"));
+const usdcOf = async (who: string) => BigInt(await near.view<string>(USDC, "ft_balance_of", { account_id: who }));
 const baseVault = (s: State) => instance(s).chains.find((c: any) => c.chain_id === PROOF_CHAIN).vault as string;
 const view = (b: Bounty) => near.view(CONTRACT, "bounty", { id: id(b) });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -277,7 +296,10 @@ for (const b of PLAN) {
       if (r.status !== 0) throw new Error(`fresh-instance.ts for ${b.protocol} failed (exit ${r.status})`);
     }
     const i = JSON.parse(readFileSync(b.instance, "utf8"));
-    instances.set(b.state, i);
+    // Check failed sends the bounty amount back to the Protocol in full (R1.6).
+    if (b.state === "check_failed" && (await usdcOf(b.protocol)) < usdcUnits(b)) {
+      throw new Error(`${ref(b)} failed its check but ${b.protocol} holds ${await usdcOf(b.protocol)} of its ${usdcUnits(b)} USDC units`);
+    }
     return { bounty: i.bounty, state: i.state, post_tx: i.post_tx, instance: b.instance };
   });
 
@@ -285,13 +307,13 @@ for (const b of PLAN) {
     // The stale claim's job, taken now and filed once its block is over 5 minutes old.
     await step("stale job", async () => {
       const job = join(dir, "site-corvane-perps-stale-job.json");
-      const r = await bountee(["test", honestUser, "--bounty", `${b.protocol}/${b.name}`, "--chain", String(PROOF_CHAIN), "--out", job], { VAULT: baseVault(b.state), AMOUNT: "5000000000" });
+      const r = await bountee(["test", honestUser, "--bounty", ref(b), "--chain", String(PROOF_CHAIN), "--out", job], { VAULT: baseVault(b.state), AMOUNT: "5000000000" });
       if (r.status !== 0) throw new Error(`bountee test of the cheat failed: ${r.stdout}`);
       return { job, local_verdict: r.out.verdict, block: r.out.block, taken_at_ms: Date.now() };
     });
     // A cheat (a fresh account's deposit then redeem: no theft) scores ZERO (R4.11).
     await step("zero claim", async () => {
-      const r = await bountee(["claim", honestUser, "--bounty", `${b.protocol}/${b.name}`, ...claimAs], { VAULT: baseVault(b.state), AMOUNT: "5000000000" });
+      const r = await bountee(["claim", honestUser, "--bounty", ref(b), ...claimAs], { VAULT: baseVault(b.state), AMOUNT: "5000000000" });
       if (r.status !== 0 || r.out.verdict?.outcome !== "ZERO") throw new Error(`the cheat's claim didn't score ZERO: ${r.stdout}`);
       return { claim_id: r.out.claim_id, tx: r.out.tx_hash, verdict: r.out.verdict };
     });
@@ -301,14 +323,14 @@ for (const b of PLAN) {
 // The win, proven on Base Sepolia: paid, and each chain's pause landed and verified (R7.3).
 const paid = byState("paid");
 const win = await step("paid claim", async () => {
-  const r = await bountee(["claim", sealedExploit(), "--bounty", `${paid.protocol}/${paid.name}`, ...claimAs], { VAULT: baseVault("paid") });
+  const r = await bountee(["claim", sealedExploit(), "--bounty", ref(paid), ...claimAs], { VAULT: baseVault("paid") });
   if (r.status !== 0 || r.out.paid !== true) throw new Error(`the winning claim wasn't paid: ${r.stdout}`);
   return { claim_id: r.out.claim_id, tx: r.out.tx_hash, verdict: r.out.verdict, receipt: r.out.receipt, verification: r.out.verification };
 });
 await step("paid verified", async () => {
   const done = (v: any) => v?.chains?.length === CHAINS.length && v.chains.every((c: any) => c.verified);
   if (done(win.verification)) return win.verification;
-  const r = await bountee(["verify-pause", `${paid.protocol}/${paid.name}`, "--as", WHITEHAT, "--wait", "3600"]);
+  const r = await bountee(["verify-pause", ref(paid), "--as", WHITEHAT, "--wait", "3600"]);
   if (!done(r.out)) throw new Error(`both chains' pauses aren't verified yet: ${r.stdout}`);
   return r.out;
 });
@@ -324,7 +346,7 @@ await step("invalid claim", async () => {
   const evidence = join(dir, "site-corvane-perps-stale-evidence.json");
   writeFileSync(exploit, `${JSON.stringify(replay.exploit)}\n`);
   writeFileSync(evidence, `${JSON.stringify({ block: replay.block, header: replay.header, proofs: replay.proofs })}\n`);
-  const r = await bountee(["claim", "--exploit", exploit, "--evidence", evidence, "--bounty", `${judged.protocol}/${judged.name}`, ...claimAs]);
+  const r = await bountee(["claim", "--exploit", exploit, "--evidence", evidence, "--bounty", ref(judged), ...claimAs]);
   if (r.status !== 0 || r.out.verdict?.outcome !== "INVALID") throw new Error(`the stale claim didn't score INVALID: ${r.stdout}`);
   return { claim_id: r.out.claim_id, tx: r.out.tx_hash, verdict: r.out.verdict };
 });
@@ -346,7 +368,7 @@ await step(`withdraw ${withdrawn.protocol}`, async () => {
     waitUntil: "FINAL",
   });
   for (let i = 0; (await view(withdrawn)).state !== "withdrawn"; i++) {
-    if (i > 40) throw new Error(`${withdrawn.protocol}/${withdrawn.name} isn't withdrawn after ${r.transaction.hash}`);
+    if (i > 40) throw new Error(`${ref(withdrawn)} isn't withdrawn after ${r.transaction.hash}`);
     await sleep(3000);
   }
   return { tx: r.transaction.hash };
@@ -354,7 +376,7 @@ await step(`withdraw ${withdrawn.protocol}`, async () => {
 const unclaimed = byState("ended");
 await step(`end ${unclaimed.protocol}`, async () => {
   const v = await ended(unclaimed);
-  if (v.state !== "live" || v.winning_claim !== null) throw new Error(`${unclaimed.protocol}/${unclaimed.name} is ${v.state}, not ended unclaimed`);
+  if (v.state !== "live" || v.winning_claim !== null) throw new Error(`${ref(unclaimed)} is ${v.state}, not ended unclaimed`);
   return { end_date_ns: v.rules.end_date_ns };
 });
 
@@ -363,8 +385,13 @@ await step(`end ${unclaimed.protocol}`, async () => {
 const summary = [];
 for (const b of PLAN) {
   const v = await view(b);
-  summary.push({ seeded: b.state, bounty: `${b.protocol}/${b.name}`, contract_state: v.state, end_date_ns: v.rules.end_date_ns, winning_claim: v.winning_claim });
+  summary.push({ seeded: b.state, bounty: ref(b), contract_state: v.state, end_date_ns: v.rules.end_date_ns, winning_claim: v.winning_claim });
 }
 record.summary = summary;
 save();
-console.log(JSON.stringify({ ok: true, contract: CONTRACT, record: RECORD, bounties: summary }));
+const wrong = summary.filter((s) => s.contract_state !== CONTRACT_STATE[s.seeded]);
+console.log(JSON.stringify({ ok: wrong.length === 0, contract: CONTRACT, record: RECORD, bounties: summary }));
+if (wrong.length > 0) {
+  console.error(wrong.map((s) => `${s.bounty} was seeded ${s.seeded} but the contract holds it ${s.contract_state}`).join("\n"));
+  process.exit(1);
+}
