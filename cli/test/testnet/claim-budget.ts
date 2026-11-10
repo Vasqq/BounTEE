@@ -47,6 +47,9 @@ export type Role =
  * reads (call tree and SLOAD/SSTORE keys from the debug tracer), plus what the judge proves for
  * every replay: the coinbase, and the attacker's holdings (R4.8).
  * The same count on a Base Sepolia fork gives the testnet numbers below.
+ * A win proven on Arbitrum runs the same PositionVault and USDC code, so it reads the same slots
+ * (ADR-0020); what differs by chain (the trie's depth and so each proof's size, the header, the
+ * coinbase, USDC's address) is read from that chain when the claim is budgeted (fresh-instance.ts).
  */
 export const DEMO_READS: Record<"testnet" | "mainnet", Record<"cheat" | "win", Partial<Record<Role, number>>>> = {
   testnet: {
@@ -66,6 +69,8 @@ export interface ClaimPlan {
 
 export interface ClaimBudget {
   kind: string;
+  /** The chain the claim is proven on, whose proofs and header it was budgeted from. */
+  chain_id: number;
   input_bytes: number;
   /** yoctoNEAR the claim draws from the claim balance at filing. */
   draw: bigint;
@@ -107,12 +112,13 @@ export async function budgetClaims(url: string, fees: any, plans: ClaimPlan[]): 
   const block = Number(BigInt(await rpc<string>(url, "eth_blockNumber", [])));
   const { hash, header } = await fetchHeader(url, block);
   const headerBytes = header.length;
-  const blockJsonBytes = JSON.stringify({ number: block, hash }).length;
+  const chainId = Number(BigInt(await rpc<string>(url, "eth_chainId", [])));
+  const blockJsonBytes = JSON.stringify({ chain_id: chainId, number: block, hash }).length;
   const out: ClaimBudget[] = [];
   for (const plan of plans) {
     const input = claimInputBytes(await proofsBytes(url, block, plan.reads), headerBytes, blockJsonBytes);
     const refunded = BigInt(Math.max(0, input - Number(fees.job_input_free_bytes))) * BigInt(fees.storage_price_per_byte);
-    out.push({ kind: plan.kind, input_bytes: input, draw: claimCost(fees, input, SEALED_EXPLOIT_BYTES), refunded });
+    out.push({ kind: plan.kind, chain_id: chainId, input_bytes: input, draw: claimCost(fees, input, SEALED_EXPLOIT_BYTES), refunded });
   }
   return out;
 }

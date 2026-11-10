@@ -81,7 +81,7 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on a local copy of Base (#
   function claim(kind: "cheat" | "win", script: string): Promise<{ result: any; job: any }> {
     const out = join(dir, `${kind}-job.json`);
     return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [entry, "test", script, "--bounty", rulesFile, "--rpc", url, "--block", String(block), "--judge", judge, "--out", out, "--json"], {
+      const child = spawn(process.execPath, [entry, "test", script, "--bounty", rulesFile, "--chain", "base", "--rpc", url, "--block", String(block), "--judge", judge, "--out", out, "--json"], {
         cwd: repo,
         env: { ...process.env, VAULT: base.vault },
       });

@@ -22,6 +22,9 @@
 //   redeem (still after buying Circle's USDC on Uniswap V2: Circle's USDC has no public mint),
 //   and the read lists are re-measured on the new vault's replays (claim-budget.ts). This
 //   test needs no exploit: the win's read list is committed as numbers.
+//   Ticket #64 (ADR-0020): the cheat is filed on Base, but a win may be proven on either chain,
+//   so the win is budgeted on each chain from that chain's own proofs (its USDC, implementation
+//   and coinbase), and every win the run files is held at the costliest chain's.
 //   Misses: the real mainnet balances and gas prices (read when #35 runs it), and every step
 //   after the preflight (each spends; rehearsed on testnet, #33).
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -58,7 +61,11 @@ const PAIR = "0x88a43bbdf9d098eec7bceda4e2494615dfd9bb9c";
 const USDC_IMPL = "0x2ce6311ddae708829bc0784c967b7d77d19fd779";
 const COINBASE = "0x4200000000000000000000000000000000000011";
 const IMPL_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
-const CONTRACTS = new Set([ROUTER, FACTORY, WETH, PAIR, USDC_IMPL, COINBASE, BASE_USDC]);
+// Arbitrum One: Circle's USDC behind its own proxy (the stand-in's implementation address), and
+// the coinbase its blocks name (ArbOS's sequencer address).
+const ARBITRUM_USDC_IMPL = "0x00000000000000000000000000000000000a4b1e";
+const ARBITRUM_COINBASE = "0xa4b000000000000000000073657175656e636572";
+const CONTRACTS = new Set([ROUTER, FACTORY, WETH, PAIR, USDC_IMPL, COINBASE, BASE_USDC, ARBITRUM_USDC_IMPL, ARBITRUM_COINBASE, ARBITRUM_USDC]);
 const RAW_HEADER = `0x${"cd".repeat(600)}`;
 const HEADER_HASH = `0x${Buffer.from(keccak_256(Buffer.from(RAW_HEADER.slice(2), "hex"))).toString("hex")}`;
 
@@ -66,6 +73,8 @@ const HEADER_HASH = `0x${Buffer.from(keccak_256(Buffer.from(RAW_HEADER.slice(2),
 const world = {
   /** Bytes per trie node in the stand-in chain's proofs: a deeper, wider trie gives bigger proofs. */
   node: 500,
+  /** A chain whose trie differs: its own bytes per node. */
+  nodeOn: new Map<number, number>(),
   near: new Map<string, bigint>(),
   /** Bytes each NEAR account stores: NEAR locks their stake, so it can't pay for anything. */
   nearStorage: new Map<string, number>(),
@@ -122,13 +131,14 @@ beforeAll(async () => {
       if (to === FACTORY && selector === "0xe6a43905") return word(BigInt(PAIR)); // getPair(address,address)
       return word(world.evmUsdc.get(to) ?? 0n);
     }
-    if (method === "eth_getStorageAt" && String(p[0]).toLowerCase() === BASE_USDC && p[1] === IMPL_SLOT) return word(BigInt(USDC_IMPL));
-    if (method === "eth_getBlockByNumber") return { number: "0x10", hash: HEADER_HASH, miner: COINBASE };
+    if (method === "eth_getStorageAt" && chain === 8453 && String(p[0]).toLowerCase() === BASE_USDC && p[1] === IMPL_SLOT) return word(BigInt(USDC_IMPL));
+    if (method === "eth_getStorageAt" && chain === 42161 && String(p[0]).toLowerCase() === ARBITRUM_USDC && p[1] === IMPL_SLOT) return word(BigInt(ARBITRUM_USDC_IMPL));
+    if (method === "eth_getBlockByNumber") return { number: "0x10", hash: HEADER_HASH, miner: chain === 42161 ? ARBITRUM_COINBASE : COINBASE };
     if (method === "debug_getRawHeader") return RAW_HEADER;
     if (method === "eth_getProof") {
       // Eight nodes for an account, six per slot; an account the stand-in doesn't know is absent.
       const known = CONTRACTS.has(String(p[0]).toLowerCase());
-      const nodes = (n: number) => Array.from({ length: n }, () => `0x${"ab".repeat(world.node)}`);
+      const nodes = (n: number) => Array.from({ length: n }, () => `0x${"ab".repeat(world.nodeOn.get(chain) ?? world.node)}`);
       return {
         address: p[0], nonce: known ? "0x1" : "0x0", balance: "0x0", codeHash: known ? `0x${"11".repeat(32)}` : `0x${"00".repeat(32)}`,
         storageHash: `0x${"22".repeat(32)}`, accountProof: nodes(8),
@@ -180,7 +190,8 @@ test("D21: the mainnet preflight lists every balance the run needs and names eac
     [DEPLOYER, "Base", "ETH", expect.stringMatching(/ETH$/), false],
     [DEPLOYER, "Base", `USDC (${BASE_USDC})`, "2 USDC", false],
     [DEPLOYER, "Arbitrum One", "ETH", expect.stringMatching(/ETH$/), false],
-    [DEPLOYER, "Arbitrum One", `USDC (${ARBITRUM_USDC})`, "1 USDC", false],
+    // ADR-0020: 2 USDC into each chain's vault, so a theft on either reaches the 1 USDC minimum.
+    [DEPLOYER, "Arbitrum One", `USDC (${ARBITRUM_USDC})`, "2 USDC", false],
     [PROTOCOL, "near-mainnet", "NEAR", expect.stringMatching(/ NEAR$/), false],
     [PROTOCOL, "near-mainnet", `USDC (${NEAR_USDC})`, "10 USDC", false],
     [WHITEHAT, "near-mainnet", "NEAR", expect.stringMatching(/ NEAR$/), false],
@@ -202,7 +213,7 @@ test("D21: a funded mainnet run passes the preflight and spends nothing", async 
   world.nearUsdc.set(PROTOCOL, 10_000_000n);
   for (const chain of [8453, 42161]) world.eth.set(chain, ETH / 100n);
   world.evmUsdc.set(BASE_USDC, 2_000_000n);
-  world.evmUsdc.set(ARBITRUM_USDC, 1_000_000n);
+  world.evmUsdc.set(ARBITRUM_USDC, 2_000_000n);
   const r = await preflight();
   expect(r.status, r.stderr).toBe(0);
   expect(r.out.ok).toBe(true);
@@ -275,7 +286,16 @@ test("D21: the Whitehat's budget follows each claim's input on the proof chain: 
     expect(proved).toContain(`chain 8453 ${address} ${slots}`);
   }
   expect(proved.filter((q) => q.startsWith(`chain 8453 ${BASE_USDC} `))).toHaveLength(2);
-  expect(proved.every((q) => q.startsWith("chain 8453 "))).toBe(true);
+  // The cheat is filed on Base; a win may be proven on either chain (ADR-0020), so it is also
+  // budgeted on Arbitrum One from that chain's own accounts: its fresh sender and vault, its
+  // coinbase, and its Circle USDC and implementation, none of Uniswap's.
+  const onArbitrum = proved.filter((q) => q.startsWith("chain 42161 "));
+  for (const [address, slots] of [[ARBITRUM_USDC, 6], [ARBITRUM_USDC_IMPL, 0], [ARBITRUM_COINBASE, 0]] as const) {
+    expect(onArbitrum).toContain(`chain 42161 ${address} ${slots}`);
+  }
+  expect(onArbitrum).toHaveLength(5);
+  expect(proved.every((q) => q.startsWith("chain 8453 ") || q.startsWith("chain 42161 "))).toBe(true);
+  expect(cheat).toMatchObject({ kind: "cheat", chain_id: 8453 });
   expect(cheat.input_bytes).toBeGreaterThan(win.input_bytes);
   // OutLayer holds the storage price for every input byte above the free 32 KiB (fees()).
   for (const c of [cheat, win]) expect(near(c.refunded)).toBe(BigInt(c.input_bytes - 32 * 1024) * 10n ** 19n);
@@ -293,6 +313,44 @@ test("D21: the Whitehat's budget follows each claim's input on the proof chain: 
   expect(near(deeper.out.balances.find((b: any) => b.who === WHITEHAT).need)).toBeGreaterThan(near(whitehat.need));
   world.node = 500;
   expectNothingSent();
+});
+
+/**
+ * D21, ADR-0020: a winning claim may be proven on either covered chain, and each chain's replay
+ * carries that chain's proofs and header, so the win is budgeted on each chain from its own
+ * proofs (not carried over from Base's), and the Whitehat holds the costliest chain's.
+ */
+test("D21: the win is budgeted on each covered chain from that chain's proofs, and the Whitehat holds the costliest one", async () => {
+  world.near.clear();
+  world.node = 500;
+  try {
+    // Arbitrum One's trie the deeper: its win carries the bigger proofs.
+    world.nodeOn.set(42161, 900);
+    const r = await preflight();
+    const wins = r.out.run.win_budgets;
+    expect(wins.map((w: any) => w.chain_id)).toEqual([8453, 42161]);
+    expect(wins[1].input_bytes).toBeGreaterThan(wins[0].input_bytes + 10_000);
+    expect(r.out.run.claim_budget.map((c: any) => [c.kind, c.chain_id])).toEqual([["cheat", 8453], ["win", 42161]]);
+    expect(r.out.run.claim_budget[1]).toEqual({ kind: "win", ...wins[1] });
+
+    // Base's the deeper instead: Base's win is the one held.
+    world.nodeOn.set(42161, 300);
+    const base = await preflight();
+    expect(base.out.run.win_budgets[0].input_bytes).toBeGreaterThan(base.out.run.win_budgets[1].input_bytes);
+    expect(base.out.run.claim_budget.map((c: any) => [c.kind, c.chain_id])).toEqual([["cheat", 8453], ["win", 8453]]);
+    // A run filing only the win holds its whole draw: Arbitrum's when Arbitrum's trie is the deeper.
+    // (With the cheat filed too, the cheat's draw is the largest and each win keeps only its job.)
+    const need = (x: typeof r) => near(x.out.balances.find((b: any) => b.who === WHITEHAT).need);
+    const winOnly = await preflight({ CLAIMS: "1" });
+    expect(winOnly.out.run.claim_budget).toEqual([{ kind: "win", ...winOnly.out.run.win_budgets[0] }]);
+    world.nodeOn.set(42161, 900);
+    const winOnlyArbitrum = await preflight({ CLAIMS: "1" });
+    expect(winOnlyArbitrum.out.run.claim_budget).toEqual([{ kind: "win", ...winOnlyArbitrum.out.run.win_budgets[1] }]);
+    expect(need(winOnlyArbitrum)).toBeGreaterThan(need(winOnly));
+    expectNothingSent();
+  } finally {
+    world.nodeOn.clear();
+  }
 });
 
 /** R1.4: the delay is a setting, and one outside 1-90 days stops the script before it reads or sends anything. */

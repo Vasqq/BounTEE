@@ -34,7 +34,7 @@ function cast(args: string[]) {
 
 let out: {
   verdict: { outcome: string; reason: string };
-  block: { number: number; hash: string };
+  block: { chain_id: number; number: number; hash: string };
   attacker: string;
   rpc: string;
   saved: string;

@@ -178,6 +178,12 @@ impl Contract {
             now < record.rules.end_date_ns.get(),
             "this bounty has ended"
         );
+        // D1: the claim's block names its proof chain, which must be a covered contract's
+        // chain. Refused here, before anything is recorded or drawn from the claim balance.
+        require!(
+            crate::posting::covers_chain(&record.rules, &block.chain_id),
+            "the claim's proof chain is a chain this bounty covers no contract on"
+        );
         // R3.5: a sealed exploit is filed once. One whose secret was never stored was never
         // judged, so it may be filed again.
         let sealed_hash = sha256_hex(sealed_exploit.as_str().as_bytes());

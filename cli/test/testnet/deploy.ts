@@ -15,13 +15,19 @@ export const near = new Near(network, process.env.NEAR_RPC);
 
 /**
  * The gas a fresh demo instance's deploy burns on one chain, with ~18% slack:
- * demo/script/Deploy.s.sol (the mock USDC on testnet, the PositionVault, and the seed's mint,
- * approve and deposit) plus the pause-gas transfer. fresh-instance.ts budgets the deployer's
+ * demo/script/Deploy.s.sol (the mock USDC on testnet, the PositionVault, and the vault USDC's
+ * mint, approve and deposit) plus the pause-gas transfer. fresh-instance.ts budgets the deployer's
  * ETH from it. Measured on Nov 8, 2026 (ticket #52) from the receipts: 2,199,437 gas on Base
  * Sepolia (five deploy transactions and the transfer); 1,387,416 on a local fork of Base with
  * Circle's USDC (vault, approve, deposit and the transfer; no mock, no mint).
  */
 export const DEMO_DEPLOY_GAS = 2_600_000n;
+
+/**
+ * How much of Circle's USDC each mainnet demo vault starts with: 2 on every chain, since a
+ * claim may be proven on any of them (ADR-0020); testnet mints a mock.
+ */
+export const VAULT_USDC = 2_000_000n;
 
 /** OutLayer and NEAR's MPC signer on each network (spec, external services). */
 const OUTLAYER = { testnet: "outlayer.testnet", mainnet: "outlayer.near" } as const;

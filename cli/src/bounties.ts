@@ -2,7 +2,7 @@
 // bounties a contract holds, and one bounty's rules, covered contracts and trusted parties.
 // Read-only: no keys, no funds.
 import { parseBountyId as bountyIdOf, type BountyId, type Rules } from "@bountee/formats";
-import { CHAINS } from "./chains.ts";
+import { CHAINS, chainLabel } from "./chains.ts";
 import type { Near } from "./near.ts";
 
 export interface BountySummary {
@@ -54,7 +54,7 @@ export async function listBounties(near: Near, contract: string): Promise<{ cont
         bounty_amount: b.rules.bounty_amount,
         minimum_theft: b.rules.minimum_theft,
         end_date_ns: b.rules.end_date_ns,
-        chains: [...new Set(b.rules.covered_contracts.map((c) => c.chain_id))],
+        chains: coveredChains(b.rules),
         covered_contracts: b.rules.covered_contracts.length,
       };
     }),
@@ -100,6 +100,33 @@ export function parseBountyId(text: string): BountyId {
   }
 }
 
+/** Every chain a covered contract is on, each once, in the rules' order: each can be a claim's proof chain (D1). */
+export function coveredChains(rules: Rules): number[] {
+  return [...new Set(rules.covered_contracts.map((c) => c.chain_id))];
+}
+
+/**
+ * The chain a claim is proven on, its proof chain (D1, D26): the covered chain `named`
+ * (`--chain`), or the bounty's one covered chain when none is named. Refused, listing the
+ * covered chains, when the bounty covers several and none is named, or `named` isn't covered;
+ * `test` and `claim` ask it before any EVM RPC call or fee. The claim's block carries it.
+ */
+export function proofChain(rules: Rules, named?: number): number {
+  const covered = coveredChains(rules);
+  if (named === undefined) {
+    if (covered.length === 1) return covered[0]!;
+    throw new Error(`the bounty covers ${covered.length} chains, ${covered.map(chainLabel).join(", ")}: name the one your exploit is proven on with --chain`);
+  }
+  refuseUncovered(rules, named);
+  return named;
+}
+
+/** Refuse, listing the covered chains, a claim on `chain` when the bounty covers no contract there (D1, D26). */
+export function refuseUncovered(rules: Rules, chain: number): void {
+  const covered = coveredChains(rules);
+  if (!covered.includes(chain)) throw new Error(`the bounty covers no contract on ${chainLabel(chain)}: it covers ${covered.map(chainLabel).join(", ")}`);
+}
+
 export async function showBounty(near: Near, contract: string, id: BountyId): Promise<BountyDetail> {
   const b = await near.view<any>(contract, "bounty", { id });
   if (!b) throw new Error(`no bounty ${id.protocol}/${id.name} on ${contract}`);
@@ -108,7 +135,8 @@ export async function showBounty(near: Near, contract: string, id: BountyId): Pr
     near.view<{ address: string }>(contract, "pause_role", { id }),
   ]);
   const rules: Rules = b.rules;
-  const proofChain = rules.proof_chain;
+  // Any covered chain can be a claim's proof chain (D1), so each one's pinned RPCs are trusted.
+  const chains = coveredChains(rules);
   return {
     contract,
     id,
@@ -130,8 +158,8 @@ export async function showBounty(near: Near, contract: string, id: BountyId): Pr
       { party: "NEAR MPC network", account: config.mpc, role: "signs each pause, and confirms each pause landed" },
       {
         party: "Proof-chain RPCs",
-        rpcs: { [proofChain]: CHAINS[proofChain]?.judgeRpcs ?? [] },
-        role: `the judge build ${rules.judge_build_hash} confirms the claim's block with these; at least two must answer and agree`,
+        rpcs: Object.fromEntries(chains.map((id) => [id, CHAINS[id]?.judgeRpcs ?? []])),
+        role: `the judge build ${rules.judge_build_hash} confirms a claim's block with its chain's RPCs; at least two must answer and agree`,
       },
       { party: "USDC", account: config.usdc, role: "the token the bounty is held and paid in" },
     ],
@@ -152,8 +180,8 @@ export function formatBounty(d: BountyDetail): string {
   const lines = [
     `${d.id.protocol}/${d.id.name} on ${d.contract}: ${d.state}`,
     `  pays ${r.bounty_amount} (USDC, smallest unit) to the first claim whose fresh accounts take at least ${r.minimum_theft} from the covered contracts`,
-    `  valued in: ${r.listed_tokens.map((t) => `${t.token} at ${t.price}`).join(", ")}`,
-    `  replayed on chain ${r.proof_chain} at a block at most ${r.recency_limit_secs} s old; ends ${days(r.end_date_ns)}; exploit published ${r.disclosure_delay_days} day(s) after a win`,
+    `  valued in: ${r.listed_tokens.map((t) => `${t.token} on chain ${t.chain_id} at ${t.price}`).join(", ")}`,
+    `  provable on any covered chain (${coveredChains(r).join(", ")}), replayed at a block of that chain at most ${r.recency_limit_secs} s old; ends ${days(r.end_date_ns)}; exploit published ${r.disclosure_delay_days} day(s) after a win`,
     "  covered contracts:",
     ...d.covered_contracts.map((c) => `    ${c.chain} (${c.chain_id}) ${c.address}`),
     `  pause-role address: ${d.pause_role}`,

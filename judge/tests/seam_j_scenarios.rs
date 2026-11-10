@@ -144,7 +144,7 @@ fn job_at(state: &str, exploit: Value, bounty: &Bounty) -> Value {
             } else {
                 address(t)
             };
-            json!({ "token": token, "price": p.to_string() })
+            json!({ "chain_id": 31337, "token": token, "price": p.to_string() })
         })
         .collect();
     json!({ "replay": {

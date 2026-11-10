@@ -117,9 +117,9 @@ try {
       addr.bank, addr.swapVault, addr.router, addr.shareVault, addr.early, addr.late, addr.positionVault,
     ].map((address) => ({ chain_id: 31337, address })),
     listed_tokens: [
-      { token: addr.usdc, price: "1" },
-      { token: addr.pt, price: "1" },
-      { token: "native", price: "1" },
+      { chain_id: 31337, token: addr.usdc, price: "1" },
+      { chain_id: 31337, token: addr.pt, price: "1" },
+      { chain_id: 31337, token: "native", price: "1" },
     ],
   });
   const rules = everything(addresses);
@@ -128,7 +128,7 @@ try {
     const proofs = new Map<string, AccountProof>();
     let replay;
     for (const name of names) {
-      const r = await collectReplay({ rpc: url, block: at, rules, exploit: exploits[name]!, wasm });
+      const r = await collectReplay({ rpc: url, chain: 31337, block: at, rules, exploit: exploits[name]!, wasm });
       replay = r.replay;
       if (r.stderr) console.log(r.stderr.trim());
       console.log(name, JSON.stringify(r.verdict), `${r.replay.proofs.length} proofs`);

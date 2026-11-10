@@ -27,6 +27,7 @@ import {
   parseRules,
   parseVerdict,
   toJson,
+  type BlockRef,
   type BountyId,
   type Exploit,
   type Replay,
@@ -116,7 +117,7 @@ export interface RerunResult {
   bounty: BountyId;
   claim_id: number;
   whitehat: string;
-  block: { number: number; hash: string };
+  block: BlockRef;
   /** The verdict this re-run gave, from the published header and proofs. */
   verdict: Verdict;
   /** The verdict the enclave gave, as the contract recorded it. */

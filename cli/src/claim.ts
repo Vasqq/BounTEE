@@ -4,7 +4,7 @@
 //
 //   bountee claim [<foundry-script>[:<contract>]] --contract <bounty contract>
 //                 --bounty <protocol>/<name> --as <account>
-//                 [--sig <fn>] [--job <saved test job.json>]
+//                 [--chain <name | chain id>] [--sig <fn>] [--job <saved test job.json>]
 //                 [--exploit <exploit.json> --evidence <{block, header, proofs}.json>]
 //                 [--network testnet|mainnet] [--rpc <NEAR rpc>] [--proof-rpc <chain rpc>]
 //                 [--outlayer-api <url>] [--chain-rpc <chain id>=<url>[,...]]
@@ -45,10 +45,11 @@
 import { readFileSync } from "node:fs";
 import { actions } from "near-api-js";
 import { BARE_FLAGS } from "./usage.ts";
-import { parseBlockRef, parseExploit, parseAccountProof, type BountyId, type Exploit, type Verdict } from "@bountee/formats";
-import { parseBountyId } from "./bounties.ts";
+import { parseBlockRef, parseExploit, parseAccountProof, parseRules, type BlockRef, type BountyId, type Exploit, type Rules, type Verdict } from "@bountee/formats";
+import { parseBountyId, proofChain, refuseUncovered } from "./bounties.ts";
+import { chainLabel, parseChain } from "./chains.ts";
 import { parseRpcFlags } from "./broadcast.ts";
-import { checkClaimNear, claimCost, claimInputBytes, ensureClaimBalance, prepareClaim, settle, type Settlement } from "./claim-flow.ts";
+import { checkClaimNear, claimCost, claimInputBytes, ensureClaimBalance, prepareClaim, readJob, settle, type Settlement } from "./claim-flow.ts";
 import { proofsMatchingClaim, type ProofsSource } from "./claim-proofs.ts";
 import { KEYSTORE_API, NEAR_RPC, type Network } from "./endpoints.ts";
 import { formatNear, Near, parseNetwork } from "./near.ts";
@@ -93,6 +94,22 @@ function positional(args: string[]): string | undefined {
 const sameId = (a: BountyId, b: BountyId) => a.protocol === b.protocol && a.name === b.name;
 
 /**
+ * Refuse, before any EVM call or fee (D26), a saved job or evidence proven on `chain` (its
+ * block's) when the bounty covers no contract there, when --chain is missing on a multi-chain
+ * bounty, or when it names another chain. A dry run, which files nothing, reads no `rules`,
+ * so only the last is checked there.
+ */
+function checkProvenOn(chain: number, named: number | undefined, rules: Rules | undefined): void {
+  if (rules) refuseUncovered(rules, chain);
+  if (named === chain) return;
+  // The Whitehat names the chain as for `test`: required on a multi-chain bounty (D26).
+  const chosen = rules ? proofChain(rules, named) : named;
+  if (chosen !== undefined && chosen !== chain) {
+    throw new Error(`the claim is proven on ${chainLabel(chain)}, not ${chainLabel(chosen)}: test it again on ${chainLabel(chosen)}`);
+  }
+}
+
+/**
  * Where the proofs a claim was filed with are read from: `--job` or `--evidence` if given,
  * else the claim's own transactions on NEAR (saved by `claim` under `.bountee/claims/`, or
  * `--tx`). The contract keeps only their sha256.
@@ -113,7 +130,7 @@ export interface ClaimResult {
   /** The verdict `bountee test` gave these exact inputs (D2); null when claiming from --exploit/--evidence or an unre-run --job. */
   local_verdict?: Verdict | null;
   saved?: string;
-  block?: { number: number; hash: string };
+  block?: BlockRef;
   block_age_secs?: number;
   topped_up_near?: string;
   claim_id?: number;
@@ -144,21 +161,31 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
   const near = new Near(network, flag(args, "rpc") ?? NEAR_RPC[network]);
   if (flag(args, "retry") !== undefined) return retryClaim(args, { near, network, contract, whitehat, given }, onStage);
   const bounty = given!;
+  const named = parseChain(flag(args, "chain"));
 
-  const live = args.includes("--dry-run") ? { state: "live" } : await near.view<{ state: string } | null>(contract, "bounty", { id: bounty });
-  if (!live) throw new Error(`no bounty ${bountyText} on ${contract}`);
-  if (live.state !== "live") throw new Error(`bounty ${bountyText} is ${live.state}: it takes no claims${live.state === "paid" || live.state === "signing" || live.state === "paying" ? " (it has been won)" : ""}`);
+  // A dry run only seals, filing and spending nothing, so it reads no bounty: its rules, and so the covered chains, stay unread.
+  let rules: Rules | undefined;
+  if (!args.includes("--dry-run")) {
+    const live = await near.view<{ state: string; rules: unknown } | null>(contract, "bounty", { id: bounty });
+    if (!live) throw new Error(`no bounty ${bountyText} on ${contract}`);
+    if (live.state !== "live") throw new Error(`bounty ${bountyText} is ${live.state}: it takes no claims${live.state === "paid" || live.state === "signing" || live.state === "paying" ? " (it has been won)" : ""}`);
+    rules = parseRules(live.rules);
+  }
 
   let exploit: Exploit;
   let block, header: string, proofs;
   const result: Partial<ClaimResult> = {};
   const script = positional(args);
   if (script || flag(args, "job")) {
+    const jobFile = flag(args, "job");
+    const job = jobFile === undefined ? undefined : readJob(jobFile);
+    // A saved job names its chain in its block (D1): it is claimed there, the chain --chain names.
+    if (job) checkProvenOn(job.replay.block.chain_id, named, rules);
     const prepared = await prepareClaim({
-      job: flag(args, "job"),
+      job,
       rpc: flag(args, "proof-rpc"),
       test: script
-        ? { script, bounty: bountyText!, sig: flag(args, "sig"), rpc: flag(args, "proof-rpc"), contract, near }
+        ? { script, bounty: bountyText!, sig: flag(args, "sig"), rpc: flag(args, "proof-rpc"), contract, chain: named, near }
         : undefined,
     });
     ({ exploit, block, header, proofs } = prepared.replay);
@@ -167,6 +194,7 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
     exploit = parseExploit(JSON.parse(readFileSync(required(args, "exploit"), "utf8")));
     const evidence = JSON.parse(readFileSync(required(args, "evidence"), "utf8"));
     block = parseBlockRef(evidence.block);
+    checkProvenOn(block.chain_id, named, rules);
     proofs = (evidence.proofs as unknown[]).map(parseAccountProof);
     header = String(evidence.header);
   }
