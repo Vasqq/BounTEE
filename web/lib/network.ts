@@ -6,7 +6,9 @@
 //
 // It runs in the browser as well as on the server, so it holds only what the browser needs,
 // and only this build's network: the browser bundle carries no other network's value
-// (e2e/landing.spec.ts checks for testnet's). The NEAR endpoints only the server reads
+// (e2e/landing.spec.ts checks for testnet's). The one exception is `otherSite`, the other
+// site's address, which D31 links to; the wording around those links is rendered on the
+// server (components/AppNav.tsx, components/TryTestnet.tsx). The NEAR endpoints only the server reads
 // (RPC, archival RPC, FastNEAR's explorer API, OutLayer's API, the NEAR explorer) are the
 // command-line tool's own (cli/src/endpoints.ts), looked up by this table's `network` in
 // lib/config.ts, so the two can't drift. The EVM chains are listed here, since the tool's

@@ -8,11 +8,11 @@ import { Wordmark } from "./Wordmark.tsx";
 
 function TestnetBadge() {
   return net.otherSite ? (
-    <a className="net-badge" href={net.otherSite}>
+    <a className="chip net-badge" href={net.otherSite}>
       Testnet
     </a>
   ) : (
-    <span className="net-badge">Testnet</span>
+    <span className="chip net-badge">Testnet</span>
   );
 }
 
