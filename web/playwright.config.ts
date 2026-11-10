@@ -1,8 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
-import { PORTS, SITES } from "./e2e/stand-ins/sites.ts";
+import { APPS, nearEndpoints, PORTS, SITES } from "./e2e/stand-ins/sites.ts";
 
-const port = PORTS.mainnet;
-const testnetPort = PORTS.testnet;
 const standIn = Number(process.env.STAND_IN_PORT ?? 3199);
 const chains = `http://localhost:${standIn}`;
 /** The testnet specs: they run on the testnet build alone, and every other spec on the mainnet build alone. */
@@ -26,10 +24,7 @@ function appServer(on: number, distDir: string, chain: { covered: number[]; near
     timeout: 180_000,
     env: {
       NEXT_DIST_DIR: distDir,
-      NEAR_RPC: `${chains}/near`,
-      NEAR_ARCHIVAL_RPC: `${chains}/near`,
-      TX_API: `${chains}/txapi`,
-      OUTLAYER_API: `${chains}/outlayer`,
+      ...nearEndpoints(chains),
       DEMO_BOUNTY: "0x9f2c3e1a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e/mainnet-demo",
       NEAR_ETH_RPC: evm(chain.nearEvm),
       NEXT_PUBLIC_NEAR_ETH_RPC: evm(chain.nearEvm),
@@ -51,14 +46,14 @@ export default defineConfig({
   fullyParallel: false,
   reporter: "list",
   projects: [
-    { name: "desktop", testIgnore: TESTNET_SPECS, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 }, baseURL: `http://localhost:${port}` } },
+    { name: "desktop", testIgnore: TESTNET_SPECS, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 }, baseURL: APPS.mainnet } },
     {
       name: "phone",
       testIgnore: TESTNET_SPECS,
-      use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL: `http://localhost:${port}` },
+      use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL: APPS.mainnet },
       grep: /@phone/,
     },
-    { name: "testnet", testMatch: TESTNET_SPECS, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 }, baseURL: `http://localhost:${testnetPort}` } },
+    { name: "testnet", testMatch: TESTNET_SPECS, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 }, baseURL: APPS.testnet } },
   ],
   webServer: [
     {
@@ -68,7 +63,7 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
     // The mainnet build, with the setting unset.
-    appServer(port, ".next", { covered: [8453, 42161], nearEvm: 397 }, { NEXT_PUBLIC_TESTNET_SITE: SITES.testnet }),
-    appServer(testnetPort, ".next-testnet", { covered: [84532, 421614], nearEvm: 398 }, { NEXT_PUBLIC_NETWORK: "testnet", NEXT_PUBLIC_MAINNET_SITE: SITES.mainnet }),
+    appServer(PORTS.mainnet, ".next", { covered: [8453, 42161], nearEvm: 397 }, { NEXT_PUBLIC_TESTNET_SITE: SITES.testnet }),
+    appServer(PORTS.testnet, ".next-testnet", { covered: [84532, 421614], nearEvm: 398 }, { NEXT_PUBLIC_NETWORK: "testnet", NEXT_PUBLIC_MAINNET_SITE: SITES.mainnet }),
   ],
 });

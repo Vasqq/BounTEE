@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { pauseRole } from "@bountee/formats";
 import { emptyWorld, NETWORKS, setWorld, STAND_IN } from "./stand-ins/world.ts";
-import { PORTS } from "./stand-ins/sites.ts";
+import { nearEndpoints, PORTS } from "./stand-ins/sites.ts";
 
 const WEB = join(import.meta.dirname, "..");
 const DIST = ".next-check";
@@ -27,7 +27,7 @@ function build(vars: Record<string, string>) {
  * endpoints point at the stand-in, read when it runs; nothing changes what was built.
  */
 async function served(check: (origin: string) => Promise<void>) {
-  const env = { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: "production" as const, NEXT_TELEMETRY_DISABLED: "1", NEXT_DIST_DIR: DIST, NEAR_RPC: `${STAND_IN}/near`, NEAR_ARCHIVAL_RPC: `${STAND_IN}/near`, TX_API: `${STAND_IN}/txapi`, OUTLAYER_API: `${STAND_IN}/outlayer` };
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: "production" as const, NEXT_TELEMETRY_DISABLED: "1", NEXT_DIST_DIR: DIST, ...nearEndpoints(STAND_IN) };
   const server = spawn("pnpm", ["exec", "next", "start", "-p", String(PORTS.check)], { cwd: WEB, env, detached: true, stdio: "ignore" });
   const origin = `http://localhost:${PORTS.check}`;
   try {

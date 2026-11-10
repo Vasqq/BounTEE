@@ -12,5 +12,13 @@ export const PORTS = {
 
 export const APPS = { mainnet: `http://localhost:${PORTS.mainnet}`, testnet: `http://localhost:${PORTS.testnet}` } as const;
 
+/** The server's NEAR endpoints, each pointed at the stand-in at `chains`: read when the app runs (lib/config.ts). */
+export const nearEndpoints = (chains: string) => ({
+  NEAR_RPC: `${chains}/near`,
+  NEAR_ARCHIVAL_RPC: `${chains}/near`,
+  TX_API: `${chains}/txapi`,
+  OUTLAYER_API: `${chains}/outlayer`,
+});
+
 /** NEXT_PUBLIC_MAINNET_SITE on the testnet build, NEXT_PUBLIC_TESTNET_SITE on the mainnet one. */
 export const SITES = { mainnet: "https://bountee.example", testnet: "https://testnet.bountee.example" } as const;
