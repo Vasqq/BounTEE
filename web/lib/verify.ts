@@ -98,5 +98,5 @@ export async function readVerify(id: BountyId): Promise<VerifyResult | null> {
       ? { name: "Re-run of the published exploit", status: "wait", detail: "published · re-run it with bountee verify", links: [] }
       : { name: "Re-run of the published exploit", status: "wait", detail: `not yet published · ${after}`, links: [] },
   ];
-  return { command: verifyCommand(`${id.protocol}/${id.name}`, c.contract), rows };
+  return { command: verifyCommand(id, c.contract), rows };
 }

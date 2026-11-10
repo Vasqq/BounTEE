@@ -4,7 +4,7 @@
 // deployment setting, never a control on the page. Only server code imports this: the
 // browser gets what it needs (an EVM RPC to send a signed pause to) inside the data the
 // server hands it.
-import { ARCHIVAL_RPC, KEYSTORE_API, NEAR_EXPLORER_TX, NEAR_RPC, TX_API } from "@bountee/cli/src/endpoints.ts";
+import { ARCHIVAL_RPC, KEYSTORE_API, NEAR_EXPLORER, NEAR_EXPLORER_TX, NEAR_RPC, TX_API } from "@bountee/cli/src/endpoints.ts";
 import { net, type EvmChain } from "./network.ts";
 
 export type ChainInfo = Omit<EvmChain, "viem" | "browserRpc">;
@@ -28,7 +28,7 @@ export function config() {
     txApi: env("TX_API", TX_API[net.network]),
     /** OutLayer's API, for the winning claim's attestation. */
     outlayerApi: env("OUTLAYER_API", KEYSTORE_API[net.network]),
-    nearExplorer: NEAR_EXPLORER_TX[net.network].replace(/txns\/$/, ""),
+    nearExplorer: NEAR_EXPLORER[net.network],
     nearExplorerTx: NEAR_EXPLORER_TX[net.network],
     contract: env("BOUNTY_CONTRACT", net.bountyContract),
     /** The mainnet demo bounty the landing page tells (ADR-0018), as `<protocol>/<name>`; unset until it is posted. */

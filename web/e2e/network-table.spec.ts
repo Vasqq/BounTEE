@@ -16,7 +16,11 @@ const NEUTRAL_HOSTS = ["api.fontshare.com", "fonts.googleapis.com", "fonts.gstat
 const NETWORK_VALUES: [string, RegExp][] = [
   // Mainnet's and testnet's covered chains, NEAR's Ethereum-compatible chains, Ethereum's.
   ["a chain ID", /(?<![\w.-])(8453|42161|84532|421614|397|398|11155111)(?![\w.-])/g],
+  // The same chains' IDs as hex, as a wallet writes them.
+  ["a chain ID in hex", /\b0x(2105|a4b1|14a34|66eee|18d|18e|aa36a7)\b/gi],
   ["a network host", /https?:\/\/([a-z0-9.-]+)/gi],
+  // A host written without its scheme.
+  ["a bare host", /(?<=["'`\s])([a-z0-9-]+(\.[a-z0-9-]+)*\.(io|org|com|ai|xyz))(?![\w.-])/gi],
   // A named account where text starts (after a quote, a space or a slash, so `s.account.near`
   // is code, not an account), or an implicit one: 64 hex characters.
   ["a NEAR account", /(?<=["'`\s/])[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(near|testnet)(?![\w.-])|(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/g],
@@ -41,7 +45,7 @@ test("D30: web/app, web/components and web/lib name no chain ID, network host, N
     const text = code(readFileSync(join(WEB, file), "utf8"));
     for (const [what, pattern] of NETWORK_VALUES) {
       for (const m of text.matchAll(pattern)) {
-        if (what === "a network host" && NEUTRAL_HOSTS.includes(m[1]!.toLowerCase())) continue;
+        if ((what === "a network host" || what === "a bare host") && NEUTRAL_HOSTS.includes(m[1]!.toLowerCase())) continue;
         found.push(`${file}: ${what}, ${m[0]}`);
       }
     }
@@ -53,8 +57,9 @@ test("D30: the grep finds what it looks for, in the table and the listed excepti
   // A check that can't fail proves nothing: the table holds a value of every kind, and the
   // landing script names mainnet's explorers and contract.
   const table = code(readFileSync(join(WEB, TABLE), "utf8"));
-  for (const [what, pattern] of NETWORK_VALUES) expect([...table.matchAll(pattern)].length, what).toBeGreaterThan(0);
+  const finds = (text: string, kind: string) => [...text.matchAll(NETWORK_VALUES.find(([what]) => what === kind)![1])].length;
+  for (const kind of ["a chain ID", "a network host", "a NEAR account", "an MPC root key"]) expect(finds(table, kind), kind).toBeGreaterThan(0);
   const landing = code(readFileSync(join(WEB, EXCEPTIONS[0]!), "utf8"));
-  expect([...landing.matchAll(NETWORK_VALUES[1]![1])].length).toBeGreaterThan(0);
-  expect([...landing.matchAll(NETWORK_VALUES[2]![1])].length).toBeGreaterThan(0);
+  expect(finds(landing, "a network host")).toBeGreaterThan(0);
+  expect(finds(landing, "a NEAR account")).toBeGreaterThan(0);
 });

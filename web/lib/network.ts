@@ -16,6 +16,7 @@
 // form Next inlines into the browser bundle; each still wins over the table. The server's
 // overrides are read at request time in lib/config.ts.
 import type { Network } from "@bountee/cli/src/endpoints.ts";
+import type { BountyId } from "@bountee/formats";
 import { pauseRole } from "@bountee/formats";
 import type { Chain } from "viem";
 import { arbitrum, base } from "viem/chains";
@@ -101,4 +102,4 @@ export type CoveredChainId = (typeof net.chains)[number]["id"];
 export const coveredChain = (id: number): (typeof net.chains)[number] | undefined => net.chains.find((c) => c.id === id);
 
 /** The command that checks a bounty from the terminal: the command-line tool needs the contract named. */
-export const verifyCommand = (bounty: string, contract: string) => `bountee verify ${bounty} --contract ${contract} --network ${net.network}`;
+export const verifyCommand = (id: BountyId, contract: string) => `bountee verify ${id.protocol}/${id.name} --contract ${contract} --network ${net.network}`;

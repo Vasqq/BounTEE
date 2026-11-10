@@ -22,6 +22,8 @@ export const nearEvm = defineChain({
   blockExplorers: { default: { name: "NEAR Explorer", url: net.nearEvm.explorer } },
 });
 
+// wagmi types its chains as a non-empty tuple and its transports by those chains' IDs: built
+// from the table, both need saying so.
 const [first, ...rest] = net.chains.map((c) => c.viem);
 
 export const wagmiConfig = createConfig({
