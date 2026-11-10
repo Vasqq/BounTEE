@@ -3280,8 +3280,8 @@ impl Sandbox {
     }
 
     /// The gas the command-line tool attaches to a claim with `args` (`claimGas` in
-    /// `cli/src/claim-flow.ts`): `fees()`'s formula on an upper bound of the job input, its
-    /// proofs, header and block plus 4096 bytes (`claimInputBytes`).
+    /// `cli/src/claim-flow.ts`): `fees()`'s formula on the job input built as the contract
+    /// builds it, plus 64 bytes (`claimInputBytes`).
     async fn tool_claim_gas(&self, args: &Value) -> anyhow::Result<Gas> {
         let fees = self.view("fees", json!({})).await?;
         let num = |k: &str| -> u64 {
@@ -3293,10 +3293,19 @@ impl Sandbox {
             .as_array()
             .unwrap()
             .len() as u64;
-        let input = args["proofs"].as_str().unwrap().len()
-            + args["header"].as_str().unwrap().len()
-            + args["block"].to_string().len()
-            + 4096;
+        let rules = self.bounty(name).await?["rules"].clone();
+        let input = json!({ "judge_claim": {
+            "rules": rules,
+            "bounty": args["bounty"],
+            "whitehat": self.whitehat.id(),
+            "block": args["block"],
+            "header": args["header"],
+            "proofs_json": args["proofs"],
+            "submitted_at_ns": "0".repeat(19),
+        } })
+        .to_string()
+        .len()
+            + 64;
         Ok(Gas::from_gas(
             num("claim_gas_base")
                 + covered * num("claim_gas_per_covered_contract")
@@ -4273,12 +4282,19 @@ async fn r10_2_r11_a_claim_whose_callback_never_lands_stops_blocking_the_withdra
 // schedule (it matched mainnet's gas to 1% on that claim). It misses real OutLayer's gas,
 // which its stand-in barely spends; the testnet rehearsal covers that.
 
-/// Proofs of about `kb` KB: one account with as many 532-byte trie nodes as fit.
+/// Proofs of about `kb` KB shaped like a chain's: many accounts, each with nine 532-byte trie
+/// nodes, so their quotes, escaped where the job input embeds them, add up as on chain.
 fn proofs_of(kb: usize) -> String {
-    let nodes = kb * 1024 / 1069;
-    let proof = json!({ "address": "0x00000000000000000000000000000000000000aa",
-        "account_proof": vec![format!("0x{}", "ab".repeat(532)); nodes] });
-    Value::Array(vec![proof]).to_string()
+    let proof = |i: usize| {
+        json!({ "address": format!("0x{i:040x}"), "balance": "0x0", "nonce": "0x0",
+            "code_hash": format!("0x{}", "c5".repeat(32)), "storage_hash": format!("0x{}", "56".repeat(32)),
+            "account_proof": vec![format!("0x{}", "ab".repeat(532)); 9], "storage_proof": [] })
+    };
+    let mut proofs = vec![];
+    while Value::Array(proofs.clone()).to_string().len() < kb * 1024 {
+        proofs.push(proof(proofs.len()));
+    }
+    Value::Array(proofs).to_string()
 }
 
 /// The bounty the size tests claim on: live, covering one contract on Base Sepolia and one

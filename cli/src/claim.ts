@@ -164,11 +164,13 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
 
   // A dry run only seals, filing and spending nothing, so it reads no bounty: its rules, and so the covered chains, stay unread.
   let rules: Rules | undefined;
+  let liveRules: unknown;
   if (!args.includes("--dry-run")) {
     const live = await near.view<{ state: string; rules: unknown } | null>(contract, "bounty", { id: bounty });
     if (!live) throw new Error(`no bounty ${bountyText} on ${contract}`);
     if (live.state !== "live") throw new Error(`bounty ${bountyText} is ${live.state}: it takes no claims${live.state === "paid" || live.state === "signing" || live.state === "paying" ? " (it has been won)" : ""}`);
     rules = parseRules(live.rules);
+    liveRules = live.rules;
   }
 
   let exploit: Exploit;
@@ -214,7 +216,7 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
 
   const proofsJson = JSON.stringify(proofs);
   const fees = await near.view(contract, "fees");
-  const inputBytes = claimInputBytes(proofsJson.length, header.length, JSON.stringify(block).length);
+  const inputBytes = claimInputBytes({ rules: liveRules, bounty, whitehat, block, header, proofsJson });
   const cost = claimCost(fees, inputBytes, sealed.length);
   const gas = claimGas(fees, inputBytes, rules!.covered_contracts.length);
   const submitArgs = { bounty, block, header, proofs: proofsJson, sealed_exploit: sealed };
@@ -277,9 +279,9 @@ async function retryClaim(args: string[], c: Context & { given?: BountyId }, onS
   const out: ClaimResult = { bounty_contract: c.contract, retried: true, claim_id: claimId, block: filed.block };
   const fees = await c.near.view(c.contract, "fees");
   // The new job's input is the claim's own; no secret is stored again.
-  const inputBytes = claimInputBytes(proofs.length, filed.header.length, JSON.stringify(filed.block).length);
-  const cost = claimCost(fees, inputBytes, 0);
   const live = await c.near.view<{ rules: Rules }>(c.contract, "bounty", { id: filed.bounty });
+  const inputBytes = claimInputBytes({ rules: live.rules, bounty: filed.bounty, whitehat: c.whitehat, block: filed.block, header: filed.header, proofsJson: proofs });
+  const cost = claimCost(fees, inputBytes, 0);
   const gas = claimGas(fees, inputBytes, live.rules.covered_contracts.length);
   const retryArgs = { claim_id: claimId, proofs };
   await checkClaimNear(c.near, c.contract, c.whitehat, cost, { method: "retry_claim", gas, deposit: 0n, argsBytes: JSON.stringify(retryArgs).length });
