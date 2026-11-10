@@ -14,6 +14,12 @@
 
 /* nav: the current page's link turns ink */
 .nav ul a[aria-current="page"] { color: var(--ink); }
+/* the testnet badge beside the wordmark (D31): a chip (hover as a link chip), set in label-sm since it is a word, not data */
+.nav .brand { display: inline-flex; align-items: center; gap: 12px; flex: none; }
+.chip.net-badge { font: 500 var(--fs-sm)/1 var(--text); }
+/* the mainnet bounty list's link to the testnet site (D31): one quiet line under the list, as the footer's links */
+.cross-site { display: inline-block; margin-top: 40px; font-size: var(--fs-sm); color: var(--ink-2); text-decoration: none; transition: color var(--t1) var(--ease); }
+.cross-site:hover { color: var(--ink); }
 /* the app bar keeps its links at every width (DESIGN.md, Layout: Extension) */
 .nav ul.app-links { display: flex; }
 @media (max-width: 560px) { .nav ul.app-links { gap: 18px; } .nav .wrap { gap: 16px; } }

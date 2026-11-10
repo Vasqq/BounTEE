@@ -6,6 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { decodeFunctionData, keccak256, parseAbi, toHex } from "viem";
 import { pauseRole } from "@bountee/formats";
 import { currentWorld, emptyWorld, fundNear, NETWORKS, post, postingWorld, setWorld, VAULT_ARB, VAULT_BASE, win, type BountyId } from "./stand-ins/world.ts";
+import { SITES } from "./stand-ins/sites.ts";
 import { addressOf, chainsAsked, exploitPublicKey, metamask, PROTOCOL_KEY, walletSent } from "./stand-ins/wallet.ts";
 
 const T = NETWORKS.testnet;
@@ -14,8 +15,11 @@ const ACCOUNT = addressOf(PROTOCOL_KEY).toLowerCase();
 const NAME = "vault-v2";
 /** The pause-role address NEAR testnet's MPC network signs this bounty's pauses from (D25), as the formats derive it. */
 const PAUSE_ROLE = pauseRole.address(pauseRole.TESTNET_ROOT_PUBLIC_KEY, T.contract, { protocol: ACCOUNT, name: NAME });
-/** Every host a testnet page may link to: testnet's explorers, NEAR's faucet, and the source repository. */
-const TESTNET_HOSTS = ["testnet.nearblocks.io", "sepolia.basescan.org", "sepolia.arbiscan.io", "eth-explorer-testnet.near.org", "docs.near.org", "github.com"];
+/**
+ * Every host a testnet page may link to: testnet's explorers, NEAR's and Circle's faucets, the
+ * source repository, and the mainnet site, which the badge and the nav's Verify link go to (D31).
+ */
+const TESTNET_HOSTS = ["testnet.nearblocks.io", "sepolia.basescan.org", "sepolia.arbiscan.io", "eth-explorer-testnet.near.org", "docs.near.org", "faucet.circle.com", "github.com", new URL(SITES.mainnet).host];
 const hex = (id: number) => `0x${id.toString(16)}`;
 
 const step = (page: Page, n: number) => page.getByRole("region", { name: new RegExp(`^${n}\\. `) });
@@ -183,6 +187,17 @@ test("D30: on testnet the posting flow refuses a covered contract on Base or Arb
   expect((await chainsAsked(page)).some((a) => [hex(M.base), hex(M.arbitrum)].includes(a.chainId))).toBe(false);
 });
 
+test("D32: on testnet the posting flow links to Circle's faucet beside the bounty's USDC", async ({ page }) => {
+  await metamask(page, PROTOCOL_KEY, { network: "testnet" });
+  await setWorld(page, postingWorld(ACCOUNT, { onboarded: true, usdc: "0", network: "testnet" }));
+  await page.goto("/post");
+  await fillRules(page);
+  await connect(page);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(state(page, /Bounty/)).toHaveText("0 received");
+  await expect(item(page, /Bounty/).getByRole("link", { name: "Get test USDC from Circle's faucet" })).toHaveAttribute("href", "https://faucet.circle.com");
+});
+
 const ID: BountyId = { protocol: "brassmoor-lend.testnet", name: "pool" };
 
 test("D30: on testnet every link on the bounty list and a bounty page is a testnet explorer's, the Sepolia chains show Base's and Arbitrum's marks, and Verify names testnet", async ({ page }) => {
@@ -211,6 +226,17 @@ test("D30: on testnet every link on the bounty list and a bounty page is a testn
   const hosts = await linkHosts(page);
   expect(hosts).toContain("testnet.nearblocks.io");
   for (const host of hosts) expect(TESTNET_HOSTS, host).toContain(host);
+});
+
+test("D27, D31: on testnet a bounty page's rules read as mainnet's: a theft proven on any covered chain wins", async ({ page }) => {
+  const w = emptyWorld("testnet");
+  post(w, ID);
+  await setWorld(page, w);
+  await page.goto(`/bounties/${ID.protocol}/${ID.name}`);
+  const rules = page.getByRole("region", { name: "Rules" });
+  await expect(rules).toContainText("A theft proven on any covered chain wins: the Enclave replays each claim against that chain's state at a block at most 5 minutes old, under the judge build fixed at posting.");
+  await expect(rules).toContainText("Covers 2 contracts on Base Sepolia and Arbitrum Sepolia. A winning claim pauses every one of them.");
+  await expect(rules).not.toContainText(/undefined|chain \d/);
 });
 
 test("D30: on testnet /api/demo answers 404: the mainnet demo story is never read", async ({ page }) => {

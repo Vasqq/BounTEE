@@ -6,7 +6,9 @@
 //
 // It runs in the browser as well as on the server, so it holds only what the browser needs,
 // and only this build's network: the browser bundle carries no other network's value
-// (e2e/landing.spec.ts checks for testnet's). The NEAR endpoints only the server reads
+// (e2e/landing.spec.ts checks for testnet's). The one exception is the other site's address
+// (`mainnetSite` on testnet, `trySite` on mainnet), which D31 links to; the wording around
+// those links is rendered on the server (components/AppNav.tsx, components/TryTestnet.tsx). The NEAR endpoints only the server reads
 // (RPC, archival RPC, FastNEAR's explorer API, OutLayer's API, the NEAR explorer) are the
 // command-line tool's own (cli/src/endpoints.ts), looked up by this table's `network` in
 // lib/config.ts, so the two can't drift. The EVM chains are listed here, since the tool's
@@ -58,6 +60,19 @@ interface Row {
   nearEvm: { id: number; name: string; rpc: string; browserRpc: string | undefined; explorer: string };
   /** NEAR's faucet, linked beside the NEAR the posting flow asks for (D17): testnet's, or `NEXT_PUBLIC_NEAR_FAUCET`. */
   nearFaucet: string | undefined;
+  /** Circle's faucet for test USDC, linked beside the Protocol's USDC balance (D32): testnet's only. */
+  usdcFaucet: string | undefined;
+  /**
+   * The mainnet site (D31), which a testnet build's badge and nav Verify link go to
+   * (`NEXT_PUBLIC_MAINNET_SITE`), linked only when set. Mainnet's row has none: its own pages are it.
+   */
+  mainnetSite: string | undefined;
+  /**
+   * The site to try BounTEE on, the testnet site (D31), which a mainnet build's bounty list and
+   * landing footer link to (`NEXT_PUBLIC_TESTNET_SITE`), linked only when set. Named without the
+   * network, since the mainnet bundle carries no testnet word but that link's. Testnet's row has none.
+   */
+  trySite: string | undefined;
 }
 
 const MAINNET = {
@@ -98,6 +113,9 @@ const MAINNET = {
     explorer: "https://eth-explorer.near.org",
   },
   nearFaucet: process.env.NEXT_PUBLIC_NEAR_FAUCET || undefined,
+  usdcFaucet: undefined,
+  mainnetSite: undefined,
+  trySite: process.env.NEXT_PUBLIC_TESTNET_SITE || undefined,
 } as const satisfies Row;
 
 const TESTNET = {
@@ -141,6 +159,9 @@ const TESTNET = {
     explorer: "https://eth-explorer-testnet.near.org",
   },
   nearFaucet: process.env.NEXT_PUBLIC_NEAR_FAUCET || "https://docs.near.org/getting-started/faucet",
+  usdcFaucet: "https://faucet.circle.com",
+  mainnetSite: process.env.NEXT_PUBLIC_MAINNET_SITE || undefined,
+  trySite: undefined,
 } as const satisfies Row;
 
 /**

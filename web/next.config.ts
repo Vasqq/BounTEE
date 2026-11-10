@@ -13,8 +13,13 @@ const config: NextConfig = {
   // app. The server runs the command-line tool's own verify checks (lib/verify.ts).
   transpilePackages: ["@bountee/formats", "@bountee/cli"],
   // Always set, so Next inlines it into every bundle (it leaves an unset variable to be read at
-  // run time) and the build drops the other network's row.
-  env: { NEXT_PUBLIC_NETWORK: network || "mainnet" },
+  // run time) and the build drops the other network's row. The other site's address (D31) is
+  // always set too, empty when unset, so an unset one leaves no lookup naming the other network.
+  env: {
+    NEXT_PUBLIC_NETWORK: network || "mainnet",
+    NEXT_PUBLIC_MAINNET_SITE: process.env.NEXT_PUBLIC_MAINNET_SITE ?? "",
+    NEXT_PUBLIC_TESTNET_SITE: process.env.NEXT_PUBLIC_TESTNET_SITE ?? "",
+  },
   // Where the build goes: the test suite builds mainnet and testnet side by side (playwright.config.ts).
   distDir: process.env.NEXT_DIST_DIR || ".next",
 };

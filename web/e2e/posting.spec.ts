@@ -186,6 +186,17 @@ test("D20: a wallet whose signatures differ falls back to a saved key file", asy
   await expect(state(page, /Your exploit key/)).toHaveText("signed");
 });
 
+test("D32: on mainnet the posting flow asks for the bounty's USDC with no faucet link", async ({ page }) => {
+  await metamask(page, PROTOCOL_KEY);
+  await setWorld(page, postingWorld(ACCOUNT, { onboarded: true, usdc: "0" }));
+  await page.goto("/post");
+  await fillRules(page);
+  await connect(page);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(state(page, /Bounty/)).toHaveText("0 received");
+  await expect(page.getByRole("link", { name: /faucet/i })).toHaveCount(0);
+});
+
 test("R4.12: the posting flow states the coverage limit @phone", async ({ page }) => {
   await metamask(page, PROTOCOL_KEY);
   await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));

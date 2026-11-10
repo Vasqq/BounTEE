@@ -284,12 +284,10 @@ function RulesStep(p: { basics?: PostingBasics; s?: PostingStatus; account?: str
   // can't cover a contract on another network's chain (D30).
   const chains = net.chains;
   const setCovered = (i: number, patch: Partial<Draft["covered"][number]>) => set({ covered: d.covered.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
-  const coveredChains = [...new Set(d.covered.map((c) => c.chainId))];
   // A typo shows once its field has been left.
   const [seen, setSeen] = useState<Record<string, boolean>>({});
   const err = (k: string) => (seen[k] ? p.problems[k] : undefined);
   const touch = (k: string) => () => setSeen((x) => ({ ...x, [k]: true }));
-  const go = () => (coveredChains.includes(d.proofChain) ? p.next() : (set({ proofChain: coveredChains[0]! }), p.next()));
   // Continue stays pressable: a disabled button can't say what's missing, so a click shows every
   // gap and moves to the first.
   const showGaps = () => {
@@ -336,16 +334,6 @@ function RulesStep(p: { basics?: PostingBasics; s?: PostingStatus; account?: str
             </button>
           )}
         </fieldset>
-        {/* With every contract on one chain the proof chain is that chain, so it's only asked once there are two (D1). */}
-        {coveredChains.length > 1 && (
-          <ChainSelect
-            label="Where should Whitehats prove the theft?"
-            help="Only USDC stolen here counts. A win still pauses every chain."
-            value={coveredChains.includes(d.proofChain) ? d.proofChain : coveredChains[0]!}
-            options={coveredChains.map((id) => ({ id, name: chains.find((c) => c.id === id)?.name ?? String(id) }))}
-            onChange={(proofChain) => set({ proofChain })}
-          />
-        )}
         <div className="cols">
           <Field label="Bounty amount" error={err("amount")} help={<>Paid in full to the <Hint tip="If nobody proves one by the end date, you take the bounty back.">first proven theft</Hint>.</>}>
             <span className="suffixed">
@@ -368,7 +356,7 @@ function RulesStep(p: { basics?: PostingBasics; s?: PostingStatus; account?: str
           </Field>
         </div>
       </div>
-      <Next ok next={() => (p.ok ? go() : showGaps())} />
+      <Next ok next={() => (p.ok ? p.next() : showGaps())} />
     </Step>
   );
 }
@@ -597,6 +585,15 @@ function FundStep({ s, account, draft, done, next }: { s?: PostingStatus; accoun
                 <p>
                   <Hint tip={`Circle's native USDC on NEAR, token ${s.usdc}. When withdrawing from an exchange, pick NEAR as the network.`}>USDC on NEAR</Hint>, locked in the bounty when
                   you post.
+                  {/* D32: Circle's faucet for test USDC, on testnet only (the network table). */}
+                  {net.usdcFaucet && (
+                    <>
+                      {" "}
+                      <a href={net.usdcFaucet} target="_blank" rel="noopener">
+                        Get test USDC from Circle&apos;s faucet
+                      </a>
+                    </>
+                  )}
                 </p>
               )}
             </Item>
@@ -709,8 +706,6 @@ function PostStep(p: {
           amount: `${usdcText(bounty, s.usdcDecimals)} USDC`,
           minimumTheft: `${usdcText(bountyUnits({ ...draft, amount: draft.minimum }, s.usdcDecimals) ?? 0n, s.usdcDecimals)} USDC`,
           covered: draft.covered.map((c) => ({ chain: coveredChain(c.chainId)?.name ?? String(c.chainId), address: c.address.toLowerCase() })),
-          // The rules name no proof chain any more (D27); until #65 drops the field, the read-back names the one picked.
-          proofChain: coveredChain(draft.proofChain)?.name ?? String(draft.proofChain),
           recencyMinutes: s.fixed.recency_limit_secs / 60,
           ends: draft.endDate,
           disclosureDelayDays: Number(draft.delay),

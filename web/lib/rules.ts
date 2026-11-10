@@ -7,7 +7,7 @@ export function rulesInPlainEnglish(b: BountyPage): string[] {
   return [
     `Pays ${b.amount} to the first Whitehat whose claim takes at least ${b.minimumTheft} from the covered contracts, valued at the prices fixed at posting.`,
     `Covers ${plural(b.covered.length, "contract")} on ${chains}. A winning claim pauses every one of them.`,
-    `The Enclave replays each claim against ${b.proofChain}'s state at a block at most ${plural(b.recencyMinutes, "minute")} old, under the judge build fixed at posting.`,
+    `A theft proven on any covered chain wins: the Enclave replays each claim against that chain's state at a block at most ${plural(b.recencyMinutes, "minute")} old, under the judge build fixed at posting.`,
     `Takes claims until ${b.ends}. The winning exploit is published ${plural(b.disclosureDelayDays, "day")} after the payout.`,
   ];
 }

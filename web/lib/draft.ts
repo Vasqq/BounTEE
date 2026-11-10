@@ -12,14 +12,13 @@ export interface Draft {
   /** The bounty name the label becomes (`slug`), the ID's second half (D25). */
   name: string;
   covered: { chainId: number; address: string }[];
-  proofChain: number;
   amount: string;
   minimum: string;
   endDate: string;
   delay: string;
 }
 
-export const emptyDraft = (): Draft => ({ label: "", name: "", covered: [{ chainId: net.chains[0].id, address: "" }], proofChain: net.chains[0].id, amount: "", minimum: "1", endDate: "", delay: "30" });
+export const emptyDraft = (): Draft => ({ label: "", name: "", covered: [{ chainId: net.chains[0].id, address: "" }], amount: "", minimum: "1", endDate: "", delay: "30" });
 
 /**
  * Any words as a bounty name, as the contract's rule has it: a–z, 0–9 and single dashes, at
