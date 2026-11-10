@@ -174,6 +174,21 @@ test("D20: a wallet whose signatures differ falls back to a saved key file", asy
   await expect(step(page, 6)).toContainText(/x25519:[1-9A-HJ-NP-Za-km-z]{43,44}/);
 });
 
+test("D32: on mainnet the posting flow shows the Protocol's USDC balance with no faucet link", async ({ page }) => {
+  await metamask(page, PROTOCOL_KEY);
+  await setWorld(page, postingWorld(ACCOUNT, { onboarded: true, usdc: "0" }));
+  await connect(page);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await fillRules(page);
+  const dock = page.getByRole("navigation", { name: "Posting steps" });
+  await dock.getByRole("button", { name: "6. Exploit key" }).click();
+  await page.getByRole("button", { name: "Sign with MetaMask" }).click();
+  await expect(step(page, 6)).toContainText(/x25519:/);
+  await dock.getByRole("button", { name: "7. Post" }).click();
+  await expect(step(page, 7)).toContainText("Your account holds 0 USDC on NEAR; the bounty needs more.");
+  await expect(page.getByRole("link", { name: /faucet/i })).toHaveCount(0);
+});
+
 test("R4.12: the posting flow states the coverage limit @phone", async ({ page }) => {
   await metamask(page, PROTOCOL_KEY);
   await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));

@@ -6,6 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { decodeFunctionData, keccak256, parseAbi, toHex } from "viem";
 import { pauseRole } from "@bountee/formats";
 import { currentWorld, emptyWorld, fundNear, NETWORKS, post, postingWorld, setWorld, VAULT_ARB, VAULT_BASE, win, type BountyId } from "./stand-ins/world.ts";
+import { SITES } from "./stand-ins/sites.ts";
 import { addressOf, chainsAsked, exploitPublicKey, metamask, PROTOCOL_KEY, walletSent } from "./stand-ins/wallet.ts";
 
 const T = NETWORKS.testnet;
@@ -14,8 +15,11 @@ const ACCOUNT = addressOf(PROTOCOL_KEY).toLowerCase();
 const NAME = "vault-v2";
 /** The pause-role address NEAR testnet's MPC network signs this bounty's pauses from (D25), as the formats derive it. */
 const PAUSE_ROLE = pauseRole.address(pauseRole.TESTNET_ROOT_PUBLIC_KEY, T.contract, { protocol: ACCOUNT, name: NAME });
-/** Every host a testnet page may link to: testnet's explorers, NEAR's faucet, and the source repository. */
-const TESTNET_HOSTS = ["testnet.nearblocks.io", "sepolia.basescan.org", "sepolia.arbiscan.io", "eth-explorer-testnet.near.org", "docs.near.org", "github.com"];
+/**
+ * Every host a testnet page may link to: testnet's explorers, NEAR's and Circle's faucets, the
+ * source repository, and the mainnet site, which the badge and the nav's Verify link go to (D31).
+ */
+const TESTNET_HOSTS = ["testnet.nearblocks.io", "sepolia.basescan.org", "sepolia.arbiscan.io", "eth-explorer-testnet.near.org", "docs.near.org", "faucet.circle.com", "github.com", new URL(SITES.mainnet).host];
 const hex = (id: number) => `0x${id.toString(16)}`;
 
 const step = (page: Page, n: number) => page.getByRole("region", { name: new RegExp(`^${n}\\. `) });
@@ -175,6 +179,23 @@ test("D30: on testnet the posting flow refuses a covered contract on Base or Arb
   }
   expect(await walletSent(page)).toEqual({});
   expect((await chainsAsked(page)).some((a) => [hex(M.base), hex(M.arbitrum)].includes(a.chainId))).toBe(false);
+});
+
+test("D32: on testnet the posting flow links to Circle's faucet beside the Protocol's USDC balance", async ({ page }) => {
+  await metamask(page, PROTOCOL_KEY, { network: "testnet" });
+  await setWorld(page, postingWorld(ACCOUNT, { onboarded: true, usdc: "0", network: "testnet" }));
+  await page.goto("/post");
+  await page.getByRole("button", { name: "Connect MetaMask" }).click();
+  await expect(page.getByText(ACCOUNT).first()).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await fillRules(page);
+  const dock = page.getByRole("navigation", { name: "Posting steps" });
+  await dock.getByRole("button", { name: "6. Exploit key" }).click();
+  await page.getByRole("button", { name: "Sign with MetaMask" }).click();
+  await expect(step(page, 6)).toContainText(/x25519:/);
+  await dock.getByRole("button", { name: "7. Post" }).click();
+  const balance = step(page, 7).getByText("Your account holds 0 USDC on NEAR; the bounty needs more.");
+  await expect(balance.getByRole("link", { name: "Get test USDC from Circle's faucet" })).toHaveAttribute("href", "https://faucet.circle.com");
 });
 
 const ID: BountyId = { protocol: "brassmoor-lend.testnet", name: "pool" };

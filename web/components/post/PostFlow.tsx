@@ -606,7 +606,20 @@ function PostStep({ s, account, draft, exploitKey, ready }: { s?: PostingStatus;
               <p>
                 Sends {rules ? `${formatUnits(BigInt(rules.bounty_amount), s!.usdcDecimals)} USDC` : "the bounty amount"} with the rules. The bounty goes live once the posting check confirms every grant and the pause gas.
               </p>
-              {usdcShort && <p className="ink">Your account holds {formatUnits(BigInt(s!.account.usdc), s!.usdcDecimals)} USDC on NEAR; the bounty needs more.</p>}
+              {usdcShort && (
+                <p className="ink">
+                  Your account holds {formatUnits(BigInt(s!.account.usdc), s!.usdcDecimals)} USDC on NEAR; the bounty needs more.
+                  {/* D32: Circle's faucet for test USDC, on testnet only (the network table). */}
+                  {net.usdcFaucet && (
+                    <>
+                      {" "}
+                      <a href={net.usdcFaucet} target="_blank" rel="noopener">
+                        Get test USDC from Circle&apos;s faucet
+                      </a>
+                    </>
+                  )}
+                </p>
+              )}
               <div className="send">
                 <button type="button" className={ink(prepaid)} onClick={() => post.mutate()} disabled={!ready || !prepaid || !rules || usdcShort || post.isPending || post.isSuccess}>
                   {post.isPending ? "Signing" : post.isSuccess ? "Checking" : "Post the bounty"}
