@@ -49,7 +49,10 @@ export const CHAINS: Record<number, Chain> = {
     names: ["base"],
     rpcs: ["https://mainnet.base.org", "https://8453.rpc.thirdweb.com"],
     // Not mainnet.base.org: it answers "no state found" for a proof 100 blocks back (Nov 5).
-    proofRpcs: ["https://8453.rpc.thirdweb.com", "https://base.drpc.org"],
+    // dRPC first: a fork through it took 5-6 s on Nov 10, through thirdweb 37-52 s, and the claim's
+    // proofs must be fetched and filed inside the 300 s recency limit. Both free tiers rate-limit
+    // an IP that forks Base many times in a row (HTTP 429), so either one may be the one answering.
+    proofRpcs: ["https://base.drpc.org", "https://8453.rpc.thirdweb.com"],
     explorerTx: "https://basescan.org/tx/",
     judgeRpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co"],
     usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",

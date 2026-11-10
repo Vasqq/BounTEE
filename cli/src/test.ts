@@ -27,7 +27,7 @@ import type { Near } from "./near.ts";
 import { collectReplay, exploitFromBroadcast, rpc, runJudge } from "./proofs.ts";
 
 /** How far behind the head the claim's block is: a few seconds, since a public RPC can fail on the very latest. */
-const BLOCKS_BEHIND = 3;
+export const BLOCKS_BEHIND = 3;
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 

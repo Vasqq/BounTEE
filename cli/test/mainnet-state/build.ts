@@ -4,8 +4,9 @@
 //   node cli/test/mainnet-state/build.ts [--out <dir>] [--name <bounty name>]
 //
 // Reads Base and Arbitrum One from public RPCs (read-only) and writes, per chain, an anvil state
-// file and a manifest (`<dir>/manifest.json`) that the seam J posting check and #59's claim
-// rehearsal load into a plain, non-fork anvil.
+// file and a manifest (`<dir>/manifest.json`) that the seam J posting check (R7.6, R12.1, R12.2:
+// judge/tests/seam_j_mainnet_state.rs) and the claim rehearsal (#59, #35) load into a plain,
+// non-fork anvil.
 //
 // Why not just fork: blocks a forked anvil mines carry an all-zero state root, and the judge
 // checks every proof against the header's state root first, so every claim on a fork comes back
@@ -13,20 +14,20 @@
 // warm-up or an eth_call leaves nothing in it), so the copy is built explicitly:
 //   1. Fork the chain a few blocks behind its head.
 //   2. Give a local deployer the vault's USDC (Circle's), and fund the bounty's pause-role
-//      address (the mainnet MPC derivation for demo.bountee.near/<name> on bounty.bountee.near).
+//      address (the mainnet MPC derivation for demo.bountee.near/<name> on bounty2.bountee.near).
 //   3. Deploy the vault and deposit its USDC with demo/script/Deploy.s.sol's own transactions,
 //      each sent with its EIP-2930 access list recorded first (eth_createAccessList: every
 //      account and slot the EVM touches, read or written).
-//   4. On Base, the chain the claims are proven on, record the same for the two claims (the
-//      cheat, HonestUser.s.sol, buying through Uniswap V2; and the sealed exploit,
-//      SEALED_EXPLOIT) from a fresh account holding the bounty's native seed, then roll them
-//      back.
+//   4. Record the same for the claims proven on each chain (ADR-0020), each from a fresh
+//      account holding the bounty's native seed, then roll them back: on Base the cheat
+//      (HonestUser.s.sol, buying through Uniswap V2) and the sealed exploit (SEALED_EXPLOIT);
+//      on Arbitrum One the sealed exploit, since the agent may win on either chain.
 //   5. Write every recorded account (code, balance, nonce) and slot back onto the fork with its
 //      current value, which puts it in the fork's own state; dump that.
 //   On each chain, before the claims, the drain bot's fork test runs against this vault.
 //   6. Load the dump into a plain anvil with the chain's ID and hardfork and check its blocks'
 //      state roots are real: non-zero, and the root `eth_getProof` proves against.
-// Rebuilding the copy changes it, so #59's claim rehearsal (mainnet-state-claims.test.ts) is
+// Rebuilding the copy changes it, so the claim rehearsal (mainnet-state-claims.test.ts) is
 // rerun on each rebuild: it is what shows the claims replay on the copy.
 // It also records the deploy gas against the preflight's budget (DEMO_DEPLOY_GAS): measured on
 // Base's fork; on Arbitrum One the fork's figure plus the L1 part anvil leaves out, from the real
@@ -34,7 +35,7 @@
 // `eth_estimateGas` for the vault's creation.
 //
 // Needs anvil, forge and cast, and SEALED_EXPLOIT (the sealed exploit script's path, never in
-// this repo) for Base's claim reads. Spends nothing: every transaction runs on a local fork.
+// this repo) for the win's reads on both chains. Spends nothing: every transaction runs on a local fork.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -55,8 +56,9 @@ const arg = (name: string) => {
   return i >= 0 ? process.argv[i + 1] : undefined;
 };
 const OUT = resolve(arg("out") ?? join(repo, ".bountee/mainnet-state"));
-const BOUNTY: BountyId = { protocol: "demo.bountee.near", name: arg("name") ?? "demo-mainnet-state" };
-const CONTRACT = "bounty.bountee.near";
+/** The demo bounty as #35 posts it (`--name` overrides): its name fixes the pause-role address. */
+const BOUNTY: BountyId = { protocol: "demo.bountee.near", name: arg("name") ?? "demo" };
+const CONTRACT = "bounty2.bountee.near";
 /** The mainnet bounty contract's seed for a claim's fresh accounts (`config().seed`). */
 const SEED_NATIVE = 10n ** 18n;
 /** How far behind each chain's head the fork starts, so every public RPC has the block. */
@@ -69,16 +71,21 @@ interface ChainPlan {
   usdc: string;
   /** Circle's FiatToken keeps balances in `balanceAndBlacklistStates`, slot 9. */
   balanceSlot: bigint;
-  claims: boolean;
+  /** The claims proven on this chain whose reads go into the copy. */
+  claims: ("cheat" | "win")[];
 }
 const CHAINS: ChainPlan[] = [
-  { id: 8453, name: "Base", rpc: process.env.BASE_RPC ?? "https://mainnet.base.org", usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", balanceSlot: 9n, claims: true },
-  { id: 42161, name: "Arbitrum One", rpc: process.env.ARBITRUM_RPC ?? "https://arb1.arbitrum.io/rpc", usdc: "0xaf88d065e77c8cc2239327c5edb3a432268e5831", balanceSlot: 9n, claims: false },
+  { id: 8453, name: "Base", rpc: process.env.BASE_RPC ?? "https://mainnet.base.org", usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", balanceSlot: 9n, claims: ["cheat", "win"] },
+  { id: 42161, name: "Arbitrum One", rpc: process.env.ARBITRUM_RPC ?? "https://arb1.arbitrum.io/rpc", usdc: "0xaf88d065e77c8cc2239327c5edb3a432268e5831", balanceSlot: 9n, claims: ["win"] },
 ];
 
-/** The pinned judge's build hash on the mainnet bounty contract (`config().judge_build_hash`). */
-const PINNED_JUDGE = "0x5b3ba1891e81419a5fc398364e36c699a40c2ec7bce675588f06cad72171002d";
-/** Base and Arbitrum One's EVM today (Isthmus and ArbOS 40 both run Prague's opcodes). judge/tests/seam_j_mainnet_state.rs loads with the same. */
+/** The judge build bounty2.bountee.near pins: `bountee build --contract bounty2.bountee.near --rev e472404` (R15.2). */
+const PINNED_JUDGE = "0x497dc9b792d15fc32fdaf56cd663a3f3929c700839c2ecce89e1fa05242f3384";
+/**
+ * The copy's own EVM, for building it and serving its proofs; judge/tests/seam_j_mainnet_state.rs loads with the same.
+ * The judge replays each claim under its chain's compiled profile (ADR-0020: Arbitrum One on Osaka with its 32M gas
+ * cap and randomness 1), not under this, so the copy's hardfork never decides a verdict.
+ */
 const HARDFORK = "prague";
 /** Blocks mined on a loaded state before use: `bountee test` judges a block three behind the head, and the first is the dumped fork block, whose root is zero. */
 const MINED_ON_LOAD = 5; // as judge/tests/seam_j_mainnet_state.rs mines
@@ -134,6 +141,19 @@ function scriptTxs(script: string, url: string, chainId: number, sender: string,
   }));
 }
 
+/**
+ * A sent transaction's receipt. Anvil answers `eth_sendTransaction` before its block is mined, and
+ * on an Arbitrum One fork mining takes long enough that an immediate lookup returns null.
+ */
+async function receiptOf(url: string, hash: string): Promise<{ status: string; gasUsed: string; contractAddress: string | null }> {
+  for (let i = 0; ; i++) {
+    const receipt = await rpc<{ status: string; gasUsed: string; contractAddress: string | null } | null>(url, "eth_getTransactionReceipt", [hash]);
+    if (receipt) return receipt;
+    if (i > 600) throw new Error(`no receipt for ${hash} after 60 s`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 /** Every account and slot the transactions touch, as each is sent in turn on `url`; returns their receipts. */
 async function sendRecording(url: string, txs: Tx[], reads: Map<string, Set<string>>): Promise<{ gasUsed: bigint; created: string | null }[]> {
   const receipts: { gasUsed: bigint; created: string | null }[] = [];
@@ -149,7 +169,7 @@ async function sendRecording(url: string, txs: Tx[], reads: Map<string, Set<stri
     }
     await rpc(url, "anvil_impersonateAccount", [t.from]);
     const hash = await rpc<string>(url, "eth_sendTransaction", [call]);
-    const receipt = await rpc<{ status: string; gasUsed: string; contractAddress: string | null }>(url, "eth_getTransactionReceipt", [hash]);
+    const receipt = await receiptOf(url, hash);
     if (receipt.status !== "0x1") throw new Error(`a transaction reverted on the fork: ${hash}`);
     receipts.push({ gasUsed: BigInt(receipt.gasUsed), created: receipt.contractAddress?.toLowerCase() ?? null });
   }
@@ -226,13 +246,12 @@ async function build(chain: ChainPlan, role: string) {
     const deployTotal = deployed.reduce((a, r) => a + r.gasUsed, 0n) + transferGas + l1Gas;
     if (deployTotal > DEMO_DEPLOY_GAS) throw new Error(`${chain.name}: deploying takes ${deployTotal} gas, over the ${DEMO_DEPLOY_GAS} the preflight budgets`);
 
-    if (chain.claims) {
+    if (chain.claims.length > 0) {
       const snapshot = await rpc<string>(fork.url, "evm_snapshot", []);
       const claimant = () => `0x${randomBytes(20).toString("hex")}`;
-      for (const [script, env] of [
-        [join(demo, "script/HonestUser.s.sol"), { VAULT: vault }],
-        [sealedExploit(), { VAULT: vault }],
-      ] as const) {
+      const scripts = { cheat: join(demo, "script/HonestUser.s.sol"), win: sealedExploit() };
+      for (const script of chain.claims.map((kind) => scripts[kind])) {
+        const env = { VAULT: vault };
         const from = claimant();
         await rpc(fork.url, "anvil_setBalance", [from, hex(SEED_NATIVE)]);
         await sendRecording(fork.url, scriptTxs(script, fork.url, chain.id, from, env), reads);
@@ -306,7 +325,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     exploit_public_key: "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
     judge_build_hash: PINNED_JUDGE,
   };
-  const manifest = { bounty: BOUNTY, contract: CONTRACT, pause_role: role, built_at: new Date().toISOString(), rules, chains };
+  const manifest = { label: "A local copy of mainnet state for analysis, not mainnet evidence (#58, #35)", bounty: BOUNTY, contract: CONTRACT, pause_role: role, built_at: new Date().toISOString(), rules, chains };
   writeFileSync(join(OUT, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(JSON.stringify(manifest));
 }
