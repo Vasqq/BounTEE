@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { KeyPair } from "near-api-js";
 import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import { NEAR_GAS_PRICE, NEAR_PROTOCOL_CONFIG } from "./testnet/stand-ins.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const judgeFixtures = new URL("../../judge/tests/fixtures/", import.meta.url);
@@ -41,6 +42,15 @@ const PAUSES = [
   { chain_id: 421614, contract: "0x" + "bb".repeat(20), nonce: 0, tx: "0x02", tx_hash: "0x" + "b2".repeat(32) },
 ];
 const JUDGE_HASH = "5a".repeat(32);
+/** The bounty's rules as the contract shows them: the paused contracts covered, each chain's native coin listed. */
+const RULES = {
+  ...JSON.parse(readFileSync(new URL("../../judge/tests/fixtures/rules.json", import.meta.url), "utf8")),
+  covered_contracts: PAUSES.map((p) => ({ chain_id: p.chain_id, address: p.contract })),
+  listed_tokens: PAUSES.map((p) => ({ chain_id: p.chain_id, token: "native", price: "1" })),
+  bounty_amount: "100000000",
+};
+/** The anvil fixture's block, relabelled to the bounty's first chain: the stand-in contract checks no header (D1, D26). */
+const onCoveredChain = (block: { chain_id: number }) => ({ ...block, chain_id: PAUSES[0]!.chain_id });
 const PAYS = { outcome: "PAYS", reason: "minimum_theft_reached" };
 
 // ---- The stand-in's world, moved on by `step` -------------------------------------------------
@@ -55,6 +65,8 @@ let world: {
   sealedBeforeFiling?: boolean;
   /** The claim's own transaction didn't pay; RETRY_TX did. */
   paidByRetry?: boolean;
+  /** The Whitehat account's NEAR. */
+  near: bigint;
 };
 
 function reset() {
@@ -62,7 +74,7 @@ function reset() {
     claim: null,
     bounty: {
       id: BOUNTY,
-      rules: { bounty_amount: "100000000", covered_contracts: PAUSES.map((p) => ({ chain_id: p.chain_id, address: p.contract })) },
+      rules: RULES,
       state: "live",
       winning_claim: null,
       signed_pauses: [],
@@ -71,13 +83,14 @@ function reset() {
     },
     verified: {},
     receipts: {},
+    near: 10n ** 25n,
   };
 }
 
 const newClaim = () => ({
   bounty: BOUNTY,
   whitehat: WHITEHAT,
-  block: { number: 8, hash: "0x" + "00".repeat(32) },
+  block: { chain_id: 84532, number: 8, hash: "0x" + "00".repeat(32) },
   header: "0x",
   proofs_sha256: "0x" + "00".repeat(32),
   submitted_at_ns: "1793850608584544984",
@@ -216,6 +229,12 @@ const server = createServer(async (req, res) => {
     }
   } else if (call.method === "query" && call.params.request_type === "view_access_key") {
     return reply({ nonce: 1, permission: "FullAccess", block_height: 1, block_hash: "11111111111111111111111111111111" });
+  } else if (call.method === "query" && call.params.request_type === "view_account") {
+    return reply({ amount: String(world.near), locked: "0", code_hash: "11111111111111111111111111111111", storage_usage: 1, block_height: 1, block_hash: "11111111111111111111111111111111" });
+  } else if (call.method === "EXPERIMENTAL_protocol_config") {
+    return reply(NEAR_PROTOCOL_CONFIG);
+  } else if (call.method === "gas_price") {
+    return reply(NEAR_GAS_PRICE);
   } else if (call.method === "block") {
     return reply({ header: { hash: "11111111111111111111111111111111", height: 1, timestamp: 0 } });
   } else if (call.method === "send_tx" || call.method === "broadcast_tx_commit") {
@@ -319,12 +338,12 @@ test("D23 D24 R14.5: claim shows its own progress live after filing, then gives 
   writeFileSync(join(dir, `${WHITEHAT}.json`), JSON.stringify({ account_id: WHITEHAT, public_key: keystore.getPublicKey().toString(), private_key: keystore.toString() }));
   const state = JSON.parse(readFileSync(new URL("state.json", judgeFixtures), "utf8"));
   writeFileSync(join(dir, "exploit.json"), readFileSync(new URL("exploits/drain.json", judgeFixtures)));
-  writeFileSync(join(dir, "evidence.json"), JSON.stringify({ block: state.block, header: state.header, proofs: state.proofs }));
+  writeFileSync(join(dir, "evidence.json"), JSON.stringify({ block: onCoveredChain(state.block), header: state.header, proofs: state.proofs }));
 
   const r = await follow(
     [
       "claim", "--contract", CONTRACT, "--bounty", `${BOUNTY.protocol}/${BOUNTY.name}`, "--as", WHITEHAT,
-      "--exploit", join(dir, "exploit.json"), "--evidence", join(dir, "evidence.json"),
+      "--exploit", join(dir, "exploit.json"), "--evidence", join(dir, "evidence.json"), "--chain", String(PAUSES[0]!.chain_id),
       "--rpc", `${base}/near`, "--outlayer-api", `${base}/outlayer`, "--tx-api", `${base}/txapi`, "--chain-rpc", `84532=${base}/evm,421614=${base}/evm`,
       "--no-broadcast", "--interval", "0.05", "--json",
     ],
@@ -339,6 +358,32 @@ test("D23 D24 R14.5: claim shows its own progress live after filing, then gives 
   // "Sealed" showed before the claim was filed: filing can take as long as the verdict.
   expect(world.sealedBeforeFiling).toBe(true);
   expectReceipt(out);
+}, 60_000);
+
+/**
+ * R11.1, #57: `submit_claim` attaches 300 Tgas, which NEAR takes up front at its 1e9 yoctoNEAR
+ * minimum price, about 0.3 NEAR. A Whitehat holding less is refused before the claim is filed.
+ */
+test("R11.1: claim refuses, filing nothing, when the Whitehat can't hold submit_claim's gas, and names what to add", async () => {
+  world.near = (3n * 10n ** 24n) / 10n;
+  const dir = mkdtempSync(join(tmpdir(), "bountee-poor-"));
+  writeFileSync(join(dir, `${WHITEHAT}.json`), JSON.stringify({ account_id: WHITEHAT, public_key: keystore.getPublicKey().toString(), private_key: keystore.toString() }));
+  const state = JSON.parse(readFileSync(new URL("state.json", judgeFixtures), "utf8"));
+  writeFileSync(join(dir, "exploit.json"), readFileSync(new URL("exploits/drain.json", judgeFixtures)));
+  writeFileSync(join(dir, "evidence.json"), JSON.stringify({ block: onCoveredChain(state.block), header: state.header, proofs: state.proofs }));
+  const r = await follow(
+    [
+      "claim", "--contract", CONTRACT, "--bounty", `${BOUNTY.protocol}/${BOUNTY.name}`, "--as", WHITEHAT,
+      "--exploit", join(dir, "exploit.json"), "--evidence", join(dir, "evidence.json"), "--chain", String(PAUSES[0]!.chain_id),
+      "--rpc", `${base}/near`, "--outlayer-api", `${base}/outlayer`, "--tx-api", `${base}/txapi`, "--chain-rpc", `84532=${base}/evm,421614=${base}/evm`,
+      "--no-broadcast", "--interval", "0.05", "--json",
+    ],
+    { BOUNTEE_CREDENTIALS_DIR: dir },
+    dir,
+  );
+  expect(r.code).toBe(1);
+  expect(r.stderr).toMatch(/holds 0\.29\d* NEAR free of its storage stake and this claim needs 0\.3\d* in hand .*: add 0\.0\d+ NEAR \(nothing was spent\)/);
+  expect(world.claim).toBeNull();
 }, 60_000);
 
 test("D24: a payout someone else sent with retry-payout is the receipt's payout", async () => {

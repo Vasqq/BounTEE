@@ -3,18 +3,22 @@
 // WAI-ARIA select-only combobox: focus stays on the button, arrows move through the list,
 // Enter, Space or Tab picks, Escape closes, and typing a letter jumps to the chain it starts.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { coveredChain, type ChainFamily } from "@/lib/network.ts";
 
-const MARKS: Record<number, string> = {
-  8453: "/brand/Base_mark.svg",
-  42161: "/brand/Arbitrum_mark.svg",
+// By family, as ChainMark is (D30): a test chain shows its mainnet's mark. These are the
+// rounded-tile versions, sized for a 20px list row; ChainMark draws the 16px inline marks.
+const MARKS: Record<ChainFamily, string> = {
+  base: "/brand/Base_mark.svg",
+  arbitrum: "/brand/Arbitrum_mark.svg",
 };
 
 function Mark({ id }: { id: number }) {
-  const src = MARKS[id];
+  const family = coveredChain(id)?.family;
+  const src = family && MARKS[family];
   return src ? <img className="chain-mark" src={src} alt="" width={20} height={20} /> : <span className="chain-mark" aria-hidden="true" />;
 }
 
-export function ChainSelect({ label, value, options, onChange, help }: { label: string; value: number; options: { id: number; name: string }[]; onChange: (id: number) => void; help?: string }) {
+export function ChainSelect({ label, value, options, onChange, help }: { label: string; value: number; options: readonly { id: number; name: string }[]; onChange: (id: number) => void; help?: string }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -77,6 +81,8 @@ export function ChainSelect({ label, value, options, onChange, help }: { label: 
           aria-activedescendant={open ? `${id}-${active}` : undefined}
           onClick={() => (open ? setOpen(false) : show(at))}
           onKeyDown={onKey}
+          // Focus moving off the picker closes it, as a pointer pressed elsewhere does.
+          onBlur={(e) => root.current?.contains(e.relatedTarget as Node) || setOpen(false)}
         >
           {current && <Mark id={current.id} />}
           <span className="chain-name">{current?.name ?? "Choose a chain"}</span>
@@ -87,7 +93,7 @@ export function ChainSelect({ label, value, options, onChange, help }: { label: 
         {open && (
           <ul role="listbox" id={`${id}-list`} aria-labelledby={`${id}-label`} tabIndex={-1}>
             {options.map((o, i) => (
-              <li key={o.id} id={`${id}-${i}`} role="option" aria-selected={i === at} data-active={i === active || undefined} onPointerEnter={() => setActive(i)} onClick={() => pick(i)}>
+              <li key={o.id} id={`${id}-${i}`} role="option" aria-selected={i === at} data-active={i === active || undefined} onPointerEnter={() => setActive(i)} onPointerDown={(e) => e.preventDefault()} onClick={() => pick(i)}>
                 <Mark id={o.id} />
                 <span className="chain-name">{o.name}</span>
                 {i === at && (

@@ -4,6 +4,7 @@
 import type { Page } from "@playwright/test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
+import { pauseRole } from "@bountee/formats";
 
 export interface BountyId {
   protocol: string;
@@ -47,6 +48,8 @@ export interface EvmReceipt {
 }
 
 export interface World {
+  /** The network the world stands in for: its contract, USDC, chain IDs and MPC root key (NETWORKS). */
+  network: Network;
   contract: string;
   config: any;
   fees: any;
@@ -87,12 +90,46 @@ export interface World {
   >;
 }
 
-export const CONTRACT = "bounty.bountee.near";
-export const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
-export const BASE = 8453;
+export type Network = "mainnet" | "testnet";
+
+/**
+ * Each network's values, written here from their sources (Circle's USDC addresses, the formats'
+ * MPC root keys, NEAR's NEP-518 chains), never read from the app's table, so a spec checks
+ * the app against them.
+ */
+export const NETWORKS = {
+  mainnet: {
+    contract: "bounty.bountee.near",
+    usdc: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    base: 8453,
+    arbitrum: 42161,
+    /** Circle's USDC on the Base-family and Arbitrum-family chains. */
+    baseUsdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    arbitrumUsdc: "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+    nearEvm: 397,
+    mpcRootPublicKey: pauseRole.MAINNET_ROOT_PUBLIC_KEY,
+  },
+  testnet: {
+    contract: "bounty.bountee.testnet",
+    usdc: "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+    base: 84532,
+    arbitrum: 421614,
+    baseUsdc: "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+    arbitrumUsdc: "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+    nearEvm: 398,
+    mpcRootPublicKey: pauseRole.TESTNET_ROOT_PUBLIC_KEY,
+  },
+} as const;
+
+export const CONTRACT = NETWORKS.mainnet.contract;
+export const USDC = NETWORKS.mainnet.usdc;
+export const BASE = NETWORKS.mainnet.base;
 /** NEAR's Ethereum-compatible chain (NEP-518). */
-export const NEAR_EVM = 397;
-export const ARBITRUM = 42161;
+export const NEAR_EVM = NETWORKS.mainnet.nearEvm;
+export const ARBITRUM = NETWORKS.mainnet.arbitrum;
+
+/** The world's covered chains: its network's Base-family chain, then its Arbitrum-family one. */
+export const chainsOf = (w: World): [number, number] => [NETWORKS[w.network].base, NETWORKS[w.network].arbitrum];
 export const PAUSE_ROLE = "0x5a1c6a3e0c1f5b8e2d7f4a9b3c6d8e0f1a2b3c4d";
 export const VAULT_BASE = "0x8e01c52f1b2bbedd8b714b9ae168d022b52e74c1";
 export const VAULT_ARB = "0x3f6a9e2d4c1b8a7e5d0f9c3b2a1e8d7c6b5a4f3e";
@@ -106,15 +143,16 @@ export const nearHash = (seed: string) => (seed.repeat(44) + "A".repeat(44)).rep
 /** An EVM transaction hash, distinct per seed. */
 export const evmHash = (seed: string) => `0x${Buffer.from(seed).toString("hex").padEnd(64, "a").slice(0, 64)}`;
 
-export function rules(over: Partial<any> = {}) {
+export function rules(over: Partial<any> = {}, network: Network = "mainnet") {
+  const n = NETWORKS[network];
   return {
     covered_contracts: [
-      { chain_id: BASE, address: VAULT_BASE },
-      { chain_id: ARBITRUM, address: VAULT_ARB },
+      { chain_id: n.base, address: VAULT_BASE },
+      { chain_id: n.arbitrum, address: VAULT_ARB },
     ],
-    proof_chain: BASE,
+    proof_chain: n.base,
     recency_limit_secs: 300,
-    listed_tokens: [{ token: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", price: "1" }],
+    listed_tokens: [{ token: n.baseUsdc, price: "1" }],
     seed: { native: "1000000000000000000", tokens: [] },
     bounty_amount: "10000000",
     minimum_theft: "1000000",
@@ -126,10 +164,10 @@ export function rules(over: Partial<any> = {}) {
   };
 }
 
-export function bounty(id: BountyId, over: Partial<BountyView> = {}): BountyView {
+export function bounty(id: BountyId, over: Partial<BountyView> = {}, network: Network = "mainnet"): BountyView {
   return {
     id,
-    rules: rules(),
+    rules: rules({}, network),
     state: "live",
     winning_claim: null,
     signed_pauses: [],
@@ -161,10 +199,12 @@ export function claim(id: number, bountyId: BountyId, state: string, verdict: { 
 }
 
 /** A world with nothing posted: the contract deployed, chains up, pause-role gas at `balance`. */
-export function emptyWorld(): World {
+export function emptyWorld(network: Network = "mainnet"): World {
+  const n = NETWORKS[network];
   return {
-    contract: CONTRACT,
-    config: { outlayer: "outlayer.near", mpc: "v1.signer", usdc: USDC, judge_build_hash: rules().judge_build_hash, seed: rules().seed },
+    network,
+    contract: n.contract,
+    config: { outlayer: "outlayer.near", mpc: "v1.signer", usdc: n.usdc, judge_build_hash: rules().judge_build_hash, seed: rules().seed },
     fees: {
       posting_fee: "500000000000000000000000",
       pause_gas_limit: 200000,
@@ -173,7 +213,7 @@ export function emptyWorld(): World {
       pause_gas_per_pause: PAUSE_GAS_PER_PAUSE,
       prepaid_verify_attempts: 3,
     },
-    accounts: { [CONTRACT]: { amount: "4849165010462500000000000", code_hash: "8Ld3ac3b1nH3rFfg2e4Zk9q4ixpvG9Bqv7rUd3q1Ytrd" } },
+    accounts: { [n.contract]: { amount: "4849165010462500000000000", code_hash: "8Ld3ac3b1nH3rFfg2e4Zk9q4ixpvG9Bqv7rUd3q1Ytrd" } },
     bounties: [],
     claims: [],
     pauseRoles: {},
@@ -182,23 +222,23 @@ export function emptyWorld(): World {
     releases: {},
     nearTxs: [],
     evm: {
-      [BASE]: { balances: {}, receipts: {} },
-      [ARBITRUM]: { balances: {}, receipts: {} },
-      [NEAR_EVM]: { balances: {}, receipts: {} },
+      [n.base]: { balances: {}, receipts: {} },
+      [n.arbitrum]: { balances: {}, receipts: {} },
+      [n.nearEvm]: { balances: {}, receipts: {} },
     },
   };
 }
 
 /** Post a bounty: its posting transaction, its pause role, and pause gas held on each chain. */
 export function post(w: World, id: BountyId, over: Partial<BountyView> = {}, gasWei = "1000000000000000"): BountyView {
-  const b = bounty(id, over);
+  const b = bounty(id, over, w.network);
   w.bounties.push(b);
   w.pauseRoles[`${id.protocol}/${id.name}`] = { path: `${id.protocol}/${id.name}`, address: PAUSE_ROLE };
-  for (const chain of [BASE, ARBITRUM]) w.evm[chain]!.balances[PAUSE_ROLE] = gasWei;
+  for (const chain of chainsOf(w)) w.evm[chain]!.balances[PAUSE_ROLE] = gasWei;
   w.nearTxs.push({
     hash: nearHash(`post${id.name}`),
     signer: id.protocol,
-    receipts: [{ executor: CONTRACT, logs: [event("bounty_posted", { bounty: id, amount: b.rules.bounty_amount }), event("bounty_live", { bounty: id })], ok: true }],
+    receipts: [{ executor: w.contract, logs: [event("bounty_posted", { bounty: id, amount: b.rules.bounty_amount }), event("bounty_live", { bounty: id })], ok: true }],
   });
   return b;
 }
@@ -210,12 +250,12 @@ export function judge(w: World, id: BountyId, claimId: number, outcome: "PAYS" |
   w.nearTxs.push({
     hash: nearHash(`submit${claimId}`),
     signer: whitehat,
-    receipts: [{ executor: CONTRACT, logs: [event("claim_submitted", { claim_id: claimId, bounty: id, whitehat })], ok: true }],
+    receipts: [{ executor: w.contract, logs: [event("claim_submitted", { claim_id: claimId, bounty: id, whitehat })], ok: true }],
   });
   w.nearTxs.push({
     hash: nearHash(`judged${claimId}`),
     signer: "worker.outlayer.near",
-    receipts: [{ executor: CONTRACT, logs: [event("claim_judged", { claim_id: claimId, verdict })], ok: true }],
+    receipts: [{ executor: w.contract, logs: [event("claim_judged", { claim_id: claimId, verdict })], ok: true }],
   });
 }
 
@@ -225,7 +265,7 @@ export function claimInProgress(w: World, id: BountyId, claimId: number) {
   w.nearTxs.push({
     hash: nearHash(`submit${claimId}`),
     signer: "hunter.near",
-    receipts: [{ executor: CONTRACT, logs: [event("claim_submitted", { claim_id: claimId, bounty: id, whitehat: "hunter.near" })], ok: true }],
+    receipts: [{ executor: w.contract, logs: [event("claim_submitted", { claim_id: claimId, bounty: id, whitehat: "hunter.near" })], ok: true }],
   });
 }
 
@@ -233,7 +273,7 @@ export function claimInProgress(w: World, id: BountyId, claimId: number) {
 export const hashOfRaw = (raw: string) => `0x${bytesToHex(keccak_256(hexToBytes(raw.replace(/^0x/, ""))))}`;
 
 /** The raw signed pause for a chain. */
-export const rawPause = (chain: number) => `0x02f8${chain.toString(16)}deadbeef${"00".repeat(40)}`;
+export const rawPause = (chain: number) => `0x02f8${chain.toString(16).padStart(6, "0")}deadbeef${"00".repeat(40)}`;
 
 /**
  * Win the bounty with claim `claimId`: pauses signed for each covered contract, the payout,
@@ -257,12 +297,12 @@ export function win(
     hash: nearHash(`signed${claimId}`),
     signer: "relayer.near",
     receipts: [
-      { executor: CONTRACT, logs: [event("pauses_signed", { bounty: id, claim_id: claimId, pauses: b.signed_pauses.length })], ok: true },
-      { executor: CONTRACT, logs: [event("bounty_paid", { bounty: id, claim_id: claimId, amount: b.rules.bounty_amount })], ok: true },
+      { executor: w.contract, logs: [event("pauses_signed", { bounty: id, claim_id: claimId, pauses: b.signed_pauses.length })], ok: true },
+      { executor: w.contract, logs: [event("bounty_paid", { bounty: id, claim_id: claimId, amount: b.rules.bounty_amount })], ok: true },
       {
-        executor: USDC,
-        predecessor: CONTRACT,
-        logs: [`EVENT_JSON:${JSON.stringify({ standard: "nep141", version: "1.0.0", event: "ft_transfer", data: [{ old_owner_id: CONTRACT, new_owner_id: "whitehat.near", amount: b.rules.bounty_amount }] })}`],
+        executor: w.config.usdc,
+        predecessor: w.contract,
+        logs: [`EVENT_JSON:${JSON.stringify({ standard: "nep141", version: "1.0.0", event: "ft_transfer", data: [{ old_owner_id: w.contract, new_owner_id: "whitehat.near", amount: b.rules.bounty_amount }] })}`],
         ok: true,
       },
     ],
@@ -270,7 +310,7 @@ export function win(
   for (const p of b.signed_pauses) {
     if (o.landed?.includes(p.chain_id)) w.evm[p.chain_id]!.receipts[p.tx_hash] = { ok: true, block: 22_000_000, to: p.contract };
   }
-  w.verifications[`${id.protocol}/${id.name}`] = [BASE, ARBITRUM].map((chain) => {
+  w.verifications[`${id.protocol}/${id.name}`] = chainsOf(w).map((chain) => {
     const done = o.verified?.includes(chain) ?? false;
     return {
       chain_id: chain,
@@ -285,7 +325,7 @@ export function win(
     w.nearTxs.push({
       hash: nearHash(`verified${chain}`),
       signer: "relayer.near",
-      receipts: [{ executor: CONTRACT, logs: [event("pause_verified", { bounty: id, chain_id: chain, verified_pauses: b.signed_pauses.filter((p) => p.chain_id === chain).map((p) => p.tx_hash) })], ok: true }],
+      receipts: [{ executor: w.contract, logs: [event("pause_verified", { bounty: id, chain_id: chain, verified_pauses: b.signed_pauses.filter((p) => p.chain_id === chain).map((p) => p.tx_hash) })], ok: true }],
     });
   }
 }
@@ -309,7 +349,7 @@ export function publish(w: World, id: BountyId, claimId: number) {
   w.nearTxs.push({
     hash: nearHash(`published${claimId}`),
     signer: "anyone.near",
-    receipts: [{ executor: CONTRACT, logs: [event("exploit_published", { bounty: id, claim_id: claimId })], ok: true }],
+    receipts: [{ executor: w.contract, logs: [event("exploit_published", { bounty: id, claim_id: claimId })], ok: true }],
   });
 }
 
@@ -331,16 +371,17 @@ export function finishedDemo(): World {
 export function withClaimKey(w: World, claimId: number) {
   const tx = w.nearTxs.find((t) => t.hash === nearHash(`submit${claimId}`))!;
   tx.publicKey = "ed25519:ClaimKeyOfTheWhitehatsAgent";
-  w.claimKeys = { ...w.claimKeys, [`${tx.signer}/${tx.publicKey}`]: CONTRACT };
+  w.claimKeys = { ...w.claimKeys, [`${tx.signer}/${tx.publicKey}`]: w.contract };
 }
 
 /** A world ready for a Protocol at `account` to post: its NEAR, USDC, and contracts that use AccessControl. */
-export function postingWorld(account: string, o: { near?: string; usdc?: string; onboarded?: boolean } = {}): World {
-  const w = emptyWorld();
+export function postingWorld(account: string, o: { near?: string; usdc?: string; onboarded?: boolean; network?: Network } = {}): World {
+  const w = emptyWorld(o.network);
   const id = account.toLowerCase();
   if (o.near !== undefined) w.accounts[id] = { amount: o.near, code_hash: "11111111111111111111111111111111" };
   w.posting = { feeBalances: {}, usdc: { [id]: o.usdc ?? "0" }, onboarded: o.onboarded ? [id] : [], relayerKeyHex: "32c5815495b5e6bd0099e93ed930c0024e641506ed7c8f97c527302f1eed1a06" };
-  w.pausers = { [`${BASE}:${VAULT_BASE}`]: [], [`${ARBITRUM}:${VAULT_ARB}`]: [] };
+  const [base, arbitrum] = chainsOf(w);
+  w.pausers = { [`${base}:${VAULT_BASE}`]: [], [`${arbitrum}:${VAULT_ARB}`]: [] };
   return w;
 }
 

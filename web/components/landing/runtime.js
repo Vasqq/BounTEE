@@ -53,7 +53,7 @@ function stepsFor() {
     { d: `After the ${days(live.delay)} disclosure delay the winning exploit is published, so anyone can re-run it. Until then only the Protocol can open it.`, tx: tx(7, []), pending: live.published ? null : `pending · after ${live.delay == null ? DASH : live.delay === 1 ? '1 day' : live.delay + ' days'}` }
   ];
 }
-const cmdFor = () => `bountee verify ${live.name ? live.protocol + '/' + live.name : '<protocol>/<name>'} --network mainnet`;
+const cmdFor = () => `bountee verify ${live.name ? live.protocol + '/' + live.name : '<protocol>/<name>'} --contract bounty.bountee.near --network mainnet`;
 const ext = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4 2h6v6M10 2 3 9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
 const short = h => h.length > 12 ? `${h.slice(0, 6)}…${h.slice(-4)}` : h;
 const copyIco = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M8.5 1.5h-6a1 1 0 0 0-1 1v6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';

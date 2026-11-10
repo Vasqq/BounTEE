@@ -52,8 +52,6 @@ export interface PostingBasics {
   contract: string;
   usdc: string;
   usdcDecimals: number;
-  /** The chains a bounty can cover, and the USDC each values theft in. */
-  chains: { id: number; name: string; usdc: string; explorerTx: string }[];
   postingFee: string;
   /** Rules BounTEE sets, not the Protocol (R1.1, R1.3). */
   fixed: { recency_limit_secs: number; seed: unknown; judge_build_hash: string };
@@ -108,7 +106,6 @@ async function readContractTerms(c: ReturnType<typeof config>) {
     contract: c.contract,
     usdc: cfg.usdc,
     usdcDecimals: meta.decimals,
-    chains: Object.values(c.chains).map((x) => ({ id: x.id, name: x.name, usdc: x.usdc, explorerTx: x.explorerTx })),
     postingFee: fees.posting_fee,
     fixed: { recency_limit_secs: 300, seed: cfg.seed, judge_build_hash: cfg.judge_build_hash },
     nearEth: c.nearEth,

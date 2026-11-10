@@ -13,7 +13,8 @@ const DASH = "–";
 /** The prototype's staggered entrance: `--d` delays a `.rise`. */
 const delay = (d: string) => ({ "--d": d }) as CSSProperties;
 
-export function Landing() {
+/** `nearExplorer`: the explorer the proof links point at before the demo bounty is read. */
+export function Landing({ nearExplorer }: { nearExplorer: string }) {
   const { data: demo = null } = useDemo();
   const demoId = useMemo(() => (demo ? { protocol: demo.story.protocol, name: demo.story.name } : null), [demo?.story.protocol, demo?.story.name]); // eslint-disable-line react-hooks/exhaustive-deps
   const { data: result } = useVerify(demoId);
@@ -72,7 +73,7 @@ export function Landing() {
                 <dt>Ran on</dt><dd>{demo?.chains ? `${listOf(["NEAR", ...demo.chains])} mainnet` : DASH}</dd>
                 <dt>Claimed by</dt><dd>{demo?.story.claimKey ? "a Whitehat's AI agent, with a claim key" : DASH}</dd>
                 <dt>Paid</dt><dd>{demo?.paidOnce ? <><span className="ok">{demo.amount}</span>, once</> : DASH}</dd>
-                <dt>Every step</dt><dd>{demo?.contract ? <a href={demo.contractHref} target="_blank" rel="noopener">{demo.contract} on nearblocks</a> : <a href="https://nearblocks.io/" target="_blank" rel="noopener">tx pending</a>}</dd>
+                <dt>Every step</dt><dd>{demo?.contract ? <a href={demo.contractHref} target="_blank" rel="noopener">{demo.contract} on nearblocks</a> : <a href={nearExplorer} target="_blank" rel="noopener">tx pending</a>}</dd>
               </dl>
             </div>
           </div>

@@ -23,6 +23,45 @@ export interface Read {
   slots: number;
 }
 
+/** An account a demo claim's replay reads, by what it is to the run. */
+export type Role =
+  | "sender" // the claim's fresh account
+  | "coinbase" // the block's coinbase
+  | "vault" // the demo PositionVault
+  | "usdc" // its token: the demo's MockUSDC on testnet, Circle's USDC on mainnet
+  | "usdc_implementation" // Circle's USDC implementation, behind its proxy
+  | "uniswap_router" // Uniswap V2's router, where the mainnet cheat buys its USDC
+  | "uniswap_pair" // the WETH/USDC pair it buys from
+  | "weth"; // WETH
+
+/**
+ * How many storage slots each demo replay proves, per account, on each network: the cheat
+ * (demo/script/HonestUser.s.sol: deposit then redeem, after buying Circle's USDC on Uniswap V2
+ * on mainnet) and the winning exploit on the PositionVault.
+ *
+ * Measured on Nov 8, 2026 (ticket #52). Testnet: `bountee test` of HonestUser.s.sol and of the
+ * sealed exploit against a fresh PositionVault instance on Base Sepolia, counting each saved
+ * job's proofs (cli/test/fresh-instance-testnet.test.ts checks these against a live replay).
+ * Mainnet (no mainnet transaction): both scripts run on a local anvil fork of Base with a
+ * PositionVault deployed and seeded there, counting the accounts and slots each transaction
+ * reads (call tree and SLOAD/SSTORE keys from the debug tracer), plus what the judge proves for
+ * every replay: the coinbase, and the attacker's holdings (R4.8).
+ * The same count on a Base Sepolia fork gives the testnet numbers below.
+ * A win proven on Arbitrum runs the same PositionVault and USDC code, so it reads the same slots
+ * (ADR-0020); what differs by chain (the trie's depth and so each proof's size, the header, the
+ * coinbase, USDC's address) is read from that chain when the claim is budgeted (fresh-instance.ts).
+ */
+export const DEMO_READS: Record<"testnet" | "mainnet", Record<"cheat" | "win", Partial<Record<Role, number>>>> = {
+  testnet: {
+    cheat: { sender: 0, coinbase: 0, vault: 3, usdc: 4 },
+    win: { sender: 0, coinbase: 0, vault: 3, usdc: 3 },
+  },
+  mainnet: {
+    cheat: { sender: 0, coinbase: 0, vault: 3, usdc_implementation: 0, usdc: 7, uniswap_router: 0, uniswap_pair: 6, weth: 2 },
+    win: { sender: 0, coinbase: 0, vault: 3, usdc_implementation: 0, usdc: 6 },
+  },
+};
+
 export interface ClaimPlan {
   kind: string;
   reads: Read[];
@@ -30,6 +69,8 @@ export interface ClaimPlan {
 
 export interface ClaimBudget {
   kind: string;
+  /** The chain the claim is proven on, whose proofs and header it was budgeted from. */
+  chain_id: number;
   input_bytes: number;
   /** yoctoNEAR the claim draws from the claim balance at filing. */
   draw: bigint;
@@ -71,12 +112,13 @@ export async function budgetClaims(url: string, fees: any, plans: ClaimPlan[]): 
   const block = Number(BigInt(await rpc<string>(url, "eth_blockNumber", [])));
   const { hash, header } = await fetchHeader(url, block);
   const headerBytes = header.length;
-  const blockJsonBytes = JSON.stringify({ number: block, hash }).length;
+  const chainId = Number(BigInt(await rpc<string>(url, "eth_chainId", [])));
+  const blockJsonBytes = JSON.stringify({ chain_id: chainId, number: block, hash }).length;
   const out: ClaimBudget[] = [];
   for (const plan of plans) {
     const input = claimInputBytes(await proofsBytes(url, block, plan.reads), headerBytes, blockJsonBytes);
     const refunded = BigInt(Math.max(0, input - Number(fees.job_input_free_bytes))) * BigInt(fees.storage_price_per_byte);
-    out.push({ kind: plan.kind, input_bytes: input, draw: claimCost(fees, input, SEALED_EXPLOIT_BYTES), refunded });
+    out.push({ kind: plan.kind, chain_id: chainId, input_bytes: input, draw: claimCost(fees, input, SEALED_EXPLOIT_BYTES), refunded });
   }
   return out;
 }

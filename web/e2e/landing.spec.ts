@@ -94,14 +94,14 @@ test("D4, ADR-0017: no testnet string or explorer link ships in the mainnet buil
   expect(hits).toEqual([]);
 });
 
-test("D6: the landing page's Verify lists the demo bounty's checks, read live", async ({ page }) => {
+test("D6, D30: the landing page's Verify lists the demo bounty's checks, read live, under a command naming mainnet's contract", async ({ page }) => {
   await setWorld(page, finishedDemo());
   await page.goto("/");
   await page.locator("#verify").scrollIntoViewIfNeeded();
   const run = page.getByRole("list", { name: "Check results" });
   await expect(run.getByRole("listitem").filter({ hasText: "Payout on NEAR" })).toContainText("PASS");
   await expect(run.getByRole("listitem").filter({ hasText: "Pauses verified on NEAR" })).toContainText("PASS");
-  await expect(page.locator("#cmd")).toHaveText(`$bountee verify ${DEMO.protocol}/${DEMO.name} --network mainnet`);
+  await expect(page.locator("#cmd")).toHaveText(`$bountee verify ${DEMO.protocol}/${DEMO.name} --contract bounty.bountee.near --network mainnet`);
 });
 
 test("D4, R15.6: the story says an AI agent won with a claim key only when NEAR shows the claim was filed with one", async ({ page }) => {

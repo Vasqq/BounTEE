@@ -13,6 +13,22 @@ export const root = fileURLToPath(new URL("../../../", import.meta.url));
 export const network = parseNetwork(process.env.NETWORK);
 export const near = new Near(network, process.env.NEAR_RPC);
 
+/**
+ * The gas a fresh demo instance's deploy burns on one chain, with ~18% slack:
+ * demo/script/Deploy.s.sol (the mock USDC on testnet, the PositionVault, and the vault USDC's
+ * mint, approve and deposit) plus the pause-gas transfer. fresh-instance.ts budgets the deployer's
+ * ETH from it. Measured on Nov 8, 2026 (ticket #52) from the receipts: 2,199,437 gas on Base
+ * Sepolia (five deploy transactions and the transfer); 1,387,416 on a local fork of Base with
+ * Circle's USDC (vault, approve, deposit and the transfer; no mock, no mint).
+ */
+export const DEMO_DEPLOY_GAS = 2_600_000n;
+
+/**
+ * How much of Circle's USDC each mainnet demo vault starts with: 2 on every chain, since a
+ * claim may be proven on any of them (ADR-0020); testnet mints a mock.
+ */
+export const VAULT_USDC = 2_000_000n;
+
 /** OutLayer and NEAR's MPC signer on each network (spec, external services). */
 const OUTLAYER = { testnet: "outlayer.testnet", mainnet: "outlayer.near" } as const;
 const MPC = { testnet: "v1.signer-prod.testnet", mainnet: "v1.signer" } as const;
@@ -22,11 +38,11 @@ export const DEFAULT_USDC = { testnet: "ft.bountee-spike4.testnet", mainnet: "17
 
 /**
  * Build the attested judge (no features), pinned to `pinnedTo` as its only caller, with the
- * reproducible build (`bountee build`, R15.2) of the checkout's HEAD commit, so anyone
- * rebuilds the hash the deployment pins.
+ * reproducible build (`bountee build`, R15.2) of commit `rev` (default the checkout's HEAD), so
+ * anyone rebuilds the hash the deployment pins.
  */
-export function buildJudge(pinnedTo: string): { wasm: Buffer; hash: string } {
-  const built = reproducibleBuild({ pin: pinnedTo, only: "judge" }).judge!;
+export function buildJudge(pinnedTo: string, rev?: string): { wasm: Buffer; hash: string } {
+  const built = reproducibleBuild({ pin: pinnedTo, rev, only: "judge" }).judge!;
   return { wasm: readFileSync(built.wasm), hash: built.sha256 };
 }
 
@@ -86,8 +102,11 @@ export function contractConfig(o: { usdc: string; judgeHash: string; judgeUrl: s
   };
 }
 
-/** One balance a run needs, as the preflights report it. */
-export interface Need { who: string; chain: string; asset: string; have: string; need: string; ok: boolean; top_up?: string }
+/**
+ * One balance a run needs, as the preflights report it: shown, and in the asset's smallest unit
+ * (`units`), so a script driving several runs can add up what a shared payer needs.
+ */
+export interface Need { who: string; chain: string; asset: string; have: string; need: string; ok: boolean; top_up?: string; units: { have: string; need: string } }
 
 /** A whole-number setting from the environment, or `fallback` when unset; anything else stops the script. */
 export function wholeNumber(name: string, fallback?: number): number {
@@ -102,7 +121,10 @@ export function wholeNumber(name: string, fallback?: number): number {
 
 /** `who`'s balance of `asset` on `chain` against what the run needs, each shown with `show`. */
 export function need(who: string, chain: string, asset: string, have: bigint, want: bigint, show: (x: bigint) => string): Need {
-  return { who, chain, asset, have: show(have), need: show(want), ok: have >= want, ...(have < want ? { top_up: show(want - have) } : {}) };
+  return {
+    who, chain, asset, have: show(have), need: show(want), ok: have >= want, ...(have < want ? { top_up: show(want - have) } : {}),
+    units: { have: have.toString(), need: want.toString() },
+  };
 }
 
 /**
@@ -124,9 +146,9 @@ export function stopIfShort(needs: Need[], plan: Record<string, unknown> = {}): 
   }
 }
 
-/** The reproducible build of HEAD's bounty contract (R15.2); its NEP-330 metadata names the commit. */
-export function buildContract(contract: string): Buffer {
-  return readFileSync(reproducibleBuild({ pin: contract, only: "contract" }).contract!.wasm);
+/** The reproducible build of commit `rev`'s bounty contract (default HEAD, R15.2); its NEP-330 metadata names the commit. */
+export function buildContract(contract: string, rev?: string): Buffer {
+  return readFileSync(reproducibleBuild({ pin: contract, rev, only: "contract" }).contract!.wasm);
 }
 
 /**

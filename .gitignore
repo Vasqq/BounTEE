@@ -7,6 +7,7 @@ node_modules/
 
 # Next.js
 /web/.next/
+/web/.next-*/
 /web/next-env.d.ts
 
 # Playwright
@@ -25,6 +26,7 @@ node_modules/
 # Secrets never live in the repo (shared testnet secrets: ~/.bountee-testnet/)
 .env
 .env.*
+!/web/.env.testnet.example
 
 .DS_Store
 /demo/broadcast/

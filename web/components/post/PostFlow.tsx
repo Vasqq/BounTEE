@@ -13,6 +13,7 @@ import { draftProblems, emptyDraft, nextLabel, rulesOf, slug, usdcUnits, type Dr
 import { exploitKeyMessage, keyFromFile, keyFromSignature, publicKeyText } from "@/lib/exploit-key.ts";
 import { shortHash, units } from "@/lib/format.ts";
 import { enableNearSigning, MAX_GAS, nearFunctionCall } from "@/lib/near-eth.ts";
+import { coveredChain, net } from "@/lib/network.ts";
 import type { EvmCall, PostingBasics, PostingStatus } from "@/lib/posting.ts";
 import { BOUNTY_CONTRACT, NEAR_USDC, pauseRoleOf } from "@/lib/pinned.ts";
 import { rulesInPlainEnglish } from "@/lib/rules.ts";
@@ -97,9 +98,12 @@ function trusted(s: PostingStatus, protocol: string, name: string): PostingStatu
 
 /** Send one EVM transaction from MetaMask on its chain and wait for it to land. */
 async function sendOn(call: EvmCall) {
-  await switchChain(wagmiConfig, { chainId: call.chainId as 8453 | 42161 });
-  const hash = await sendTransaction(wagmiConfig, { chainId: call.chainId as 8453 | 42161, to: call.to as Address, data: call.data as `0x${string}`, value: BigInt(call.value) });
-  const r = await waitForTransactionReceipt(wagmiConfig, { hash, chainId: call.chainId as 8453 | 42161 });
+  // Widened to number: wagmi types a send by the wallet setup's chains, which are built from the table untyped by ID.
+  const chainId: number | undefined = coveredChain(call.chainId)?.id;
+  if (chainId === undefined) throw new Error(`This app can't send on chain ${call.chainId}.`);
+  await switchChain(wagmiConfig, { chainId });
+  const hash = await sendTransaction(wagmiConfig, { chainId, to: call.to as Address, data: call.data as `0x${string}`, value: BigInt(call.value) });
+  const r = await waitForTransactionReceipt(wagmiConfig, { hash, chainId });
   if (r.status !== "success") throw new Error("The transaction reverted.");
   return hash;
 }
@@ -276,7 +280,9 @@ function Field({ label, error, help, children }: { label: string; error?: string
 function RulesStep(p: { basics?: PostingBasics; s?: PostingStatus; account?: string; draft: Draft; setDraft: (d: Draft) => void; problems: Record<string, string>; ok: boolean; next: () => void }) {
   const { draft: d, setDraft } = p;
   const set = (patch: Partial<Draft>) => setDraft({ ...d, ...patch });
-  const chains = p.basics?.chains ?? [];
+  // The chains offered are this build's (the network table), never the server's: a bounty here
+  // can't cover a contract on another network's chain (D30).
+  const chains = net.chains;
   const setCovered = (i: number, patch: Partial<Draft["covered"][number]>) => set({ covered: d.covered.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
   const coveredChains = [...new Set(d.covered.map((c) => c.chainId))];
   // A typo shows once its field has been left.
@@ -416,7 +422,7 @@ function ChainCard({ n, chainId, s, next }: { n: number; chainId: number; s: Pos
   const grants = s.covered.filter((c) => c.chainId === chainId);
   const gas = s.gas.find((g) => g.chainId === chainId);
   const name = grants[0]?.chain ?? gas?.chain ?? String(chainId);
-  const explorerTx = s.chains.find((x) => x.id === chainId)?.explorerTx;
+  const explorerTx = coveredChain(chainId)?.explorerTx;
   const ready = grants.every((c) => c.granted) && (!gas || gas.ok);
   const left = grants.filter((c) => !c.granted).length + (gas && !gas.ok ? 1 : 0);
   const title = (
@@ -555,7 +561,7 @@ function bountyUnits(draft: Draft, decimals: number): bigint | null {
 // USDC and the NEAR for the posting fee (R11.4) and the prompts' gas, both to the Protocol's own
 // 0x… NEAR account, each ticking off once it holds enough.
 function FundStep({ s, account, draft, done, next }: { s?: PostingStatus; account?: string; draft: Draft; done: boolean; next: () => void }) {
-  const faucet = process.env.NEXT_PUBLIC_NEAR_FAUCET;
+  const faucet = net.nearFaucet;
   const bounty = s ? bountyUnits(draft, s.usdcDecimals) : null;
   const usdcOk = !!s && bounty !== null && BigInt(s.account.usdc) >= bounty;
   const nearOk = !!s && BigInt(s.account.near) >= BigInt(s.nearNeeded);
@@ -612,7 +618,7 @@ function FundStep({ s, account, draft, done, next }: { s?: PostingStatus; accoun
                     </Hint>
                     , paid in NEAR.
                   </p>
-                  {/* D17: a faucet exists only for a testnet rehearsal build. */}
+                  {/* D17: NEAR has a faucet only on testnet (the network table). */}
                   {faucet && (
                     <p>
                       <a href={faucet} target="_blank" rel="noopener">
@@ -702,8 +708,9 @@ function PostStep(p: {
       ? rulesInPlainEnglish({
           amount: `${usdcText(bounty, s.usdcDecimals)} USDC`,
           minimumTheft: `${usdcText(bountyUnits({ ...draft, amount: draft.minimum }, s.usdcDecimals) ?? 0n, s.usdcDecimals)} USDC`,
-          covered: draft.covered.map((c) => ({ chain: s.chains.find((x) => x.id === c.chainId)?.name ?? String(c.chainId), address: c.address.toLowerCase() })),
-          proofChain: s.chains.find((x) => x.id === draft.proofChain)?.name ?? String(draft.proofChain),
+          covered: draft.covered.map((c) => ({ chain: coveredChain(c.chainId)?.name ?? String(c.chainId), address: c.address.toLowerCase() })),
+          // The rules name no proof chain any more (D27); until #65 drops the field, the read-back names the one picked.
+          proofChain: coveredChain(draft.proofChain)?.name ?? String(draft.proofChain),
           recencyMinutes: s.fixed.recency_limit_secs / 60,
           ends: draft.endDate,
           disclosureDelayDays: Number(draft.delay),

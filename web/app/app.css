@@ -190,7 +190,7 @@ fieldset.covered > .btn { justify-self: start; }
   background: var(--ground-2); border-radius: var(--r-sm); box-shadow: var(--float); transform-origin: top; animation: chain-open var(--t1) var(--ease); }
 .chain-select li { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; border-radius: 6px; color: var(--ink); font: 400 var(--fs-ui)/1 var(--text); cursor: pointer; }
 .chain-select li[data-active] { background: var(--surface); }
-.chain-select li .tick { color: var(--ok); flex: none; margin-left: 12px; }
+.chain-select li .tick { color: var(--ink); flex: none; margin-left: 12px; }
 @keyframes chain-open { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
 @media (prefers-reduced-motion: reduce) { .chain-select ul { animation: none; } .chain-select .chev { transition: none; } }
 

@@ -18,6 +18,13 @@
 //   claim proves, OutLayer's hold from fees(), and the peak with holds refunded between claims.
 //   The real sizes are a recorded analysis: run against Base mainnet the cheat budgets 289 KB,
 //   matching the ~289 KB a real cheat replay proved (ticket #35's prep notes).
+//   Ticket #52 moves the run to the PositionVault: the cheat is HonestUser.s.sol's deposit then
+//   redeem (still after buying Circle's USDC on Uniswap V2: Circle's USDC has no public mint),
+//   and the read lists are re-measured on the new vault's replays (claim-budget.ts). This
+//   test needs no exploit: the win's read list is committed as numbers.
+//   Ticket #64 (ADR-0020): the cheat is filed on Base, but a win may be proven on either chain,
+//   so the win is budgeted on each chain from that chain's own proofs (its USDC, implementation
+//   and coinbase), and every win the run files is held at the costliest chain's.
 //   Misses: the real mainnet balances and gas prices (read when #35 runs it), and every step
 //   after the preflight (each spends; rehearsed on testnet, #33).
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -26,7 +33,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { RpcError, nearView, runScript, sendsAmong, standIns, type Logged } from "./testnet/stand-ins.ts";
+import { NEAR_GAS_PRICE, NEAR_PROTOCOL_CONFIG, RpcError, nearView, runScript, sendsAmong, standIns, type Logged } from "./testnet/stand-ins.ts";
 
 const script = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
 const CONTRACT = "bounty.bountee.near";
@@ -54,7 +61,11 @@ const PAIR = "0x88a43bbdf9d098eec7bceda4e2494615dfd9bb9c";
 const USDC_IMPL = "0x2ce6311ddae708829bc0784c967b7d77d19fd779";
 const COINBASE = "0x4200000000000000000000000000000000000011";
 const IMPL_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
-const CONTRACTS = new Set([ROUTER, FACTORY, WETH, PAIR, USDC_IMPL, COINBASE, BASE_USDC]);
+// Arbitrum One: Circle's USDC behind its own proxy (the stand-in's implementation address), and
+// the coinbase its blocks name (ArbOS's sequencer address).
+const ARBITRUM_USDC_IMPL = "0x00000000000000000000000000000000000a4b1e";
+const ARBITRUM_COINBASE = "0xa4b000000000000000000073657175656e636572";
+const CONTRACTS = new Set([ROUTER, FACTORY, WETH, PAIR, USDC_IMPL, COINBASE, BASE_USDC, ARBITRUM_USDC_IMPL, ARBITRUM_COINBASE, ARBITRUM_USDC]);
 const RAW_HEADER = `0x${"cd".repeat(600)}`;
 const HEADER_HASH = `0x${Buffer.from(keccak_256(Buffer.from(RAW_HEADER.slice(2), "hex"))).toString("hex")}`;
 
@@ -62,7 +73,13 @@ const HEADER_HASH = `0x${Buffer.from(keccak_256(Buffer.from(RAW_HEADER.slice(2),
 const world = {
   /** Bytes per trie node in the stand-in chain's proofs: a deeper, wider trie gives bigger proofs. */
   node: 500,
+  /** A chain whose trie differs: its own bytes per node. */
+  nodeOn: new Map<number, number>(),
   near: new Map<string, bigint>(),
+  /** Bytes each NEAR account stores: NEAR locks their stake, so it can't pay for anything. */
+  nearStorage: new Map<string, number>(),
+  /** The posting fee each Protocol has already prepaid on the contract. */
+  prepaid: new Map<string, bigint>(),
   nearUsdc: new Map<string, bigint>(),
   eth: new Map<number, bigint>(),
   evmUsdc: new Map<string, bigint>(),
@@ -82,11 +99,20 @@ beforeAll(async () => {
     if (where === "near") {
       if (method === "query" && p.request_type === "view_account") {
         const amount = world.near.get(p.account_id);
-        return amount === undefined ? new RpcError("UNKNOWN_ACCOUNT") : { amount: amount.toString() };
+        return amount === undefined
+          ? new RpcError("UNKNOWN_ACCOUNT")
+          : { amount: amount.toString(), locked: "0", storage_usage: world.nearStorage.get(p.account_id) ?? 182 };
       }
+      if (method === "EXPERIMENTAL_protocol_config") return NEAR_PROTOCOL_CONFIG;
+      if (method === "gas_price") return NEAR_GAS_PRICE;
       if (method === "query" && p.request_type === "call_function") {
         const args = JSON.parse(Buffer.from(p.args_base64, "base64").toString() || "{}");
         if (p.account_id === CONTRACT && p.method_name === "fees") return nearView(FEES);
+        // The deployed contract's config (bounty.bountee.near, Nov 8), which the posting's rules take their seed and judge from.
+        if (p.account_id === CONTRACT && p.method_name === "config") {
+          return nearView({ seed: { native: "1000000000000000000", tokens: [] }, judge_build_hash: `0x${"5b".repeat(32)}` });
+        }
+        if (p.account_id === CONTRACT && p.method_name === "posting_fee_balance") return nearView((world.prepaid.get(args.account_id) ?? 0n).toString());
         if (p.account_id === NEAR_USDC && p.method_name === "ft_balance_of") return nearView((world.nearUsdc.get(args.account_id) ?? 0n).toString());
       }
       return undefined;
@@ -105,13 +131,14 @@ beforeAll(async () => {
       if (to === FACTORY && selector === "0xe6a43905") return word(BigInt(PAIR)); // getPair(address,address)
       return word(world.evmUsdc.get(to) ?? 0n);
     }
-    if (method === "eth_getStorageAt" && String(p[0]).toLowerCase() === BASE_USDC && p[1] === IMPL_SLOT) return word(BigInt(USDC_IMPL));
-    if (method === "eth_getBlockByNumber") return { number: "0x10", hash: HEADER_HASH, miner: COINBASE };
+    if (method === "eth_getStorageAt" && chain === 8453 && String(p[0]).toLowerCase() === BASE_USDC && p[1] === IMPL_SLOT) return word(BigInt(USDC_IMPL));
+    if (method === "eth_getStorageAt" && chain === 42161 && String(p[0]).toLowerCase() === ARBITRUM_USDC && p[1] === IMPL_SLOT) return word(BigInt(ARBITRUM_USDC_IMPL));
+    if (method === "eth_getBlockByNumber") return { number: "0x10", hash: HEADER_HASH, miner: chain === 42161 ? ARBITRUM_COINBASE : COINBASE };
     if (method === "debug_getRawHeader") return RAW_HEADER;
     if (method === "eth_getProof") {
       // Eight nodes for an account, six per slot; an account the stand-in doesn't know is absent.
       const known = CONTRACTS.has(String(p[0]).toLowerCase());
-      const nodes = (n: number) => Array.from({ length: n }, () => `0x${"ab".repeat(world.node)}`);
+      const nodes = (n: number) => Array.from({ length: n }, () => `0x${"ab".repeat(world.nodeOn.get(chain) ?? world.node)}`);
       return {
         address: p[0], nonce: known ? "0x1" : "0x0", balance: "0x0", codeHash: known ? `0x${"11".repeat(32)}` : `0x${"00".repeat(32)}`,
         storageHash: `0x${"22".repeat(32)}`, accountProof: nodes(8),
@@ -163,8 +190,9 @@ test("D21: the mainnet preflight lists every balance the run needs and names eac
     [DEPLOYER, "Base", "ETH", expect.stringMatching(/ETH$/), false],
     [DEPLOYER, "Base", `USDC (${BASE_USDC})`, "2 USDC", false],
     [DEPLOYER, "Arbitrum One", "ETH", expect.stringMatching(/ETH$/), false],
-    [DEPLOYER, "Arbitrum One", `USDC (${ARBITRUM_USDC})`, "1 USDC", false],
-    [PROTOCOL, "near-mainnet", "NEAR", "0.6 NEAR", false],
+    // ADR-0020: 2 USDC into each chain's vault, so a theft on either reaches the 1 USDC minimum.
+    [DEPLOYER, "Arbitrum One", `USDC (${ARBITRUM_USDC})`, "2 USDC", false],
+    [PROTOCOL, "near-mainnet", "NEAR", expect.stringMatching(/ NEAR$/), false],
     [PROTOCOL, "near-mainnet", `USDC (${NEAR_USDC})`, "10 USDC", false],
     [WHITEHAT, "near-mainnet", "NEAR", expect.stringMatching(/ NEAR$/), false],
   ]);
@@ -185,12 +213,50 @@ test("D21: a funded mainnet run passes the preflight and spends nothing", async 
   world.nearUsdc.set(PROTOCOL, 10_000_000n);
   for (const chain of [8453, 42161]) world.eth.set(chain, ETH / 100n);
   world.evmUsdc.set(BASE_USDC, 2_000_000n);
-  world.evmUsdc.set(ARBITRUM_USDC, 1_000_000n);
+  world.evmUsdc.set(ARBITRUM_USDC, 2_000_000n);
   const r = await preflight();
   expect(r.status, r.stderr).toBe(0);
   expect(r.out.ok).toBe(true);
   expect(r.out.balances.every((b: any) => b.ok)).toBe(true);
   expectNothingSent();
+});
+
+/**
+ * D21, #57: the Protocol holds the posting's gas in hand. NEAR takes a transaction's attached gas
+ * up front at max(gas price, min_gas_purchase_price), 1e9 yoctoNEAR on mainnet, and refunds what's
+ * unused only afterwards. The old check asked for the posting fee plus 0.1 NEAR; Nov 7's post
+ * failed with the fee prepaid and 0.0903 NEAR left, its 270 Tgas transfer-and-call wanting 0.2709.
+ */
+test("D21: a Protocol with the posting fee plus 0.1 NEAR is short of the posting's gas, and nothing is sent", async () => {
+  world.near.set(PROTOCOL, 7n * YOCTO / 10n);
+  world.prepaid.delete(PROTOCOL);
+  const r = await preflight();
+  expect(r.status, r.stderr).toBe(3);
+  const protocol = r.out.balances.find((b: any) => b.who === PROTOCOL && b.asset === "NEAR");
+  expect(protocol.ok).toBe(false);
+  // The fee (0.5) and its first balance entry's storage (0.01), the prepayment's 30 Tgas (0.03)
+  // and the transfer-and-call's 270 Tgas (0.27) at 1e9, each call's receipt costs (under 0.002),
+  // and the 182 bytes the account stores (0.00182, locked).
+  expect(near(protocol.need)).toBeGreaterThan(81n * YOCTO / 100n);
+  expect(near(protocol.need)).toBeLessThan(815n * YOCTO / 1000n);
+  expectNothingSent();
+});
+
+/** D21, #57: with the posting fee prepaid, as `demo.bountee.near`'s was on Nov 7, only the transfer-and-call's gas is left to hold. */
+test("D21: with the posting fee prepaid, the Protocol needs Nov 7's 0.2709 NEAR of gas in hand, and 0.0903 is short", async () => {
+  world.near.set(PROTOCOL, 903n * YOCTO / 10_000n);
+  world.prepaid.set(PROTOCOL, POSTING_FEE);
+  try {
+    const r = await preflight();
+    expect(r.status, r.stderr).toBe(3);
+    const protocol = r.out.balances.find((b: any) => b.who === PROTOCOL && b.asset === "NEAR");
+    // Nov 7's 0.2709 NEAR, plus the stake the account's 182 bytes lock.
+    expect(near(protocol.need)).toBeGreaterThan(2709n * YOCTO / 10_000n);
+    expect(near(protocol.need)).toBeLessThan(2740n * YOCTO / 10_000n);
+    expectNothingSent();
+  } finally {
+    world.prepaid.delete(PROTOCOL);
+  }
 });
 
 /** D21, ADR-0018: with no settings, the preflight plans ADR-0018's run: two claims (the cheat and the win) and a 1-day disclosure delay. */
@@ -210,19 +276,36 @@ test("D21: the Whitehat's budget follows each claim's input on the proof chain: 
   world.node = 500;
   const r = await preflight();
   const [cheat, win] = r.out.run.claim_budget;
-  // The cheat proves the accounts its purchase reads, on Base: the router, pair, WETH, and
-  // Circle's USDC and its implementation; the win reads none of Uniswap's.
+  // The cheat (HonestUser.s.sol on the PositionVault: buy, approve, deposit, redeem) proves
+  // the accounts its purchase reads, on Base: the router, pair, WETH, and Circle's USDC and
+  // its implementation, with 7 of USDC's slots; the win reads none of Uniswap's, and 6 of
+  // USDC's slots. The slot counts are ticket #52's measurement of the new vault's replays
+  // (claim-budget.ts, DEMO_READS), independent of the code that budgets them.
   const proved = requests.filter((q) => q.method === "eth_getProof").map((q) => `${q.where} ${q.detail}`);
-  for (const [address, slots] of [[ROUTER, 0], [PAIR, 6], [WETH, 2], [BASE_USDC, 8], [USDC_IMPL, 0], [BASE_USDC, 4], [COINBASE, 0]] as const) {
+  for (const [address, slots] of [[ROUTER, 0], [PAIR, 6], [WETH, 2], [BASE_USDC, 7], [USDC_IMPL, 0], [BASE_USDC, 6], [COINBASE, 0]] as const) {
     expect(proved).toContain(`chain 8453 ${address} ${slots}`);
   }
-  expect(proved.every((q) => q.startsWith("chain 8453 "))).toBe(true);
+  expect(proved.filter((q) => q.startsWith(`chain 8453 ${BASE_USDC} `))).toHaveLength(2);
+  // The cheat is filed on Base; a win may be proven on either chain (ADR-0020), so it is also
+  // budgeted on Arbitrum One from that chain's own accounts: its fresh sender and vault, its
+  // coinbase, and its Circle USDC and implementation, none of Uniswap's.
+  const onArbitrum = proved.filter((q) => q.startsWith("chain 42161 "));
+  for (const [address, slots] of [[ARBITRUM_USDC, 6], [ARBITRUM_USDC_IMPL, 0], [ARBITRUM_COINBASE, 0]] as const) {
+    expect(onArbitrum).toContain(`chain 42161 ${address} ${slots}`);
+  }
+  expect(onArbitrum).toHaveLength(5);
+  expect(proved.every((q) => q.startsWith("chain 8453 ") || q.startsWith("chain 42161 "))).toBe(true);
+  expect(cheat).toMatchObject({ kind: "cheat", chain_id: 8453 });
   expect(cheat.input_bytes).toBeGreaterThan(win.input_bytes);
   // OutLayer holds the storage price for every input byte above the free 32 KiB (fees()).
   for (const c of [cheat, win]) expect(near(c.refunded)).toBe(BigInt(c.input_bytes - 32 * 1024) * 10n ** 19n);
-  // The claims run one at a time and each hold comes back: the cheat's whole draw, and the win's draw less its hold.
+  // The claims run one at a time and each hold comes back: the cheat's whole draw, and the win's
+  // draw less its hold, plus one claim's gas in hand: `submit_claim` attaches 300 Tgas, which NEAR
+  // takes up front at its 1e9 yoctoNEAR minimum price, 0.3 NEAR, before refunding what's unused.
   const whitehat = r.out.balances.find((b: any) => b.who === WHITEHAT);
-  expect(near(whitehat.need)).toBe(near(cheat.draw) + near(win.draw) - near(win.refunded));
+  const gasInHand = near(whitehat.need) - (near(cheat.draw) + near(win.draw) - near(win.refunded));
+  expect(gasInHand).toBeGreaterThanOrEqual(3n * YOCTO / 10n);
+  expect(gasInHand).toBeLessThan(31n * YOCTO / 100n);
   // A deeper trie on the proof chain makes bigger proofs, and the budget grows with them.
   world.node = 1000;
   const deeper = await preflight();
@@ -230,6 +313,44 @@ test("D21: the Whitehat's budget follows each claim's input on the proof chain: 
   expect(near(deeper.out.balances.find((b: any) => b.who === WHITEHAT).need)).toBeGreaterThan(near(whitehat.need));
   world.node = 500;
   expectNothingSent();
+});
+
+/**
+ * D21, ADR-0020: a winning claim may be proven on either covered chain, and each chain's replay
+ * carries that chain's proofs and header, so the win is budgeted on each chain from its own
+ * proofs (not carried over from Base's), and the Whitehat holds the costliest chain's.
+ */
+test("D21: the win is budgeted on each covered chain from that chain's proofs, and the Whitehat holds the costliest one", async () => {
+  world.near.clear();
+  world.node = 500;
+  try {
+    // Arbitrum One's trie the deeper: its win carries the bigger proofs.
+    world.nodeOn.set(42161, 900);
+    const r = await preflight();
+    const wins = r.out.run.win_budgets;
+    expect(wins.map((w: any) => w.chain_id)).toEqual([8453, 42161]);
+    expect(wins[1].input_bytes).toBeGreaterThan(wins[0].input_bytes + 10_000);
+    expect(r.out.run.claim_budget.map((c: any) => [c.kind, c.chain_id])).toEqual([["cheat", 8453], ["win", 42161]]);
+    expect(r.out.run.claim_budget[1]).toEqual({ kind: "win", ...wins[1] });
+
+    // Base's the deeper instead: Base's win is the one held.
+    world.nodeOn.set(42161, 300);
+    const base = await preflight();
+    expect(base.out.run.win_budgets[0].input_bytes).toBeGreaterThan(base.out.run.win_budgets[1].input_bytes);
+    expect(base.out.run.claim_budget.map((c: any) => [c.kind, c.chain_id])).toEqual([["cheat", 8453], ["win", 8453]]);
+    // A run filing only the win holds its whole draw: Arbitrum's when Arbitrum's trie is the deeper.
+    // (With the cheat filed too, the cheat's draw is the largest and each win keeps only its job.)
+    const need = (x: typeof r) => near(x.out.balances.find((b: any) => b.who === WHITEHAT).need);
+    const winOnly = await preflight({ CLAIMS: "1" });
+    expect(winOnly.out.run.claim_budget).toEqual([{ kind: "win", ...winOnly.out.run.win_budgets[0] }]);
+    world.nodeOn.set(42161, 900);
+    const winOnlyArbitrum = await preflight({ CLAIMS: "1" });
+    expect(winOnlyArbitrum.out.run.claim_budget).toEqual([{ kind: "win", ...winOnlyArbitrum.out.run.win_budgets[1] }]);
+    expect(need(winOnlyArbitrum)).toBeGreaterThan(need(winOnly));
+    expectNothingSent();
+  } finally {
+    world.nodeOn.clear();
+  }
 });
 
 /** R1.4: the delay is a setting, and one outside 1-90 days stops the script before it reads or sends anything. */

@@ -13,7 +13,7 @@ import {MockUSDC} from "../src/MockUSDC.sol";
 ///   VAULT     (address, required) — the deployed DemoVault.
 ///   ATTACKER  (address, optional) — where the loot goes; defaults to the broadcaster.
 /// Broadcast key: a fresh account with no role on the vault.
-contract Exploit is Script {
+contract DrainStrategy is Script {
     function run() external {
         DemoVault vault = DemoVault(vm.envAddress("VAULT"));
         MockUSDC usdc = MockUSDC(address(vault.token()));

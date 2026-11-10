@@ -9,14 +9,14 @@ const verify = (page: Page) => page.getByRole("region", { name: "Verify" });
 const row = (page: Page, name: string) => verify(page).getByRole("listitem").filter({ hasText: name });
 const chainRow = (page: Page, chain: string) => page.getByRole("region", { name: `Pause on ${chain}` });
 
-test("D6: Verify shows each check as passing, failing or not yet published", async ({ page }) => {
+test("D6, D30: Verify shows each check as passing, failing or not yet published, under a command naming mainnet's contract", async ({ page }) => {
   const w = emptyWorld();
   post(w, ID);
   // Paid; both pauses landed, only Base's recorded verified; OutLayer has no attestation for the verdict.
   win(w, ID, 0, { landed: [BASE, ARBITRUM], verified: [BASE] });
   await setWorld(page, w);
   await open(page);
-  await expect(verify(page).getByText(`bountee verify ${ID.protocol}/${ID.name} --network mainnet`)).toBeVisible();
+  await expect(verify(page).getByText(`bountee verify ${ID.protocol}/${ID.name} --contract bounty.bountee.near --network mainnet`)).toBeVisible();
   await expect(row(page, "Payout on NEAR")).toContainText("PASS");
   await expect(row(page, "Payout on NEAR").getByRole("link")).toHaveAttribute("href", /^https:\/\/nearblocks\.io\/txns\//);
   await expect(row(page, "Pauses landed")).toContainText("PASS");

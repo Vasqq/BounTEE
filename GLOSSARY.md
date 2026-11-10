@@ -87,7 +87,7 @@ A pause that NEAR's MPC network has confirmed succeeded on its chain, in a block
 _Avoid_: Confirmed pause, finalized pause
 
 **Proof chain**:
-The one chain, named at posting, whose recent state every exploit is judged against. A winning exploit still pauses every covered chain.
+The covered chain a claim names, whose recent state that claim is judged against. Any covered chain can be a claim's proof chain, and a winning exploit still pauses every covered chain.
 _Avoid_: Home chain, main chain
 
 **Exploit**:
@@ -115,7 +115,7 @@ A contract in the snapshot that an exploit may use but that the bounty doesn't c
 _Avoid_: External contract, helper
 
 **Listed token**:
-A token the Protocol names at posting as counting toward gain and loss, each with a posting price.
+A token on one covered chain that the Protocol names at posting as counting toward gain and loss on that chain, each with a posting price.
 _Avoid_: Whitelisted token, supported asset
 
 **Posting price**:
@@ -137,7 +137,7 @@ An account that doesn't exist in the snapshot, holding no roles and no deposits.
 _Avoid_: Attacker address, burner
 
 **Seed**:
-The fixed starting balance of listed tokens fresh accounts receive for a replay, subtracted before scoring.
+The fixed starting balance fresh accounts receive for a replay, subtracted before scoring.
 _Avoid_: Capital, funding
 
 **Attacker holdings**:
@@ -148,7 +148,7 @@ _Avoid_: Attacker wallet
 The value of the attacker holdings at the end of the replay, minus the value of the seed, at posting prices (R3.8).
 
 **Loss**:
-The fall in the value of the covered contracts' holdings during the replay, at posting prices (R3.8).
+The fall in the value of the holdings of the covered contracts on the claim's proof chain during the replay, at posting prices (R3.8).
 _Avoid_: Drain, damage
 
 **Score**:

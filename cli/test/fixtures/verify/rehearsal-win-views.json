@@ -1,0 +1,134 @@
+{
+  "contract": "g67.bountee-r33white-1105.testnet",
+  "bounty": {
+    "id": {
+      "protocol": "bountee-a54-1108.testnet",
+      "name": "demo-202611091639"
+    },
+    "rules": {
+      "covered_contracts": [
+        {
+          "chain_id": 84532,
+          "address": "0x586c5742fa199a4027ad49bbe89d89b67ddd4e06"
+        },
+        {
+          "chain_id": 421614,
+          "address": "0x7d2efce36c5aa6dad084e44280c795c6f7aafc53"
+        }
+      ],
+      "recency_limit_secs": 300,
+      "listed_tokens": [
+        {
+          "chain_id": 84532,
+          "token": "0x798882e923a49777cfc23978e6c98fcc4dd0d6c8",
+          "price": "1"
+        },
+        {
+          "chain_id": 84532,
+          "token": "native",
+          "price": "0"
+        },
+        {
+          "chain_id": 421614,
+          "token": "0x744f3b354ca677a711693a9f4a8a087c85ecf690",
+          "price": "1"
+        },
+        {
+          "chain_id": 421614,
+          "token": "native",
+          "price": "0"
+        }
+      ],
+      "seed": {
+        "native": "1000000000000000000",
+        "tokens": []
+      },
+      "bounty_amount": "100000000",
+      "minimum_theft": "1000000000",
+      "end_date_ns": "1796834424855000000",
+      "disclosure_delay_days": 30,
+      "exploit_public_key": "x25519:AYboYf9p4ickrC5w4W92U7Nk6WTvu4Zp9UbpE5iXYbRR",
+      "judge_build_hash": "0xd61ef3c3482fae1f537cf420be64e68e15f63d88d235da749bd537009962ef95"
+    },
+    "state": "paid",
+    "winning_claim": 1,
+    "signed_pauses": [
+      {
+        "chain_id": 84532,
+        "contract": "0x586c5742fa199a4027ad49bbe89d89b67ddd4e06",
+        "nonce": 0,
+        "tx": "0x02f87183014a348083989680843b9aca0083030d4094586c5742fa199a4027ad49bbe89d89b67ddd4e0680848456cb59c080a0368f6215bbf0777f93ec845e55c9f1f149cf1f56ceaab97c53a8965a69445735a01a704a46aea88bd8527433957a9bf2c9cf3e3e54a26a6183e1a62fc1877463ae",
+        "tx_hash": "0xbac5c15e5e8d81cabc1bafbe22c24fd176d216f12bc3c726bd4fc026bbf893e8"
+      },
+      {
+        "chain_id": 421614,
+        "contract": "0x7d2efce36c5aa6dad084e44280c795c6f7aafc53",
+        "nonce": 0,
+        "tx": "0x02f87183066eee8083989680843b9aca0083030d40947d2efce36c5aa6dad084e44280c795c6f7aafc5380848456cb59c080a05e997e3ac67d5fdce71300b7b47a86ce3732124ba166c7d3a3fc0b8849de71bea0781506c2cc4e4015e9c97bd5307ebcea90c31e63448a0495347460ef93660e0f",
+        "tx_hash": "0x7b8ec5830f7428ca7f4fdce97bb9f14dbaadbaec4952a57ca12bed30575db84e"
+      }
+    ],
+    "signing_pauses": false,
+    "paying_out": false,
+    "payout_waits_until_ns": null,
+    "posting_fee_left": "447379999999999999999997"
+  },
+  "claim_id": 1,
+  "claim": {
+    "bounty": {
+      "protocol": "bountee-a54-1108.testnet",
+      "name": "demo-202611091639"
+    },
+    "whitehat": "bountee-w53-1108.testnet",
+    "block": {
+      "chain_id": 421614,
+      "number": 327611088,
+      "hash": "0x90cfd52ba90bd360a98de9f3a7cd0fd084564334949f3654fecde9fa621c4f9a"
+    },
+    "header": "0xf90224a0ebbeea93519622b48bf2d19b3b85c0e0c41893ce73a030640cd287462386c079a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d4934794a4b000000000000000000073657175656e636572a0d583fe05fff1649d2753cc9996655f071248140c4fcbdc0c980f72afdb574052a0496e55995292b7e3fba6b6d1b0b1d975b8f25721b7afbd7cf88b2b2fae474230a0fa3148e0db9cd8cca86de592f75df9f1fc3aa4465a12d5712ed6397272d90c5ab901000000000200000000800000000000008002541000010000000000000000001100040000200000001000800000000000000400000000040020200000000020040200000080010000002004800840000000800000020000000000000008100104000020000002010100000000800000080000000000000000000400001040000000010a80000800000800000000000000004000040000000000000008000080120002000000000000000000000000010200000000000000000000400000000000000200001200000000002000002022000001000000000100000400000000102000801000000000000800000000100000000100000000000000000000000000000001841386f2d08704000000000000830acea2846af1f7d0a0447f6888b91f9dd75267de35f271853366c1438ea08047a8ed5051b5297e0351a0000000000001d0320000000000b89cd3000000000000003d0001000000000000880000000000223d8a8401312d00",
+    "proofs_sha256": "0x14e966e6255a3f046a6e7025ad6d2a8c21c7b48485902bb9885b9cbfa377e8ea",
+    "submitted_at_ns": "1794242523528571734",
+    "submitted_at_block": "276946036",
+    "step_started_at_block": "276946038",
+    "secret_profile": "c1",
+    "state": "judged",
+    "verdict": {
+      "outcome": "PAYS",
+      "reason": "minimum_theft_reached"
+    }
+  },
+  "config": {
+    "outlayer": "outlayer.testnet",
+    "mpc": "v1.signer-prod.testnet",
+    "mpc_root_public_key": "secp256k1:4NfTiv3UsGahebgTaHyD9vF8KYKMBnfd6kh94mK6xv8fGBiJB8TBtFMP5WWXz6B89Ac1fbpzPwAvoyQebemHFwx3",
+    "usdc": "ft.bountee-spike4.testnet",
+    "judge_build_hash": "0xd61ef3c3482fae1f537cf420be64e68e15f63d88d235da749bd537009962ef95",
+    "judge_wasm_url": "https://test.fastfs.io/g67.bountee-r33white-1105.testnet/outlayer.testnet/d61ef3c3482fae1f537cf420be64e68e15f63d88d235da749bd537009962ef95.wasm",
+    "seed": {
+      "native": "1000000000000000000",
+      "tokens": []
+    }
+  },
+  "pause_verifications": [
+    {
+      "chain_id": 84532,
+      "verified": true,
+      "verified_pauses": [
+        "0xbac5c15e5e8d81cabc1bafbe22c24fd176d216f12bc3c726bd4fc026bbf893e8"
+      ],
+      "attempts": 1,
+      "prepaid_attempts_left": 2,
+      "verifying": false
+    },
+    {
+      "chain_id": 421614,
+      "verified": true,
+      "verified_pauses": [
+        "0x7b8ec5830f7428ca7f4fdce97bb9f14dbaadbaec4952a57ca12bed30575db84e"
+      ],
+      "attempts": 1,
+      "prepaid_attempts_left": 2,
+      "verifying": false
+    }
+  ]
+}

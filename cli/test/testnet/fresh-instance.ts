@@ -1,22 +1,25 @@
 // A fresh demo instance and its bounty posted (D21): every winning run closes its bounty and
-// pauses its vault, so each run uses a new one. NETWORK picks the network (#43): testnet (the
-// default) deploys on Base Sepolia (and, with CHAINS, more chains) with a mock USDC and
-// posts on NEAR testnet; mainnet deploys on Base and Arbitrum One with Circle's USDC (2 into
-// the proof chain's vault, 1 into each other, ADR-0018) and posts on NEAR mainnet.
+// pauses its vault, so each run uses a new one. The demo vault is a PositionVault (ADR-0019).
+// NETWORK picks the network (#43): testnet (the default) deploys on Base Sepolia (and, with
+// CHAINS, more chains) with a mock USDC and posts on NEAR testnet; mainnet deploys on Base and
+// Arbitrum One with Circle's USDC (2 into each chain's vault, so a theft proven on either
+// reaches the 1 USDC minimum theft, ADR-0020) and posts on NEAR mainnet.
 //
 // 0. Reports every balance the run needs, and stops before spending anything, naming what
 //    to top up, if any would run dry (spec, Testing Decisions).
 // 1. Reads the new bounty's pause-role address from the bounty contract (`pause_role`), and
 //    checks it against the formats' own derivation (D25). One address serves every chain.
-// 2. On each chain, deploys a new DemoVault (demo/script/Deploy.s.sol, --broadcast), with a
-//    new MockUSDC minted into it on testnet or real USDC sent from the deployer on mainnet,
-//    granting the pause role to that address.
+// 2. On each chain, deploys a new PositionVault (demo/script/Deploy.s.sol, --broadcast),
+//    granting the pause role to that address, and funds it by the deployer's own deposit:
+//    a new MockUSDC minted to the deployer on testnet, Circle's USDC the deployer holds on
+//    mainnet, approved to the vault and deposited for shares (ADR-0019).
 // 3. On each chain, funds the pause-role address with the pause gas the posting check asks
 //    for (R7.6): the gas its signed pause may burn at its fee limit (200,000 gas at 1 gwei =
 //    0.0002 ETH), plus Base's L1 data fee allowance (0.00001 ETH); the formats'
 //    `PAUSE_GAS_PER_PAUSE`.
-// 4. Posts the bounty with `bountee post` (#17), covering every chain's vault, the first
-//    chain as its proof chain (D1); it goes live once the enclave's posting check passes.
+// 4. Posts the bounty with `bountee post` (#17), covering every chain's vault and listing each
+//    chain's USDC at price 1 and its native coin at 0 (ADR-0020): a claim may be proven on any
+//    of them (D1). It goes live once the enclave's posting check passes.
 //
 // The deployer's key never goes on forge's or cast's command line (where a failed command's
 // error would print it): they read it from a throwaway encrypted keystore (evm-key.ts), and
@@ -33,10 +36,18 @@
 // default 1, ADR-0018), WHITEHAT and CLAIMS (the Whitehat and how many claims the run files,
 // for the preflight; default 2, ADR-0018's cheat and win), DEPLOYER_ENV (default
 // ~/.bountee-testnet/base-sepolia-deployer.env, ~/.bountee-mainnet/deployer.env; the same key
-// deploys on every chain), CHAINS (comma-separated chain IDs, the proof chain first; default
-// 84532 on testnet, 8453,42161 on mainnet), RPC (the proof chain's RPC), CHAIN_RPCS
-// (<chain id>=<url>,... for any chain; every chain's default is in cli/src/chains.ts),
-// NEAR_RPC, PREFLIGHT_ONLY=1 to stop after step 0.
+// deploys on every chain), CHAINS (comma-separated chain IDs; the cheat is filed on the first, a
+// win budgeted on each; default 84532 on testnet, 8453,42161 on mainnet), RPC (the first chain's RPC),
+// CHAIN_RPCS (<chain id>=<url>,... for any chain; every chain's default is in cli/src/chains.ts),
+// NEAR_RPC, EXPLOIT_PUBLIC_KEY (the rules' exploit key, x25519:<base58>, such as the one
+// `bountee open-exploit --public-key` derives from the Protocol's wallet; default: a new key,
+// written to <dir>/<name>-exploit-key.pem), END_IN_SECS (the end date, this many seconds after
+// the posting is built; default 30 days: the testnet site's seed sets a few minutes for its
+// Ended and Withdrawn bounties, D33), SKIP_GRANT=1 (each vault names the deployer as its pauser,
+// so the pause role is never granted and the posting check fails: the bounty ends Check failed
+// with its USDC refunded, which the script then expects instead of Live, D33), PREFLIGHT_ONLY=1
+// to stop after step 0. The deployment it reads and the instance it writes are BOUNTEE_DAY3 and
+// BOUNTEE_INSTANCE.
 import { execFileSync, spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -44,13 +55,15 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { base58 } from "@scure/base";
-import { PAUSE_GAS_PER_PAUSE, pauseRole } from "@bountee/formats";
+import { PAUSE_GAS_PER_PAUSE, parseRules, pauseRole } from "@bountee/formats";
 import { parseRpcFlags } from "../../src/broadcast.ts";
 import { CHAINS, defaultRpc, proofRpcs } from "../../src/chains.ts";
 import { rpc } from "../../src/proofs.ts";
-import { budgetClaims, whitehatNeed, type ClaimBudget, type ClaimPlan, type Read } from "./claim-budget.ts";
-import { formatNear, milliNear } from "../../src/near.ts";
-import { MPC_ROOT, near, network as NETWORK, need, stopIfShort, wholeNumber, type Need } from "./deploy.ts";
+import { DEMO_READS, budgetClaims, whitehatNeed, type ClaimBudget, type ClaimPlan, type Read, type Role } from "./claim-budget.ts";
+import { CLAIM_GAS } from "../../src/claim.ts";
+import { formatNear, roundUpNear } from "../../src/near.ts";
+import { postingNeed } from "../../src/post.ts";
+import { DEMO_DEPLOY_GAS, MPC_ROOT, near, network as NETWORK, need, stopIfShort, VAULT_USDC, wholeNumber, type Need } from "./deploy.ts";
 import { keystoreEnv, redact } from "./evm-key.ts";
 
 const home = homedir();
@@ -76,19 +89,31 @@ const DISCLOSURE_DELAY_DAYS = wholeNumber("DISCLOSURE_DELAY_DAYS", 1);
 if (DISCLOSURE_DELAY_DAYS < 1 || DISCLOSURE_DELAY_DAYS > 90) {
   throw new Error(`DISCLOSURE_DELAY_DAYS is ${DISCLOSURE_DELAY_DAYS}: a disclosure delay is 1-90 days (R1.4)`);
 }
+// A malformed exploit key would only be refused at posting, after the vaults are deployed.
+if (process.env.EXPLOIT_PUBLIC_KEY) {
+  const [curve, key] = process.env.EXPLOIT_PUBLIC_KEY.split(":");
+  let bytes = 0;
+  try {
+    bytes = base58.decode(key ?? "").length;
+  } catch {}
+  if (curve !== "x25519" || bytes !== 32) throw new Error(`EXPLOIT_PUBLIC_KEY is ${process.env.EXPLOIT_PUBLIC_KEY}: it must be x25519:<32 bytes, base58>`);
+}
 // The claims the run files, for the Whitehat's preflight: ADR-0018's run files two, the cheat
 // that scores zero and the winning claim. A run that files more (the Day-3 checkpoint's three)
 // says so.
 const CLAIMS = wholeNumber("CLAIMS", 2);
+// The end date, END_IN_SECS after the rules are built (R1.4 refuses one not in the future).
+const END_IN_SECS = wholeNumber("END_IN_SECS", 30 * 86_400);
+if (END_IN_SECS === 0) throw new Error("END_IN_SECS is 0: the end date must be in the future (R1.4)");
+// D33's Check failed: the vaults never grant the pause role, so the posting check refuses.
+const SKIP_GRANT = process.env.SKIP_GRANT === "1";
+const EXPECTED_STATE = SKIP_GRANT ? "check_failed" : "live";
 const CHAIN_IDS = (process.env.CHAINS ?? (MAINNET ? "8453,42161" : "84532")).split(",").map(Number);
 const CHAIN = CHAIN_IDS[0]!;
 const chainRpcs = { ...parseRpcFlags(process.env.CHAIN_RPCS ? process.env.CHAIN_RPCS.split(",") : []), ...(process.env.RPC ? { [CHAIN]: process.env.RPC } : {}) };
 const rpcOf = (chain: number) => chainRpcs[chain] ?? defaultRpc(chain) ?? (() => { throw new Error(`no RPC for chain ${chain}: set CHAIN_RPCS`); })();
 const chainName = (chain: number) => CHAINS[chain]?.name ?? `chain ${chain}`;
-// How much of Circle's USDC each mainnet vault starts with (ADR-0018: 2 on the proof chain,
-// 1 on each other; the replay measures it). Testnet mints a mock.
 const circleUsdc = (chain: number) => CHAINS[chain]?.usdc ?? (() => { throw new Error(`no USDC known on chain ${chain}`); })();
-const vaultSeed = (chain: number) => (chain === CHAIN ? 2_000_000n : 1_000_000n);
 if (MAINNET) CHAIN_IDS.forEach(circleUsdc);
 const nearChain = `near-${NETWORK}`;
 const OUT = process.env.BOUNTEE_INSTANCE ?? join(dir, "day3-instance.json");
@@ -136,61 +161,98 @@ const eth = (wei: bigint) => `${(Number(wei) / 1e18).toFixed(6)} ETH`;
 
 // ---- 0. Preflight --------------------------------------------------------------------------------
 
+/**
+ * The bounty's rules, covering `vaults` and listing each chain's USDC (`usdcs`) at price 1 and its
+ * native coin at 0 (ADR-0020): built for the preflight's sizing before the vaults exist, and for
+ * the posting after.
+ */
+function bountyRules(config: any, vaults: { chain_id: number; address: string }[], usdcs: { chain_id: number; usdc: string }[], exploitPublicKey: string) {
+  return {
+    covered_contracts: vaults,
+    recency_limit_secs: 300,
+    listed_tokens: usdcs.flatMap(({ chain_id, usdc }) => [
+      { chain_id, token: usdc, price: "1" },
+      { chain_id, token: "native", price: "0" },
+    ]),
+    seed: config.seed,
+    bounty_amount: BOUNTY_AMOUNT,
+    minimum_theft: MINIMUM_THEFT,
+    end_date_ns: String(BigInt(Date.now() + END_IN_SECS * 1000) * 1_000_000n),
+    disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
+    exploit_public_key: exploitPublicKey,
+    judge_build_hash: config.judge_build_hash,
+  };
+}
+
 const fees = await near.view(CONTRACT, "fees");
 // Gas limit at the fee limit (0.0002 ETH, R7.6), plus the L1 data fee an OP-stack chain such as
 // Base charges on top: its pool refuses a pause whose sender holds exactly gas x max fee (Day-3
 // run, Nov 5: "have 200000000000000 want 200000000001544"). The posting check asks for this.
 const pauseGasWei = PAUSE_GAS_PER_PAUSE;
-// Deploy.s.sol plus the pause-gas transfer, ~3.2M gas: at 3x today's price (floor 0.05 gwei),
-// plus 0.00005 ETH of slack.
+// Deploy.s.sol plus the pause-gas transfer (DEMO_DEPLOY_GAS): at 3x today's price (floor
+// 0.05 gwei), plus 0.00005 ETH of slack.
 const deployWei = (rpc: string) => {
   const gasPrice = BigInt(cast("gas-price", "--rpc-url", rpc));
   const deployPrice = 3n * gasPrice > 50_000_000n ? 3n * gasPrice : 50_000_000n;
-  return 4_000_000n * deployPrice + 50_000_000_000_000n;
+  return DEMO_DEPLOY_GAS * deployPrice + 50_000_000_000_000n;
 };
 const WHITEHAT = process.env.WHITEHAT;
 const ftBalance = async (who: string) => BigInt(await near.view<string>(USDC, "ft_balance_of", { account_id: who }));
 
-// The proof chain's RPC for the claims' proofs: the one given, else one known to serve proofs.
-const proofRpc = chainRpcs[CHAIN] ?? proofRpcs(CHAIN)[0] ?? rpcOf(CHAIN);
-// The router demo/script/HonestUser.s.sol buys Circle's USDC through on mainnet (Uniswap V2).
+// A chain's RPC for a claim's proofs: the one given, else one known to serve proofs.
+const proofRpcOf = (chain: number) => chainRpcs[chain] ?? proofRpcs(chain)[0] ?? rpcOf(chain);
+// The router demo/script/HonestUser.s.sol buys Circle's USDC through on mainnet (Uniswap V2 on
+// Base, where the cheat is filed).
 const UNISWAP_V2_ROUTER = "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24";
 // Circle's USDC is a proxy, and every call reads its implementation's code. FiatTokenProxy keeps
 // the implementation at ZeppelinOS's slot, keccak256("org.zeppelinos.proxy.implementation"), not
 // EIP-1967's.
 const IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
 
+const runtimes = new Map<string, string>();
+/** A demo contract's compiled runtime code, compiled once. */
+const runtime = (name: string) => {
+  if (!runtimes.has(name)) runtimes.set(name, foundry("forge", ["inspect", name, "deployedBytecode"], { cwd: demoDir }));
+  return runtimes.get(name)!;
+};
+
 /**
- * The run's claims and what each replay reads (the accounts and slot counts the Day-3 run's jobs
- * and #35's mainnet cheat proved): the cheat (demo/script/HonestUser.s.sol) first, then the
- * winning exploit (Exploit.s.sol) for every other claim; a one-claim run files only the win.
+ * What a demo claim of `kind` proven on `chain` reads (claim-budget.ts's DEMO_READS, measured on
+ * the PositionVault's replays), each account resolved on that chain: its coinbase, its USDC, and
+ * for the cheat (demo/script/HonestUser.s.sol, filed on Base) Uniswap's. A contract the run
+ * deploys (the vault, and the mock USDC on testnet) is budgeted from its compiled code.
  */
-async function claimPlans(): Promise<ClaimPlan[]> {
-  const call = (to: string, sig: string, ...args: string[]) => cast("call", to, sig, ...args, "--rpc-url", proofRpc).split(" ")[0]!.toLowerCase();
-  const runtime = (name: string) => foundry("forge", ["inspect", name, "deployedBytecode"], { cwd: demoDir });
-  const head = await rpc<{ miner: string }>(proofRpc, "eth_getBlockByNumber", ["latest", false]);
-  const sender: Read = { name: "fresh sender", slots: 0 };
-  const coinbase: Read = { name: "block's coinbase", address: head.miner, slots: 0 };
-  const vault: Read = { name: "DemoVault", code: runtime("DemoVault"), slots: 0 };
-  let cheat: Read[];
-  let win: Read[];
+async function claimPlan(chain: number, kind: "cheat" | "win"): Promise<ClaimPlan> {
+  const url = proofRpcOf(chain);
+  const call = (to: string, sig: string, ...args: string[]) => cast("call", to, sig, ...args, "--rpc-url", url).split(" ")[0]!.toLowerCase();
+  const head = await rpc<{ miner: string }>(url, "eth_getBlockByNumber", ["latest", false]);
+  const accounts: Partial<Record<Role, Omit<Read, "slots">>> = {
+    sender: { name: "fresh sender" },
+    coinbase: { name: "block's coinbase", address: head.miner },
+    vault: { name: "PositionVault", code: runtime("PositionVault") },
+  };
   if (MAINNET) {
-    const usdc = circleUsdc(CHAIN);
-    const impl = `0x${BigInt(cast("storage", usdc, IMPLEMENTATION_SLOT, "--rpc-url", proofRpc)).toString(16).padStart(40, "0")}`;
+    const usdc = circleUsdc(chain);
+    const impl = `0x${BigInt(cast("storage", usdc, IMPLEMENTATION_SLOT, "--rpc-url", url)).toString(16).padStart(40, "0")}`;
     if (/^0x0+$/.test(impl)) throw new Error(`${usdc} names no implementation at ${IMPLEMENTATION_SLOT}`);
-    const weth = call(UNISWAP_V2_ROUTER, "WETH()(address)");
-    const pair = call(call(UNISWAP_V2_ROUTER, "factory()(address)"), "getPair(address,address)(address)", weth, usdc);
-    const token = [{ name: "USDC implementation", address: impl, slots: 0 }];
-    cheat = [sender, coinbase, vault, ...token, { name: "USDC", address: usdc, slots: 8 },
-      { name: "Uniswap V2 router", address: UNISWAP_V2_ROUTER, slots: 0 }, { name: "WETH/USDC pair", address: pair, slots: 6 }, { name: "WETH", address: weth, slots: 2 }];
-    win = [sender, coinbase, vault, ...token, { name: "USDC", address: usdc, slots: 4 }];
+    Object.assign(accounts, {
+      usdc_implementation: { name: "USDC implementation", address: impl },
+      usdc: { name: "USDC", address: usdc },
+    });
+    if (kind === "cheat") {
+      const weth = call(UNISWAP_V2_ROUTER, "WETH()(address)");
+      const pair = call(call(UNISWAP_V2_ROUTER, "factory()(address)"), "getPair(address,address)(address)", weth, usdc);
+      Object.assign(accounts, {
+        uniswap_router: { name: "Uniswap V2 router", address: UNISWAP_V2_ROUTER },
+        uniswap_pair: { name: "WETH/USDC pair", address: pair },
+        weth: { name: "WETH", address: weth },
+      });
+    }
   } else {
-    const mock = runtime("MockUSDC");
-    cheat = [sender, coinbase, vault, { name: "MockUSDC", code: mock, slots: 4 }];
-    win = [sender, coinbase, vault, { name: "MockUSDC", code: mock, slots: 2 }];
+    accounts.usdc = { name: "MockUSDC", code: runtime("MockUSDC") };
   }
-  const wins = Array.from({ length: Math.max(0, CLAIMS - 1) }, () => ({ kind: "win", reads: win }));
-  return CLAIMS === 0 ? [] : CLAIMS === 1 ? [{ kind: "win", reads: win }] : [{ kind: "cheat", reads: cheat }, ...wins];
+  const reads = Object.entries(DEMO_READS[NETWORK][kind]).map(([role, slots]) => ({ ...accounts[role as Role]!, slots: slots! }));
+  return { kind, reads };
 }
 
 const needs: Need[] = [];
@@ -201,23 +263,51 @@ for (const chain of CHAIN_IDS) {
   needs.push(need(DEPLOYER, chainName(chain), "ETH", BigInt(cast("balance", DEPLOYER, "--rpc-url", rpc)), deployWei(rpc) + pauseGasWei, eth));
   if (MAINNET) {
     const have = BigInt(cast("call", circleUsdc(chain), "balanceOf(address)(uint256)", DEPLOYER, "--rpc-url", rpc).split(" ")[0]!);
-    needs.push(need(DEPLOYER, chainName(chain), `USDC (${circleUsdc(chain)})`, have, vaultSeed(chain), showUsdc));
+    needs.push(need(DEPLOYER, chainName(chain), `USDC (${circleUsdc(chain)})`, have, VAULT_USDC, showUsdc));
   }
 }
-needs.push(need(PROTOCOL, nearChain, "NEAR", (await near.balance(PROTOCOL)) ?? 0n, BigInt(fees.posting_fee) + milliNear(100), showNear));
+// The posting's NEAR in hand (#57): sized on rules of the same shape as the real ones, with
+// placeholder vaults and exploit key of the same lengths (a key's base58 is 43 or 44 characters;
+// this one is 44), since neither exists yet.
+const sizingRules = parseRules(
+  bountyRules(
+    await near.view(CONTRACT, "config"),
+    CHAIN_IDS.map((chain_id) => ({ chain_id, address: `0x${"0".repeat(40)}` })),
+    CHAIN_IDS.map((chain_id) => ({ chain_id, usdc: MAINNET ? circleUsdc(chain_id) : `0x${"0".repeat(40)}` })),
+    "x25519:6W7B3sSYk1p2DZ7FXyRbJWDNiaRfVTj1hm6k8Cqnq6wA",
+  ),
+);
+const { need: postingNear } = await postingNeed(near, CONTRACT, { protocol: PROTOCOL, name: NAME }, sizingRules);
+needs.push(need(PROTOCOL, nearChain, "NEAR", (await near.freeNear(PROTOCOL)) ?? 0n, postingNear, showNear));
 needs.push(need(PROTOCOL, nearChain, `${MAINNET ? "" : "test "}USDC (${USDC})`, await ftBalance(PROTOCOL), BigInt(BOUNTY_AMOUNT), showUsdc));
 let claimBudgets: ClaimBudget[] = [];
+let winBudgets: ClaimBudget[] = [];
 if (WHITEHAT) {
-  // Each claim's draw, from the very proofs it will carry on this network's proof chain
-  // (claim-budget.ts); the Whitehat holds the largest draw plus what the others keep.
-  claimBudgets = await budgetClaims(proofRpc, fees, await claimPlans());
-  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.balance(WHITEHAT)) ?? 0n, whitehatNeed(claimBudgets), showNear));
+  // Each claim's draw, from the very proofs it will carry on the chain it is proven on
+  // (claim-budget.ts). The cheat is filed on the first chain (Base); a win may be proven on any
+  // covered chain (ADR-0020), so it is budgeted on each, from that chain's own proofs and header,
+  // and every win the run files is held at the costliest chain's. The Whitehat holds the
+  // largest draw plus what the others keep.
+  if (CLAIMS > 0) {
+    for (const chain of CHAIN_IDS) winBudgets.push(...(await budgetClaims(proofRpcOf(chain), fees, [await claimPlan(chain, "win")])));
+    const win = winBudgets.reduce((m, w) => (w.draw > m.draw ? w : m));
+    const cheat = CLAIMS === 1 ? [] : await budgetClaims(proofRpcOf(CHAIN), fees, [await claimPlan(CHAIN, "cheat")]);
+    claimBudgets = [...cheat, ...Array.from({ length: CLAIMS - cheat.length }, () => win)];
+  }
+  // Plus one claim's gas in hand (#57): `submit_claim` attaches CLAIM_GAS, bought up front, and the
+  // claims go one at a time, so the largest claim's call is the most ever held at once.
+  const claimGas = await Promise.all(
+    claimBudgets.map((c) => near.upfrontNear([{ method: "submit_claim", gas: CLAIM_GAS, deposit: 0n, argsBytes: c.input_bytes }])),
+  );
+  const claimGasNear = claimGas.reduce((m, x) => (x > m ? x : m), 0n);
+  needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.freeNear(WHITEHAT)) ?? 0n, roundUpNear(whitehatNeed(claimBudgets) + claimGasNear), showNear));
 }
+const shownBudget = (c: ClaimBudget) => ({ chain_id: c.chain_id, input_bytes: c.input_bytes, draw: showNear(c.draw), refunded: showNear(c.refunded) });
 stopIfShort(needs, {
   run: {
     claims: CLAIMS,
     disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
-    ...(WHITEHAT ? { claim_budget: claimBudgets.map((c) => ({ kind: c.kind, input_bytes: c.input_bytes, draw: showNear(c.draw), refunded: showNear(c.refunded) })) } : {}),
+    ...(WHITEHAT ? { claim_budget: claimBudgets.map((c) => ({ kind: c.kind, ...shownBudget(c) })), win_budgets: winBudgets.map(shownBudget) } : {}),
   },
 });
 
@@ -229,7 +319,7 @@ const role = await near.view<{ path: string; address: string }>(CONTRACT, "pause
 const derived = pauseRole.address(MPC_ROOT[NETWORK], CONTRACT, id);
 if (role.address !== derived) throw new Error(`pause_role says ${role.address}, the formats derive ${derived}`);
 
-// ---- 2. Demo vault ---------------------------------------------------------------------------------
+// ---- 2. PositionVault -----------------------------------------------------------------------------
 
 interface ChainInstance {
   chain_id: number;
@@ -252,15 +342,16 @@ for (const chain of CHAIN_IDS) {
   const forge = foundry("forge", ["script", "script/Deploy.s.sol", "--rpc-url", rpc, "--broadcast", "--sender", DEPLOYER, "--slow"], {
     signs: true,
     cwd: demoDir,
-    env: { PAUSE_ROLE: role.address, ...(MAINNET ? { USDC: circleUsdc(chain), SEED_USDC: vaultSeed(chain).toString() } : {}) },
+    env: { PAUSE_ROLE: SKIP_GRANT ? DEPLOYER : role.address, ...(MAINNET ? { USDC: circleUsdc(chain), SEED_USDC: VAULT_USDC.toString() } : {}) },
   });
   const deployed = JSON.parse(forge.slice(forge.indexOf("DEMO_DEPLOY_JSON:") + "DEMO_DEPLOY_JSON:".length).trim().split("\n")[0]!);
   const vault = String(deployed.vault).toLowerCase();
   const evmUsdc = String(deployed.usdc).toLowerCase();
   const runLog = JSON.parse(readFileSync(join(root, `demo/broadcast/Deploy.s.sol/${chain}/run-latest.json`), "utf8"));
   const deployTxs: string[] = runLog.receipts.map((r: { transactionHash: string }) => r.transactionHash);
-  if (cast("call", vault, "pauser()(address)", "--rpc-url", rpc).toLowerCase() !== role.address) {
-    throw new Error(`the vault's pauser on chain ${chain} isn't ${role.address}`);
+  const pauser = SKIP_GRANT ? DEPLOYER.toLowerCase() : role.address;
+  if (cast("call", vault, "pauser()(address)", "--rpc-url", rpc).toLowerCase() !== pauser) {
+    throw new Error(`the PositionVault's pauser on chain ${chain} isn't ${pauser}`);
   }
 
   // ---- 3. Pause gas --------------------------------------------------------------------------------
@@ -284,26 +375,19 @@ const proof = chains[0]!;
 // ---- 4. Post the bounty ------------------------------------------------------------------------------
 
 const config = await near.view(CONTRACT, "config");
-const x25519 = generateKeyPairSync("x25519");
-const pub = Buffer.from(x25519.publicKey.export({ format: "jwk" }).x!, "base64url");
-const exploitKeyFile = join(dir, `${NAME}-exploit-key.pem`);
-writeFileSync(exploitKeyFile, x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
-const rules = {
-  covered_contracts: chains.map((c) => ({ chain_id: c.chain_id, address: c.vault })),
-  proof_chain: CHAIN,
-  recency_limit_secs: 300,
-  listed_tokens: [
-    { token: proof.evm_usdc, price: "1" },
-    { token: "native", price: "0" },
-  ],
-  seed: config.seed,
-  bounty_amount: BOUNTY_AMOUNT,
-  minimum_theft: MINIMUM_THEFT,
-  end_date_ns: String(BigInt(Date.now() + 30 * 86_400_000) * 1_000_000n),
-  disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
-  exploit_public_key: `x25519:${base58.encode(pub)}`,
-  judge_build_hash: config.judge_build_hash,
-};
+const exploitPublicKey = process.env.EXPLOIT_PUBLIC_KEY ?? newExploitKey();
+function newExploitKey(): string {
+  const x25519 = generateKeyPairSync("x25519");
+  const pub = Buffer.from(x25519.publicKey.export({ format: "jwk" }).x!, "base64url");
+  writeFileSync(join(dir, `${NAME}-exploit-key.pem`), x25519.privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+  return `x25519:${base58.encode(pub)}`;
+}
+const rules = bountyRules(
+  config,
+  chains.map((c) => ({ chain_id: c.chain_id, address: c.vault })),
+  chains.map((c) => ({ chain_id: c.chain_id, usdc: c.evm_usdc })),
+  exploitPublicKey,
+);
 const rulesFile = join(dir, `${NAME}-rules.json`);
 writeFileSync(rulesFile, `${JSON.stringify(rules, null, 2)}\n`, { mode: 0o600 });
 const posted = spawnSync(
@@ -317,9 +401,10 @@ const posted = spawnSync(
   { encoding: "utf8" },
 );
 const postResult = JSON.parse(posted.stdout.trim().split("\n").pop() || posted.stderr.trim().split("\n").pop() || "{}");
-if (posted.status !== 0 || postResult.state !== "live") {
+// `post` exits 1 on a failed check, which SKIP_GRANT expects; the state read back decides.
+if (postResult.state !== EXPECTED_STATE || (EXPECTED_STATE === "live" && posted.status !== 0)) {
   save({ posted: false, rules, post: postResult });
-  throw new Error(`the bounty isn't live: ${posted.stdout}${posted.stderr}`);
+  throw new Error(`the bounty isn't ${EXPECTED_STATE}: ${posted.stdout}${posted.stderr}`);
 }
 
 const instance = {
@@ -338,6 +423,7 @@ const instance = {
   pause_gas_tx: proof.pause_gas_tx,
   chains,
   post_tx: postResult.post_tx,
+  state: postResult.state,
   rules,
   balances: needs,
 };

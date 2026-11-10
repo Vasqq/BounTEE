@@ -2,7 +2,7 @@
 
 **Bug bounties that pay the Whitehat the moment their exploit is proven, and pause the bug on every chain before anyone else can use it.**
 
-A Protocol posts a bounty in USDC on a NEAR contract that nobody holds a key to. A Whitehat (a person, or an AI agent with a key that can only file claims) writes the exploit as a Foundry script, seals it on their own machine and files a claim. An enclave replays it against the chain's recent state. If fresh accounts walk away with at least the bounty's minimum theft from the covered contracts, NEAR Chain Signatures signs a pause for every covered contract on every chain, the Whitehat is paid the whole bounty, and only then can the Protocol open the exploit. Anyone can check all of it afterwards, with no keys and no funds.
+A Protocol posts a bounty in USDC on a NEAR contract that nobody holds a key to. A Whitehat (a person, or an AI agent with a key that can only file claims) writes the exploit as a Foundry script, seals it on their own machine and files a claim on whichever covered chain the exploit works on. An enclave replays it against that chain's recent state. If fresh accounts walk away with at least the bounty's minimum theft from the covered contracts there, NEAR Chain Signatures signs a pause for every covered contract on every chain, the Whitehat is paid the whole bounty, and only then can the Protocol open the exploit. Anyone can check all of it afterwards, with no keys and no funds.
 
 Built for the NEAR hackathon, security track.
 
@@ -20,7 +20,7 @@ The core promises rest on things only NEAR provides. Each is backed by a mainnet
 
 | Promise | What on NEAR does it | Mainnet evidence |
 |---|---|---|
-| Nobody can take the bounty or block a valid payout: not the Protocol, not the Whitehat, not us (R2) | A **keyless contract**, `bounty.bountee.near`, holds the USDC and the right to request pauses. Its account has no access keys, so only its code can move funds. | Deployment and key removal: _pending mainnet run_ <!-- MAINNET: contract deploy tx; access-key deletion tx --> |
+| Nobody can take the bounty or block a valid payout: not the Protocol, not the Whitehat, not us (R2) | A **keyless contract**, `bounty2.bountee.near`, holds the USDC and the right to request pauses. Its account has no access keys, so only its code can move funds. | Deployment and key removal: _pending mainnet run_ <!-- MAINNET: contract deploy tx; access-key deletion tx --> |
 | One proven exploit pauses the bug on every chain at once (R7.1) | **Chain Signatures**: the contract asks NEAR's MPC network to sign a `pause()` from the bounty's own address on Base and on Arbitrum. No one holds that key. | Pause signing: _pending mainnet run_ <!-- MAINNET: sign-pauses tx --> · Pause on Base: _pending_ <!-- MAINNET: Base pause tx --> · Pause on Arbitrum: _pending_ <!-- MAINNET: Arbitrum pause tx --> |
 | A pause shown as "verified" really landed (R7.10) | **MPC foreign-chain transaction verification**: NEAR's MPC network checks the pause on Base and Arbitrum and the contract records it on NEAR. | Verified pauses: _pending mainnet run_ <!-- MAINNET: verify-pause tx (Base); verify-pause tx (Arbitrum) --> |
 | An AI agent can claim and be paid without holding the Whitehat's money keys (R14.2) | A **function-call access key** limited to the contract's two claim methods. NEAR itself refuses anything else signed with it. | Claim key added: _pending_ <!-- MAINNET: key add tx --> · Agent's claim: _pending_ <!-- MAINNET: agent's submit_claim tx --> · Payout: _pending_ <!-- MAINNET: payout tx --> |
@@ -39,6 +39,8 @@ alias bountee='node cli/src/main.ts'   # in a script, use `pnpm bountee` instead
 Each step below is a command and what it prints. They replay recorded jobs (the exact judge input: a block header, its state proofs and the exploit, all committed in the repo) through the judge compiled from this repo. The enclave's build differs from yours only in the bounty contract it answers to, so `bountee test` notes that yours is "not the bounty's pinned build", and `--judge` runs any build. They spend nothing and send nothing.
 
 **1. A real exploit of the demo vault pays.** Fresh accounts walk away with the vault's USDC.
+
+Steps 1 and 2 replay jobs recorded on the earlier demo vault (`demo/src/DemoVault.sol`). The live demo bounty now covers the position vault (`demo/src/PositionVault.sol`); its jobs replace these once the mainnet run records them (#35).
 
 ```console
 $ bountee test --job demo/fixtures/exploit.json
@@ -110,14 +112,14 @@ These need the network.
 **The bounty contract holds no keys.**
 
 ```console online pending
-$ curl -s https://free.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"bounty.bountee.near"}}'
+$ curl -s https://free.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"bounty2.bountee.near"}}'
 "keys":[]
 ```
 
 **Everything about the demo bounty checks out.** This one also needs Docker, for the reproducible build. `verify` rebuilds the contract and the judge from this repo and compares their hashes with what ran, checks the enclave's attestation against Intel's certificates, the payout, each pause's landing and its verified record on NEAR, and re-runs the published exploit.
 
 ```console online
-$ bountee verify <MAINNET: demo bounty id> --contract bounty.bountee.near --network mainnet
+$ bountee verify <MAINNET: demo bounty id> --contract bounty2.bountee.near --network mainnet
 pass contract_code
 pass judge_build
 pass attestation
@@ -129,23 +131,33 @@ pass rerun
 
 There is no live bounty for you to win. A win closes its bounty and pauses its vault, so every winning run uses a fresh instance, deployed and posted by `cli/test/testnet/fresh-instance.ts` (with `NETWORK=mainnet` for the demo).
 
+## Try it on testnet
+
+The same web app also runs as a testnet site, on NEAR testnet, Base Sepolia and Arbitrum Sepolia, with no real money. Its address isn't set yet: it isn't hosted, and this section will name it once it is. Its bounty contract is `bounty.bountee.testnet`, which takes Circle's testnet USDC and holds no keys. Its bounty list holds bounties from made-up Protocols in each state that lasts: Live, Live with claims judged, Paid, Ended unclaimed, Withdrawn and Check failed (seeded by `cli/test/testnet/site-seed.ts`).
+
+To post a bounty there, you need MetaMask, testnet NEAR (`bountee init` creates a testnet account funded by NEAR's faucet), test USDC ([Circle's faucet](https://faucet.circle.com)) and a pausable contract you control on Base Sepolia or Arbitrum Sepolia. To claim from the command line, run `bountee init` for a testnet account, then `bountee test` and `bountee claim` against a Live bounty with `--contract bounty.bountee.testnet --network testnet`.
+
+Nothing on the testnet site is evidence for anything in this README. Every proof cited here is a mainnet transaction.
+
 ## Not production-ready
 
-- Not audited by a third party. Our own audit of the deployed build found no critical or high issues, and its five known issues are listed in [docs/audit.md](docs/audit.md). They stay unfixed in the demo, because the deployed build must be the one the full rehearsal ran.
+- Not audited by a third party. Our own audit of the whole contract, on the build first deployed as `bounty.bountee.near`, found no critical or high issues, and its five known issues are listed in [docs/audit.md](docs/audit.md). `bounty2.bountee.near` is that build plus the any-chain changes, which that audit didn't cover. The five stay unfixed in the demo, because the deployed build must be the one the full rehearsal ran.
 - The contract has no admin and can't be upgraded. A bounty whose pause signatures can never be made (if NEAR's MPC network changed its interface), or whose winner Circle has blocklisted, stays stuck, and its USDC stays locked.
 - The bounty contract trusts OutLayer's verdict; it doesn't check the enclave's attestation itself. Anyone can check it afterwards with `bountee verify`.
-- One payout per bounty, one proof chain per bounty, EVM chains only.
-- The demo bounty is deliberately small: 10 USDC, with 2 USDC in the Base vault and 1 in the Arbitrum vault.
+- One payout per bounty, EVM chains only. A claim is proven on one covered chain, any of them; an exploit that needs two chains' state at once can't be judged.
+- The demo bounty is deliberately small: 10 USDC, with 2 USDC in each chain's vault, so a theft on either chain can reach the 1 USDC minimum theft.
 
 ## The mainnet demo bounty
 
 One bounty, one story: an independent AI agent, given only [docs/agent-instructions.md](docs/agent-instructions.md) and a claim key, found the demo bug and won. A cheat claim on the same bounty scored zero first. A person claims with the same commands, using their own key.
 
+The bounty contract is `bounty2.bountee.near`. An earlier deployment, `bounty.bountee.near` (Nov 7), pins the earlier judge, under which each bounty names a single proof chain; it holds no keys and can't be upgraded, so it stays unused.
+
 | Step | Mainnet transaction |
 |---|---|
-| Bounty contract deployed (`bounty.bountee.near`) | _pending_ <!-- MAINNET: deploy tx --> |
-| Judge build pinned | _pending_ <!-- MAINNET: judge build hash --> |
-| Demo vault on Base (proof chain) | _pending_ <!-- MAINNET: Base vault address --> |
+| Bounty contract deployed (`bounty2.bountee.near`) | _pending_ <!-- MAINNET: deploy tx --> |
+| Judge build pinned by `bounty2.bountee.near` | _pending_ <!-- MAINNET: judge build hash --> |
+| Demo vault on Base | _pending_ <!-- MAINNET: Base vault address --> |
 | Demo vault on Arbitrum One | _pending_ <!-- MAINNET: Arbitrum vault address --> |
 | Bounty posted (10 USDC, minimum theft 1 USDC) | _pending_ <!-- MAINNET: post tx --> |
 | Cheat claim judged ZERO, nothing moved | _pending_ <!-- MAINNET: cheat claim tx; its verdict tx --> |
@@ -163,7 +175,7 @@ One bounty, one story: an independent AI agent, given only [docs/agent-instructi
 
 ### What counts as an exploit
 
-One rule. Replay the claim's transactions, sent only by fresh accounts, against the proof chain's state at the claim's block. **Gain** is what the fresh accounts (and contracts they create) end up holding, minus the seed they started with. **Loss** is what the covered contracts lost. Both count only listed tokens, at prices fixed when the bounty was posted. The score is the smaller of the two; at or above the minimum theft it **PAYS**, below it scores **ZERO**, and a malformed claim, a transaction from an existing account, or a read of state the claim didn't prove is **INVALID**.
+One rule. A claim names its **proof chain**, any chain the bounty covers, and a recent block on it. Replay the claim's transactions, sent only by fresh accounts, against the proof chain's state at that block. **Gain** is what the fresh accounts (and contracts they create) end up holding, minus the seed they started with. **Loss** is what the covered contracts on the proof chain lost. Both count only the tokens listed on the proof chain, at prices fixed when the bounty was posted. The score is the smaller of the two; at or above the minimum theft it **PAYS**, below it scores **ZERO**, and a malformed claim, a transaction from an existing account, or a read of state the claim didn't prove is **INVALID**. A win pauses every covered contract on every covered chain, whichever chain it was proven on.
 
 So a depositor's own withdrawal, an owner rescue, a sweep to the treasury, a swap or flash loan in a pool the bounty doesn't cover, and an unsold mint all score zero. Theft from the covered contracts is the only thing that pays.
 
@@ -184,7 +196,7 @@ Nobody needs to trust the Whitehat, the broadcaster of a signed pause (anyone ca
 
 ### Timing
 
-- **Recency window: 5 minutes.** A claim is judged against the proof chain's state at a block no more than 5 minutes older than the claim. A bug the Protocol fixes itself stops being claimable 5 minutes after the fix lands.
+- **Recency window: 5 minutes.** A claim is judged against its proof chain's state at a block no more than 5 minutes older than the claim. A bug the Protocol fixes itself on a chain stops being claimable there 5 minutes after the fix lands; it stays claimable on a chain where it isn't fixed.
 - **Verdict to pause: measured on the mainnet run.** A PAYS verdict is public on NEAR, so from that moment a watcher knows a covered contract has a bug, though not what it is, until the pauses land. On the demo bounty that window, from the PAYS verdict to the last pause landing, was _pending mainnet run_ <!-- MAINNET: verdict-to-last-pause-landed, in seconds (R7.8) -->. From the verdict to the last verified pause took _pending mainnet run_ <!-- MAINNET: verdict-to-last-verified-pause, in seconds -->.
 
 ### Stated limits
@@ -195,6 +207,7 @@ Nobody needs to trust the Whitehat, the broadcaster of a signed pause (anyone ca
 - **A Fake poster can still post a bounty on a copy of someone else's code.** Granting the pause role proves control of the covered contracts, not authorship of the code in them.
 - **A failed claim reveals its read set, never its exploit.** The claim's proofs go on NEAR, so anyone can see which fresh addresses and storage slots it touched.
 - **"Paused" means the pause transaction succeeded on that chain, as verified by NEAR's MPC network.** It is not a claim about what the contract's code does when paused.
+- **The replay doesn't reproduce every chain exactly.** On Arbitrum, the chain's block-number opcode returns an Ethereum block number where the replay returns the Arbitrum block's own, and Arbitrum's system contracts (such as `ArbSys`) and Stylus (WebAssembly) contracts don't exist in the replay. Base runs Osaka's opcodes, but its claims are still replayed under Prague's rules. So on Arbitrum a contract that reads the block number, calls a system contract or is a Stylus contract, and on Base a contract that uses Osaka's opcodes, may replay differently from how it runs on the chain.
 
 ### Coverage limit
 

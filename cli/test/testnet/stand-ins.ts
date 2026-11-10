@@ -4,7 +4,7 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 
-/** One request a stand-in got: where (`near` or `chain <id>`), the method, and what it asked for. */
+/** One request a stand-in got: where (`near`, `chain <id>`, or `http` for a plain endpoint), the method (an `http` request's path), and what it asked for. */
 export interface Logged {
   where: string;
   method: string;
@@ -22,22 +22,54 @@ export class RpcError {
 /** What a route answers: a result, an RpcError, or undefined for "not scripted". */
 export type Route = (where: string, method: string, params: any) => unknown;
 
+/**
+ * NEAR's pricing as mainnet's `EXPERIMENTAL_protocol_config` and `gas_price` reported it on Nov 8
+ * (testnet's is the same): what a stand-in NEAR RPC answers so a pre-spend check can price a
+ * transaction's gas in hand (#57).
+ */
+export const NEAR_PROTOCOL_CONFIG = {
+  runtime_config: {
+    min_gas_purchase_price: "1000000000",
+    storage_amount_per_byte: "10000000000000000000",
+    transaction_costs: {
+      action_receipt_creation_config: { send_not_sir: 108059500000, send_sir: 108059500000, execution: 108059500000 },
+      action_creation_config: {
+        function_call_cost: { send_not_sir: 200000000000, send_sir: 200000000000, execution: 780000000000 },
+        function_call_cost_per_byte: { send_not_sir: 47683715, send_sir: 2235934, execution: 2235934 },
+      },
+    },
+  },
+};
+export const NEAR_GAS_PRICE = { gas_price: "100000000" };
+
 /** Answers `{"result": [...bytes]}` as NEAR's `call_function` does, for a view returning `value`. */
 export const nearView = (value: unknown) => ({ result: [...Buffer.from(JSON.stringify(value))], logs: [] });
 
 /** Nothing signed went to NEAR or a chain. */
 export const sendsAmong = (requests: Logged[]) => requests.filter((r) => /send|broadcast_tx/i.test(r.method));
 
+/** A plain HTTP endpoint a stand-in answers beside JSON-RPC (OutLayer's `/secrets/pubkey`): its JSON answer. */
+export type HttpRoute = () => unknown;
+
 /**
  * A local JSON-RPC server: `<base>/near` answers as NEAR RPC, `<base>/<chain id>` as that EVM
- * chain (batches too), each from `route`; every request is logged in `requests`.
+ * chain (batches too), each from `route`, and each path in `http` as that plain endpoint
+ * (logged `where: "http"`, `method` its path); every request is logged in `requests`.
  */
-export async function standIns(route: Route): Promise<{ base: string; requests: Logged[]; close: () => void }> {
+export async function standIns(
+  route: Route,
+  http: Record<string, HttpRoute> = {},
+): Promise<{ base: string; requests: Logged[]; close: () => void }> {
   const requests: Logged[] = [];
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
+      const endpoint = http[req.url!];
+      if (endpoint) {
+        requests.push({ where: "http", method: req.url! });
+        return res.end(JSON.stringify(endpoint()));
+      }
       const parsed = JSON.parse(body);
       const where = req.url === "/near" ? "near" : `chain ${req.url!.slice(1)}`;
       const answer = (call: any) => {
