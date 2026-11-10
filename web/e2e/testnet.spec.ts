@@ -223,7 +223,7 @@ test("D30: on testnet every link on the bounty list and a bounty page is a testn
   await expect(page.getByRole("region", { name: "Pause on Arbitrum Sepolia" }).getByRole("listitem").filter({ hasText: "2. Landed" }).getByRole("link", { name: /0x/ })).toHaveAttribute("href", /^https:\/\/sepolia\.arbiscan\.io\/tx\/0x/);
   await expect(base.locator("svg[role=img][aria-label='Base Sepolia'] path").first()).toHaveAttribute("fill", "#0000ff");
   const verify = page.getByRole("region", { name: "Verify" });
-  await expect(verify.getByText(`bountee verify ${ID.protocol}/${ID.name} --contract bounty.bountee.testnet --network testnet`)).toBeVisible();
+  await expect(verify.getByText(`bountee verify ${ID.protocol}/${ID.name} --contract bounty2.bountee.testnet --network testnet`)).toBeVisible();
   await expect(verify.getByRole("listitem").filter({ hasText: "Payout on NEAR" }).getByRole("link").first()).toHaveAttribute("href", /^https:\/\/testnet\.nearblocks\.io\/txns\//);
   const hosts = await linkHosts(page);
   expect(hosts).toContain("testnet.nearblocks.io");
