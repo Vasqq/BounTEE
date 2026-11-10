@@ -2,7 +2,9 @@
 
 The web app is mainnet-only (ADR-0017), so its bounty list holds the one demo bounty and nobody can try posting without real USDC. Visitors and judges want to click through a bounty in every state and post one themselves at no cost. So the same web app also runs as a second site, built for NEAR testnet, Base Sepolia and Arbitrum Sepolia, on its own `testnet.` subdomain (Liam, Nov 10). The network stays a deployment setting: one environment variable picks it when the site is built, and no page offers a switch.
 
-Amended Nov 10 (Liam): the site's contract is `bounty3.bountee.testnet`, deployed the same way. Its bounties vary their covered chains and minimum thefts, in proportion to their few-USDC amounts. Posted bounties can't change and the earlier site contracts, `bounty.bountee.testnet` and `bounty2.bountee.testnet`, hold no keys, so they stay deployed, unlinked.
+Amended Nov 10 (Liam): the site's contract is `bounty2.bountee.testnet`, deployed the same way. Its bounties vary their covered chains and minimum thefts, which posted bounties can't change, and `bounty.bountee.testnet` holds no keys, so it stays deployed, unlinked.
+
+Amended again Nov 10 (Liam): the site's contract is `bounty3.bountee.testnet`, deployed the same way, so its bounties' minimum thefts can stay in proportion to their few-USDC amounts. `bounty2.bountee.testnet` holds no keys either, so it stays deployed, unlinked.
 
 ## Decisions
 
