@@ -106,19 +106,19 @@ const STALE_SECS = 360;
 
 type State = "ended" | "withdrawn" | "live" | "check_failed" | "claims_judged" | "paid";
 interface Bounty { state: State; protocol: string; name: string; usdc: number; chains: number[]; minimumUsdc: number; claims: number; instance: string }
-const bounty = (state: State, protocol: string, name: string, usdc: number, chains: number[], minimumUsdc: number, claims = 0): Bounty => ({
-  state, protocol, name, usdc, chains, minimumUsdc, claims, instance: join(dir, `${PREFIX}-${protocol.replace(/\.testnet$/, "")}-instance.json`),
+const bounty = ({ claims = 0, ...b }: Omit<Bounty, "claims" | "instance"> & { claims?: number }): Bounty => ({
+  ...b, claims, instance: join(dir, `${PREFIX}-${b.protocol.replace(/\.testnet$/, "")}-instance.json`),
 });
 // Ended and Withdrawn first: their end dates pass while the rest are posted and claimed. The
 // minimum thefts differ, as real Protocols' would: the corvane-perps cheat steals nothing, so it
 // stays ZERO under any of them, and the brassmoor-lend win drains its vault's whole seed.
 const PLAN: Bounty[] = [
-  bounty("ended", "lindquay-vaults.testnet", "yield-vault-q4", 2, [ARBITRUM_SEPOLIA], 1_000),
-  bounty("withdrawn", "osterwick-dex.testnet", "orderbook-v2", 2, BOTH, 5_000),
-  bounty("live", "tallowfen-swap.testnet", "amm-router", 2, [BASE_SEPOLIA], 500),
-  bounty("check_failed", "pellmar-stable.testnet", "stable-reserve", 1, BOTH, 250),
-  bounty("claims_judged", "corvane-perps.testnet", "perps-margin", 2, BOTH, 2_500, 2),
-  bounty("paid", "brassmoor-lend.testnet", "lending-pool-v3", 3, BOTH, 10_000, 1),
+  bounty({ state: "ended", protocol: "lindquay-vaults.testnet", name: "yield-vault-q4", usdc: 2, chains: [ARBITRUM_SEPOLIA], minimumUsdc: 1_000 }),
+  bounty({ state: "withdrawn", protocol: "osterwick-dex.testnet", name: "orderbook-v2", usdc: 2, chains: BOTH, minimumUsdc: 5_000 }),
+  bounty({ state: "live", protocol: "tallowfen-swap.testnet", name: "amm-router", usdc: 2, chains: [BASE_SEPOLIA], minimumUsdc: 500 }),
+  bounty({ state: "check_failed", protocol: "pellmar-stable.testnet", name: "stable-reserve", usdc: 1, chains: BOTH, minimumUsdc: 250 }),
+  bounty({ state: "claims_judged", protocol: "corvane-perps.testnet", name: "perps-margin", usdc: 2, chains: BOTH, minimumUsdc: 2_500, claims: 2 }),
+  bounty({ state: "paid", protocol: "brassmoor-lend.testnet", name: "lending-pool-v3", usdc: 3, chains: BOTH, minimumUsdc: 10_000, claims: 1 }),
 ];
 const byState = (s: State) => PLAN.find((b) => b.state === s)!;
 const id = (b: Bounty) => ({ protocol: b.protocol, name: b.name });
@@ -134,7 +134,8 @@ const minimumUnits = (b: Bounty) => BigInt(b.minimumUsdc) * 1_000_000n;
 for (const b of PLAN.filter((b) => b.claims > 0)) {
   if (!b.chains.includes(PROOF_CHAIN)) throw new Error(`${b.protocol} takes claims proven on chain ${PROOF_CHAIN}, which it doesn't cover`);
 }
-if (minimumUnits(byState("paid")) > TESTNET_VAULT_SEED) throw new Error("the Paid bounty's minimum theft exceeds what its vault holds: the win would score ZERO");
+const paid = byState("paid");
+if (minimumUnits(paid) > TESTNET_VAULT_SEED) throw new Error("the Paid bounty's minimum theft exceeds what its vault holds: the win would score ZERO");
 
 const record: Record<string, any> = existsSync(RECORD) ? JSON.parse(readFileSync(RECORD, "utf8")) : {};
 const save = () => {
@@ -229,10 +230,13 @@ const add = (who: string, chain: string, asset: string, have: bigint, want: bigi
 };
 /** What each Protocol is sent from the funder: its bounty amount less what it holds. */
 const moves: { protocol: string; usdc: bigint; register: boolean }[] = [];
+/** What fresh-instance.ts's preflight reported it would post for each bounty: its chains and minimum theft. */
+const posts = new Map<string, { chains: number[]; minimum_theft: string }>();
 for (const b of PLAN.filter((b) => todo.includes(b) || claimsLeft(b))) {
   const r = await fresh(b, true);
   if (r.status !== 0 && r.status !== 3) throw new Error(`fresh-instance.ts's preflight for ${b.protocol} failed (exit ${r.status}): ${r.stdout}${r.stderr}`);
   // What fresh-instance.ts will post: this bounty's own chains and minimum theft.
+  posts.set(b.protocol, { chains: r.out.run?.chains, minimum_theft: r.out.run?.minimum_theft });
   if (r.out.run?.chains?.join(",") !== b.chains.join(",") || r.out.run?.minimum_theft !== minimumUnits(b).toString()) {
     throw new Error(`fresh-instance.ts would post ${b.protocol} on ${r.out.run?.chains} with minimum theft ${r.out.run?.minimum_theft}, not ${b.chains} and ${minimumUnits(b)}`);
   }
@@ -260,11 +264,11 @@ if (record[`withdraw ${withdrawn.protocol}`] === undefined) {
   add(withdrawn.protocol, nearChain, "NEAR", free, gas);
 }
 // The win's pauses: `sign_pauses` if the verdict's callback left them, and one `verify_pause` per chain.
-if (claimsLeft(byState("paid")) && nearOf(WHITEHAT)) {
-  const contracts = BigInt(byState("paid").chains.length);
+if (claimsLeft(paid) && nearOf(WHITEHAT)) {
+  const contracts = BigInt(paid.chains.length);
   const pauseCalls: PricedCall[] = [
     { method: "sign_pauses", gas: BigInt(fees.min_sign_pauses_gas_base) + BigInt(fees.min_sign_pauses_gas_per_contract) * contracts + tgas(40), deposit: 0n, argsBytes: 80 },
-    ...byState("paid").chains.map(() => ({ method: "verify_pause", gas: BigInt(fees.min_verify_pause_gas_base) + BigInt(fees.min_verify_pause_gas_per_pause) + tgas(20), deposit: 0n, argsBytes: 200 })),
+    ...paid.chains.map(() => ({ method: "verify_pause", gas: BigInt(fees.min_verify_pause_gas_base) + BigInt(fees.min_verify_pause_gas_per_pause) + tgas(20), deposit: 0n, argsBytes: 200 })),
   ];
   nearOf(WHITEHAT)!.need += roundUpNear(await near.upfrontNear(pauseCalls));
 }
@@ -281,7 +285,8 @@ needs.push(
 );
 stopIfShort(needs, {
   contract: CONTRACT,
-  bounties: PLAN.map((b) => ({ state: b.state, protocol: b.protocol, name: b.name, usdc: b.usdc, chains: b.chains, minimum_theft: minimumUnits(b).toString(), posted: posted(b) })),
+  // Each bounty's chains and minimum theft as fresh-instance.ts will post them (none once posted).
+  bounties: PLAN.map((b) => ({ state: b.state, protocol: b.protocol, name: b.name, usdc: b.usdc, ...posts.get(b.protocol), posted: posted(b) })),
   created_by_faucet: createdByFaucet,
   moves: moves.map((m) => ({ ...m, usdc: showUsdc(m.usdc) })),
 });
@@ -355,7 +360,6 @@ for (const b of PLAN) {
 }
 
 // The win, proven on Base Sepolia: paid, and each chain's pause landed and verified (R7.3).
-const paid = byState("paid");
 const win = await step("paid claim", async () => {
   const r = await bountee(["claim", sealedExploit(), "--bounty", ref(paid), ...claimAs], { VAULT: baseVault("paid") });
   if (r.status !== 0 || r.out.paid !== true) throw new Error(`the winning claim wasn't paid: ${r.stdout}`);
@@ -365,7 +369,7 @@ await step("paid verified", async () => {
   const done = (v: any) => v?.chains?.length === paid.chains.length && v.chains.every((c: any) => c.verified);
   if (done(win.verification)) return win.verification;
   const r = await bountee(["verify-pause", ref(paid), "--as", WHITEHAT, "--wait", "3600"]);
-  if (!done(r.out)) throw new Error(`both chains' pauses aren't verified yet: ${r.stdout}`);
+  if (!done(r.out)) throw new Error(`not every chain's pause is verified yet: ${r.stdout}`);
   return r.out;
 });
 

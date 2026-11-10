@@ -197,6 +197,8 @@ test("D33: with every balance empty, the seed's preflight names every short bala
 
 test("D33: each bounty covers its own chains with its own minimum theft: tallowfen-swap Base Sepolia only, lindquay-vaults Arbitrum Sepolia only", async () => {
   const r = await preflight();
+  expect(r.status, r.stderr).toBe(3);
+  // Each as fresh-instance.ts's own preflight reported it would post it.
   const of = (p: string) => r.out.bounties.find((b: any) => b.protocol === `${p}.testnet`);
   // Liam's call (Nov 10): two single-chain bounties, the other four on both Sepolia chains.
   expect(of("tallowfen-swap").chains).toEqual([84532]);
