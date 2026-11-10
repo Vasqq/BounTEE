@@ -14,6 +14,12 @@
 
 /* nav: the current page's link turns ink */
 .nav ul a[aria-current="page"] { color: var(--ink); }
+/* the testnet badge beside the wordmark (D31): the chip's shape and fill, in label-sm; hover as a link chip */
+.nav .brand { display: inline-flex; align-items: center; gap: 12px; flex: none; }
+.net-badge { display: inline-flex; align-items: center; height: 30px; padding: 0 11px; border-radius: 7px; background: var(--surface);
+  color: var(--ink-2); font: 500 var(--fs-sm)/1 var(--text); white-space: nowrap; text-decoration: none; }
+a.net-badge { transition: background-color var(--t2) var(--ease), color var(--t2) var(--ease); }
+a.net-badge:hover { background: var(--line); color: var(--ink); }
 /* the app bar keeps its links at every width (DESIGN.md, Layout: Extension) */
 .nav ul.app-links { display: flex; }
 @media (max-width: 560px) { .nav ul.app-links { gap: 18px; } .nav .wrap { gap: 16px; } }

@@ -58,6 +58,15 @@ interface Row {
   nearEvm: { id: number; name: string; rpc: string; browserRpc: string | undefined; explorer: string };
   /** NEAR's faucet, linked beside the NEAR the posting flow asks for (D17): testnet's, or `NEXT_PUBLIC_NEAR_FAUCET`. */
   nearFaucet: string | undefined;
+  /** Circle's faucet for test USDC, linked beside the Protocol's USDC balance (D32): testnet's only. */
+  usdcFaucet: string | undefined;
+  /**
+   * The other site's address (D31), each shown only when set: the mainnet site, which a testnet
+   * build's badge and Verify link go to (`NEXT_PUBLIC_MAINNET_SITE`), and the testnet site,
+   * which a mainnet build's "Try it on testnet" links go to (`NEXT_PUBLIC_TESTNET_SITE`).
+   */
+  mainnetSite: string | undefined;
+  testnetSite: string | undefined;
 }
 
 const MAINNET = {
@@ -98,6 +107,9 @@ const MAINNET = {
     explorer: "https://eth-explorer.near.org",
   },
   nearFaucet: process.env.NEXT_PUBLIC_NEAR_FAUCET || undefined,
+  usdcFaucet: undefined,
+  mainnetSite: undefined,
+  testnetSite: process.env.NEXT_PUBLIC_TESTNET_SITE || undefined,
 } as const satisfies Row;
 
 const TESTNET = {
@@ -141,6 +153,9 @@ const TESTNET = {
     explorer: "https://eth-explorer-testnet.near.org",
   },
   nearFaucet: process.env.NEXT_PUBLIC_NEAR_FAUCET || "https://docs.near.org/getting-started/faucet",
+  usdcFaucet: "https://faucet.circle.com",
+  mainnetSite: process.env.NEXT_PUBLIC_MAINNET_SITE || undefined,
+  testnetSite: undefined,
 } as const satisfies Row;
 
 /**

@@ -1,14 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
+import { PORTS, SITES } from "./e2e/stand-ins/sites.ts";
 
-const port = Number(process.env.WEB_PORT ?? 3100);
-const testnetPort = Number(process.env.TESTNET_WEB_PORT ?? port + 2);
+const port = PORTS.mainnet;
+const testnetPort = PORTS.testnet;
 const standIn = Number(process.env.STAND_IN_PORT ?? 3199);
 const chains = `http://localhost:${standIn}`;
 /** The testnet specs: they run on the testnet build alone, and every other spec on the mainnet build alone. */
 const TESTNET_SPECS = /testnet\.spec\.ts$/;
 // The mainnet build is built with the network setting unset, as a mainnet deployment is (D30):
-// a setting in the shell must not reach it. The testnet build sets its own.
-delete process.env.NEXT_PUBLIC_NETWORK;
+// a setting in the shell must not reach it. The testnet build sets its own. Each build is told
+// the other site's address (D31) here alone.
+for (const v of ["NEXT_PUBLIC_NETWORK", "NEXT_PUBLIC_MAINNET_SITE", "NEXT_PUBLIC_TESTNET_SITE"]) delete process.env[v];
 
 /**
  * One build of the app, its endpoints pointed at the stand-in (a real build takes the network
@@ -66,7 +68,7 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
     // The mainnet build, with the setting unset.
-    appServer(port, ".next", { covered: [8453, 42161], nearEvm: 397 }),
-    appServer(testnetPort, ".next-testnet", { covered: [84532, 421614], nearEvm: 398 }, { NEXT_PUBLIC_NETWORK: "testnet" }),
+    appServer(port, ".next", { covered: [8453, 42161], nearEvm: 397 }, { NEXT_PUBLIC_TESTNET_SITE: SITES.testnet }),
+    appServer(testnetPort, ".next-testnet", { covered: [84532, 421614], nearEvm: 398 }, { NEXT_PUBLIC_NETWORK: "testnet", NEXT_PUBLIC_MAINNET_SITE: SITES.mainnet }),
   ],
 });

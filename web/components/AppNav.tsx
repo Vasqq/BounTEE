@@ -1,35 +1,41 @@
-"use client";
 // The app bar: wordmark, "Bounties", "Verify" and "Post a bounty" (DESIGN.md, Nav bar:
-// Extension). Transparent at the top, solid with a blur once scrolled more than 8px.
-import { useEffect, useState } from "react";
+// Extension). On a testnet build the wordmark carries the "Testnet" badge, linking to the
+// mainnet site when its address is set (D31). Rendered on the server, so the mainnet browser
+// bundle carries no testnet wording.
+import { net } from "@/lib/network.ts";
+import { NavBar } from "./NavBar.tsx";
 import { Wordmark } from "./Wordmark.tsx";
 
+function TestnetBadge() {
+  return net.mainnetSite ? (
+    <a className="net-badge" href={net.mainnetSite}>
+      Testnet
+    </a>
+  ) : (
+    <span className="net-badge">Testnet</span>
+  );
+}
+
 export function AppNav({ current }: { current?: "bounties" | "post" }) {
-  const [solid, setSolid] = useState(false);
-  useEffect(() => {
-    const on = () => setSolid(window.scrollY > 8);
-    on();
-    window.addEventListener("scroll", on, { passive: true });
-    return () => window.removeEventListener("scroll", on);
-  }, []);
   return (
-    <header className={`nav${solid ? " solid" : ""}`}>
-      <div className="wrap">
+    <NavBar>
+      <span className="brand">
         <Wordmark href="/" label="BounTEE, home" />
-        <ul className="app-links">
-          <li>
-            <a href="/bounties" aria-current={current === "bounties" ? "page" : undefined}>
-              Bounties
-            </a>
-          </li>
-          <li className="verify">
-            <a href="/#verify">Verify</a>
-          </li>
-        </ul>
-        <a className="btn btn-ink" href="/post" aria-current={current === "post" ? "page" : undefined}>
-          Post a bounty
-        </a>
-      </div>
-    </header>
+        {net.network === "testnet" && <TestnetBadge />}
+      </span>
+      <ul className="app-links">
+        <li>
+          <a href="/bounties" aria-current={current === "bounties" ? "page" : undefined}>
+            Bounties
+          </a>
+        </li>
+        <li className="verify">
+          <a href="/#verify">Verify</a>
+        </li>
+      </ul>
+      <a className="btn btn-ink" href="/post" aria-current={current === "post" ? "page" : undefined}>
+        Post a bounty
+      </a>
+    </NavBar>
   );
 }
