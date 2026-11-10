@@ -18,8 +18,9 @@
 // browser faucet.
 //
 // Env: NETWORK, CONTRACT (account id, e.g. day3.bountee-spike2.testnet or bounty.bountee.near),
-// USDC, CONTRACT_NEAR (NEAR given to a new contract account, default 5), NEAR_RPC,
-// PREFLIGHT_ONLY.
+// USDC, REV (the commit the judge and contract are built from, default HEAD; the testnet site's
+// contract is built from the commit mainnet's is, ADR-0021), BOUNTEE_DAY3, CONTRACT_NEAR (NEAR
+// given to a new contract account, default 5), NEAR_RPC, PREFLIGHT_ONLY.
 // Run: [NETWORK=mainnet] node cli/test/testnet/deploy-system.ts
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -34,8 +35,9 @@ const USDC = process.env.USDC ?? DEFAULT_USDC[network];
 const OUT = process.env.BOUNTEE_DAY3 ?? join(homedir(), `.bountee-${network}`, "day3-deployment.json");
 
 const parent = CONTRACT.slice(CONTRACT.indexOf(".") + 1);
-const judge = buildJudge(CONTRACT);
-const code = buildContract(CONTRACT);
+const REV = process.env.REV || undefined;
+const judge = buildJudge(CONTRACT, REV);
+const code = buildContract(CONTRACT, REV);
 
 // ---- Preflight -----------------------------------------------------------------------------
 // The contract account locks storage for its code and state (state ~12 KB on testnet, Nov 5)
@@ -88,7 +90,7 @@ console.error(`judge ${judge.hash} at ${uploaded.url}${uploaded.tx ? ` (upload t
 const deployTx = await deployKeyless(CONTRACT, contractConfig({ usdc: USDC, judgeHash: judge.hash, judgeUrl: uploaded.url }), code);
 const config = await near.view(CONTRACT, "config");
 if (config.judge_build_hash !== `0x${judge.hash}`) {
-  throw new Error(`${CONTRACT} pins judge ${config.judge_build_hash}, but this checkout builds 0x${judge.hash}`);
+  throw new Error(`${CONTRACT} pins judge ${config.judge_build_hash}, but ${REV ?? "this checkout"} builds 0x${judge.hash}`);
 }
 
 const previous = existsSync(OUT) ? JSON.parse(readFileSync(OUT, "utf8")) : {};
@@ -99,6 +101,7 @@ const deployment = {
   outlayer: config.outlayer,
   mpc: config.mpc,
   usdc: config.usdc,
+  ...(REV ? { rev: REV } : {}),
   judge: { hash: judge.hash, url: uploaded.url, upload_tx: uploaded.tx ?? previous.judge?.upload_tx },
   create_tx: createTx ?? previous.create_tx,
   deploy_tx: deployTx ?? previous.deploy_tx,
