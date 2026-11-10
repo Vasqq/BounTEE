@@ -4,8 +4,9 @@
 //   node cli/test/mainnet-state/build.ts [--out <dir>] [--name <bounty name>]
 //
 // Reads Base and Arbitrum One from public RPCs (read-only) and writes, per chain, an anvil state
-// file and a manifest (`<dir>/manifest.json`) that the seam J posting check and #59's claim
-// rehearsal load into a plain, non-fork anvil.
+// file and a manifest (`<dir>/manifest.json`) that the seam J posting check (R7.6, R12.1, R12.2:
+// judge/tests/seam_j_mainnet_state.rs) and the claim rehearsal (#59, #35) load into a plain,
+// non-fork anvil.
 //
 // Why not just fork: blocks a forked anvil mines carry an all-zero state root, and the judge
 // checks every proof against the header's state root first, so every claim on a fork comes back
@@ -26,7 +27,7 @@
 //   On each chain, before the claims, the drain bot's fork test runs against this vault.
 //   6. Load the dump into a plain anvil with the chain's ID and hardfork and check its blocks'
 //      state roots are real: non-zero, and the root `eth_getProof` proves against.
-// Rebuilding the copy changes it, so #59's claim rehearsal (mainnet-state-claims.test.ts) is
+// Rebuilding the copy changes it, so the claim rehearsal (mainnet-state-claims.test.ts) is
 // rerun on each rebuild: it is what shows the claims replay on the copy.
 // It also records the deploy gas against the preflight's budget (DEMO_DEPLOY_GAS): measured on
 // Base's fork; on Arbitrum One the fork's figure plus the L1 part anvil leaves out, from the real
@@ -34,7 +35,7 @@
 // `eth_estimateGas` for the vault's creation.
 //
 // Needs anvil, forge and cast, and SEALED_EXPLOIT (the sealed exploit script's path, never in
-// this repo) for Base's claim reads. Spends nothing: every transaction runs on a local fork.
+// this repo) for the win's reads on both chains. Spends nothing: every transaction runs on a local fork.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

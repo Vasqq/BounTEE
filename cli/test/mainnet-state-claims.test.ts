@@ -23,7 +23,8 @@
 //   Misses: mainnet itself (the copy holds only what the claims touch, so trie sizes, and so
 //   input bytes, are small here: the budget's sizes come from the real chain, `budgetClaims`),
 //   a real Arbitrum One header (the copy's blocks are anvil's; a no-op claim on the live chains
-//   covers that), OutLayer, and the claim and payout transactions (#35's run).
+//   covers that), OutLayer, the claim and payout transactions, and the win's pauses landing and
+//   verified on both chains (R7.4, R7.10: #35's run, rehearsed on testnet by #67 and #35's cold agent).
 // A recorded analysis on a local copy, not mainnet evidence (requirements.md, testnet and local
 // runs are rehearsals). Results go to <state dir>/claims.json.
 //
@@ -57,11 +58,13 @@ const CASES = [
   { kind: "win", chain: 8453, name: "base", outcome: "PAYS", requirement: "R3.10" },
   { kind: "win", chain: 42161, name: "arbitrum", outcome: "PAYS", requirement: "R3.10" },
 ] as const;
+type Case = (typeof CASES)[number];
 
 describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base and Arbitrum One (#59, #35)", () => {
   const manifest = RUN ? JSON.parse(readFileSync(MANIFEST!, "utf8")) : {};
   const dir = RUN ? dirname(MANIFEST!) : "";
-  const loaded: Record<number, { proc: ChildProcess; url: string; block: number; chain: any }> = {};
+  /** Each chain's loaded copy: its anvil, the head the claims are judged at, and its manifest entry. */
+  const loaded: Record<number, { proc: ChildProcess; url: string; block: number; manifestChain: any }> = {};
   let rulesFile: string;
   let judge: string;
   const results: Record<string, unknown> = {};
@@ -74,11 +77,11 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base an
     judge = process.env.BOUNTEE_MAINNET_JUDGE ?? "";
     // The enclave's program and nothing else: the reproducible build whose sha256 the mainnet contract pins.
     expect(`0x${createHash("sha256").update(readFileSync(judge)).digest("hex")}`).toBe(manifest.rules.judge_build_hash);
-    for (const id of [8453, 42161]) {
-      const chain = manifest.chains.find((c: any) => c.chain_id === id);
-      const l = await loadState(chain.state, id);
+    for (const chainId of new Set(CASES.map((c) => c.chain))) {
+      const manifestChain = manifest.chains.find((c: any) => c.chain_id === chainId);
+      const l = await loadState(manifestChain.state, chainId);
       // The head, whose state root is real (the loaded state's first block, the fork's, has none).
-      loaded[id] = { proc: l.proc, url: l.url, block: Number(BigInt(await rpc<string>(l.url, "eth_blockNumber", []))), chain };
+      loaded[chainId] = { proc: l.proc, url: l.url, block: Number(BigInt(await rpc<string>(l.url, "eth_blockNumber", []))), manifestChain };
     }
     rulesFile = join(dir, "rules.json");
     writeFileSync(rulesFile, JSON.stringify(manifest.rules));
@@ -86,14 +89,14 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base an
 
   afterAll(() => Object.values(loaded).forEach((l) => l.proc.kill()));
 
-  /** `bountee test` on a copy; returns its result and the job it saved. */
-  function claim(kind: string, chain: number, name: string, script: string): Promise<{ result: any; job: any }> {
+  /** `bountee test` of one case on its chain's copy; returns its result and the job it saved. */
+  function claim({ kind, chain, name }: Case, script: string): Promise<{ result: any; job: any }> {
     const out = join(dir, `${kind}-${chain}-job.json`);
-    const { url, block, chain: c } = loaded[chain]!;
+    const { url, block, manifestChain } = loaded[chain]!;
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [entry, "test", script, "--bounty", rulesFile, "--chain", name, "--rpc", url, "--block", String(block), "--judge", judge, "--out", out, "--json"], {
         cwd: repo,
-        env: { ...process.env, VAULT: c.vault },
+        env: { ...process.env, VAULT: manifestChain.vault },
       });
       let stdout = "";
       let stderr = "";
@@ -111,16 +114,17 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base an
    * real chain itself (read-only), as the fresh-instance preflight reads it: the copy holds only
    * what the claims touch, and the swap never reads the factory's pair mapping.
    */
-  async function provenReads(job: any, chain: number): Promise<Partial<Record<Role, number>>> {
-    const { url, block, chain: c } = loaded[chain]!;
-    const usdc = c.usdc.toLowerCase();
+  async function provenReads(job: any, { kind, chain }: Case): Promise<Partial<Record<Role, number>>> {
+    const { url, block, manifestChain } = loaded[chain]!;
+    const usdc = manifestChain.usdc.toLowerCase();
     const real = defaultRpc(chain)!;
     const impl = `0x${BigInt(await rpc<string>(real, "eth_getStorageAt", [usdc, IMPLEMENTATION_SLOT, "latest"])).toString(16).padStart(40, "0")}`;
     const coinbase = (await rpc<{ miner: string }>(url, "eth_getBlockByNumber", [`0x${block.toString(16)}`, false])).miner.toLowerCase();
     const roles: Record<string, Role> = {
-      [job.exploit.transactions[0].from]: "sender", [coinbase]: "coinbase", [c.vault]: "vault", [usdc]: "usdc", [impl]: "usdc_implementation",
+      [job.exploit.transactions[0].from]: "sender", [coinbase]: "coinbase", [manifestChain.vault]: "vault", [usdc]: "usdc", [impl]: "usdc_implementation",
     };
-    if (chain === 8453) {
+    // The cheat buys its USDC through Uniswap V2 (on Base, where it is filed).
+    if (kind === "cheat") {
       const weth = cast("call", UNISWAP_V2_ROUTER, "WETH()(address)", "--rpc-url", real);
       const pair = cast("call", cast("call", UNISWAP_V2_ROUTER, "factory()(address)", "--rpc-url", real), "getPair(address,address)(address)", weth, usdc, "--rpc-url", real);
       Object.assign(roles, { [UNISWAP_V2_ROUTER]: "uniswap_router", [pair]: "uniswap_pair", [weth]: "weth" });
@@ -134,11 +138,16 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base an
     return reads;
   }
 
-  /** Fetches the job's proofs again from the chain's real proof RPCs at their head, timing each RPC; reads only. */
+  /**
+   * Fetches the job's proofs again from the chain's real proof RPCs, timing each RPC; reads only. At
+   * three blocks behind each RPC's head, as `bountee test` and `claim` pick the claim's block
+   * (cli/src/test.ts, BLOCKS_BEHIND): a load-balanced RPC can name a head whose state it doesn't
+   * serve yet, and Base's did here ("no state found").
+   */
   async function timeProofs(job: any, chain: number) {
     const timings: { rpc: string; ms: number }[] = [];
     for (const proofRpc of proofRpcs(chain)) {
-      const head = Number(BigInt(await rpc<string>(proofRpc, "eth_blockNumber", [])));
+      const head = Number(BigInt(await rpc<string>(proofRpc, "eth_blockNumber", []))) - 3;
       const start = Date.now();
       for (const p of job.proofs) await fetchProof(proofRpc, p.address, p.storage.map((s: any) => s.key), head);
       timings.push({ rpc: proofRpc, ms: Date.now() - start });
@@ -146,13 +155,14 @@ describe.skipIf(!RUN)("the new vault's mainnet claims on local copies of Base an
     return timings;
   }
 
-  for (const { kind, chain, name, outcome, requirement } of CASES) {
+  for (const c of CASES) {
+    const { kind, chain, name, outcome, requirement } = c;
     test(`${requirement} rehearsal: on the copy of mainnet the ${kind} claim proven on ${name} is judged ${outcome} by the pinned judge, its reads match the claim budget's, and its proofs fetch well inside the recency limit`, async () => {
       const script = kind === "cheat" ? join(repo, "demo/script/HonestUser.s.sol") : sealedExploit();
-      const { result, job } = await claim(kind, chain, name, script);
+      const { result, job } = await claim(c, script);
       expect(result.block.chain_id).toBe(chain);
       expect(result.verdict.outcome).toBe(outcome);
-      const reads = await provenReads(job, chain);
+      const reads = await provenReads(job, c);
       expect(reads).toEqual(DEMO_READS.mainnet[kind]);
       const timings = await timeProofs(job, chain);
       for (const t of timings) expect(t.ms).toBeLessThan(manifest.rules.recency_limit_secs * 1000);
