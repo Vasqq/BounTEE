@@ -47,7 +47,7 @@ async function fillRules(page: Page) {
   await s.getByRole("button", { name: "Continue" }).click();
 }
 
-test("D13, D5, D17, D20, D15: one MetaMask sets up the pause, adds funds and posts on NEAR as the Protocol's 0x… account", async ({ page }) => {
+test("D13, D5, D17, D20, D15, D27: one MetaMask sets up the pause, adds funds and posts on NEAR as the Protocol's 0x… account", async ({ page }) => {
   // Every step, end to end: eleven wallet prompts and their receipts.
   test.setTimeout(120_000);
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -59,6 +59,8 @@ test("D13, D5, D17, D20, D15: one MetaMask sets up the pause, adds funds and pos
   await expect(step(page, 1).getByRole("button", { name: "pay callers nothing" })).toBeVisible();
   await expect(step(page, 1)).toContainText("can be covered, so no liquidations.");
   await fillRules(page);
+  // D27: two chains covered, and still no question about where the theft is proven.
+  await expect(page.getByText(/prove the theft/i)).toHaveCount(0);
 
   // 2. Set up pause: a card per chain, its grant and its pause gas each ticked off as it lands (D5).
   // MetaMask connects here.
@@ -129,6 +131,8 @@ test("D13, D5, D17, D20, D15: one MetaMask sets up the pause, adds funds and pos
   expect(b.rules.bounty_amount).toBe("10000000");
   expect(b.rules.minimum_theft).toBe("1000000");
   expect(b.rules.disclosure_delay_days).toBe(1);
+  // Theft is valued in each covered chain's USDC, one for one (D27).
+  expect(b.rules.listed_tokens).toEqual([expect.objectContaining({ chain_id: BASE, price: "1" }), expect.objectContaining({ chain_id: ARBITRUM, price: "1" })]);
   // Every NEAR transaction went through NEAR's Ethereum-compatible chain, from the same wallet,
   // encoded as NEP-518 has it: onboarding to the account itself, then the two posting prompts.
   const nearTxs = (await walletSent(page))[NEAR_EVM]!;

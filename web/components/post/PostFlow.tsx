@@ -87,7 +87,6 @@ function trusted(s: PostingStatus, protocol: string, name: string): PostingStatu
   if (s.contract !== BOUNTY_CONTRACT || s.usdc !== NEAR_USDC || s.pauseRole.toLowerCase() !== role.toLowerCase()) {
     throw new Error("The app's server named another bounty contract, USDC or pause-role address than this page expects, so nothing will be signed.");
   }
-  if (s.gas.some((g) => BigInt(g.short) > BigInt(g.needed))) throw new Error("The app's server asked for more pause gas than a pause needs, so nothing will be signed.");
   return {
     ...s,
     pauseRole: role,
@@ -185,7 +184,7 @@ export function PostFlow() {
           {step === 1 && <RulesStep basics={basics} taken={taken} account={account} draft={draft} setDraft={setDraft} problems={problems} ok={rulesOk} next={() => go(2)} />}
           {step === 2 && <PauseStep account={account} s={rulesOk ? s : undefined} rulesFirst={rulesFirst} done={pauseReady} next={() => go(3)} />}
           {step === 3 && <FundStep s={s} account={account} draft={draft} done={funded} next={() => go(4)} />}
-          {step === 4 && <PostStep s={s} account={account} draft={draft} keyState={key} setKey={setKey} onPosted={() => setPostedAs(draft.name)} ready={complete.slice(0, 3).every(Boolean)} />}
+          {step === 4 && <PostStep s={s} account={account} draft={draft} keyState={key} setKey={setKey} onPosted={setPostedAs} ready={complete.slice(0, 3).every(Boolean)} />}
         </div>
         <RiskPanel className="risk-side" />
       </div>
@@ -649,7 +648,7 @@ function PostStep(p: {
   draft: Draft;
   keyState: { publicKey: string; from: string } | null;
   setKey: (k: { publicKey: string; from: "wallet" | "key-file" }) => void;
-  onPosted: () => void;
+  onPosted: (name: string) => void;
   ready: boolean;
 }) {
   const { s, account, draft, ready } = p;
@@ -690,16 +689,17 @@ function PostStep(p: {
         deposit: feeShort + (BigInt(s!.account.postingFeeBalance) === 0n ? ENTRY_STORAGE : 0n),
       }),
   });
+  // The name travels with the mutation, so a rename while it's pending can't be recorded as posted.
   const post = useMutation({
-    mutationFn: () =>
+    mutationFn: (name: string) =>
       nearFunctionCall({
         receiverId: s!.usdc,
         method: "ft_transfer_call",
-        args: { receiver_id: s!.contract, amount: rules!.bounty_amount, msg: JSON.stringify({ name: draft.name, rules }) },
+        args: { receiver_id: s!.contract, amount: rules!.bounty_amount, msg: JSON.stringify({ name, rules }) },
         gas: MAX_GAS,
         deposit: 1n,
       }),
-    onSuccess: p.onPosted,
+    onSuccess: (_, name) => p.onPosted(name),
   });
   const enable = useMutation({ mutationFn: () => enableNearSigning(account as Address, s!.account.relayerKey) });
   const onboarded = !!s?.account.onboarded;
@@ -823,7 +823,7 @@ function PostStep(p: {
                 <p>Sends {bounty !== null && s ? `${usdcText(bounty, s.usdcDecimals)} USDC` : "the bounty amount"} with the rules. It goes live once the posting check confirms every grant and the pause gas.</p>
                 {usdcShort && <p className="ink">Your account holds {usdcText(s!.account.usdc, s!.usdcDecimals)} USDC on NEAR; the bounty needs more.</p>}
                 <div className="send">
-                  <button type="button" className={ink(ready && keyed && onboarded && prepaid)} onClick={() => post.mutate()} disabled={!ready || !keyed || !prepaid || !rules || usdcShort || post.isPending || post.isSuccess}>
+                  <button type="button" className={ink(ready && keyed && onboarded && prepaid)} onClick={() => post.mutate(draft.name)} disabled={!ready || !keyed || !prepaid || !rules || usdcShort || post.isPending || post.isSuccess}>
                     {post.isPending ? "Signing" : post.isSuccess ? "Checking" : "Post the bounty"}
                   </button>
                   {ready && !keyed && <p>Sign your exploit key first.</p>}
