@@ -148,7 +148,8 @@
 .check-item p[role="alert"], .post-step p[role="alert"] { color: var(--ink); }
 .form { margin-top: 28px; display: grid; gap: 16px; }
 .form .cols { gap: 16px; }
-.field small { font: 400 var(--fs-sm)/1.5 var(--text); color: var(--ink-3); }
+.field small { font: 400 var(--fs-sm)/1.5 var(--text); color: var(--ink-3); text-wrap: pretty; }
+.field small .datum { color: var(--ink-2); }
 .field small.err { color: var(--ink); }
 .field select { appearance: none; background-image: none; }
 fieldset.covered { border: 0; display: grid; gap: 12px; }
@@ -173,3 +174,73 @@ fieldset.covered > .btn { justify-self: start; }
   .risk-inline { display: block; position: static; }
   .covered-row { grid-template-columns: 1fr; }
 }
+
+/* Chain picker (components/post/ChainSelect.tsx): the field's button, and its list floating below it. */
+.chain-box { position: relative; display: grid; }
+.chain-box > button { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 14px; border: 0; border-radius: var(--r-sm);
+  background: var(--surface); color: var(--ink); font: 400 18px/1.5 var(--text); text-align: left; cursor: pointer;
+  transition: background-color var(--t1) var(--ease); }
+.chain-box > button:hover, .chain-box > button[aria-expanded="true"] { background: var(--line); }
+.chain-select .chain-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chain-select .chain-mark { width: 20px; height: 20px; flex: none; border-radius: 5px; }
+.chain-select span.chain-mark { background: var(--line-2); }
+.chain-select .chev { color: var(--ink-3); flex: none; transition: transform var(--t1) var(--ease); }
+.chain-box > button[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.chain-select ul { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; min-width: 100%; width: max-content; margin: 0; padding: 6px; list-style: none;
+  background: var(--ground-2); border-radius: var(--r-sm); box-shadow: var(--float); transform-origin: top; animation: chain-open var(--t1) var(--ease); }
+.chain-select li { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; border-radius: 6px; color: var(--ink); font: 400 var(--fs-ui)/1 var(--text); cursor: pointer; }
+.chain-select li[data-active] { background: var(--surface); }
+.chain-select li .tick { color: var(--ok); flex: none; margin-left: 12px; }
+@keyframes chain-open { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+@media (prefers-reduced-motion: reduce) { .chain-select ul { animation: none; } .chain-select .chev { transition: none; } }
+
+/* A field with its unit inside it, on the right: "2,000  USDC". */
+.suffixed { position: relative; display: grid; }
+.suffixed input { padding-right: 72px; }
+.suffixed > span { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--ink-3); font: 400 var(--fs-ui)/1 var(--text); pointer-events: none; }
+
+/* End date terms (components/post/EndDate.tsx): one segmented row of radios, the last opening an exact date. */
+.terms { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px; border-radius: var(--r-sm); background: var(--surface); }
+.term { position: relative; display: grid; }
+.term input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.term span { display: grid; place-items: center; height: 40px; padding: 0 6px; border-radius: 4px; color: var(--ink-2); font: 500 var(--fs-sm)/1 var(--text); white-space: nowrap;
+  transition: background-color var(--t1) var(--ease), color var(--t1) var(--ease); }
+@media (hover: hover) and (pointer: fine) { .term:hover span { color: var(--ink); } }
+.term input:checked + span { background: var(--ink); color: var(--ground); }
+.term input:focus-visible + span { outline: 2px solid var(--ok); outline-offset: 2px; }
+
+/* Field hints (components/post/PostFlow.tsx Field): the label wraps the input; the hint sits under it. */
+.field-main { display: grid; gap: 8px; }
+
+/* Hint tooltips (components/post/Hint.tsx): a dotted phrase that opens a small floating note above it. */
+.hint { position: relative; }
+.hint-term { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline dotted var(--ink-3); text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: help; }
+.hint-term:focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; border-radius: 2px; }
+@media (hover: hover) and (pointer: fine) { .hint:hover .hint-term { color: var(--ink); } }
+.hint-pop { position: absolute; z-index: 30; left: -12px; bottom: calc(100% + 8px); width: max-content; max-width: min(280px, 80vw); padding: 10px 12px; border-radius: var(--r-sm);
+  background: var(--ground-2); box-shadow: inset 0 0 0 1px var(--line), var(--float); color: var(--ink); font: 400 var(--fs-sm)/1.5 var(--text); text-align: left; text-wrap: pretty;
+  opacity: 0; visibility: hidden; transform: translateY(4px) scale(0.97); transform-origin: 24px 100%; pointer-events: none;
+  transition: opacity 150ms var(--ease), transform 150ms var(--ease), visibility 0s linear 150ms; }
+/* Bridges the 8px gap so the pointer can move onto the note without closing it. */
+.hint-pop::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 8px; }
+.hint-pop[data-open] { opacity: 1; visibility: visible; transform: none; pointer-events: auto; transition-delay: 0s; }
+.hint-pop[data-instant] { transition-duration: 0s; }
+@media (prefers-reduced-motion: reduce) { .hint-pop { transform: none; } }
+
+/* Checklist item heads (PostFlow Item): number, title, and the item's state on the right. */
+.check-item h3 { align-items: center; flex-wrap: wrap; }
+.check-item .item-title { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.check-item .item-title .datum { color: var(--ink-2); }
+.check-item .item-state { font: 400 var(--fs-sm)/1.3 var(--text); color: var(--ink-3); transition: color var(--t2) var(--ease); }
+.check-item .item-state.ok { color: var(--ok); }
+.post-step > .fine { margin-top: 12px; font-size: var(--fs-sm); color: var(--ink-3); }
+
+/* Pause access: each chain card holds its grants and its pause gas as rows, split by a hairline. */
+.tasks { display: grid; }
+.task { display: grid; gap: 12px; padding: 16px 0; border-top: 1px solid var(--line); }
+.task:first-child { border-top: 0; padding-top: 4px; }
+.task:last-child { padding-bottom: 0; }
+.task-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.task-label { font: 400 var(--fs-sm)/1.4 var(--text); color: var(--ink-2); }
+.task-label .datum { color: var(--ink); }
+.post-error { margin-bottom: 24px; padding: 12px 16px; background: var(--ground-2); border-radius: var(--r-sm); font-size: var(--fs-sm); color: var(--ink); }

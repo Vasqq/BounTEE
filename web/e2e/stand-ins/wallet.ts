@@ -119,6 +119,11 @@ export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?
   }, address);
 }
 
+/** Whether the page has asked the stand-in MetaMask to connect (eth_requestAccounts). */
+export async function walletConnected(page: Page): Promise<boolean> {
+  return page.evaluate(() => sessionStorage.getItem("__authorized") === "1");
+}
+
 /** Every transaction the stand-in MetaMask sent, by chain ID. */
 export async function walletSent(page: Page): Promise<Record<number, { to?: string; data?: string; value?: string; hash: string }[]>> {
   return (await page.request.get(`${STAND_IN}/wallet-sent`)).json();

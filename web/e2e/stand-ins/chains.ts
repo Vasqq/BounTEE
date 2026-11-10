@@ -238,7 +238,9 @@ function apply(w: World, tx: { chainId: number; from: string; to?: string; data?
     const call = decodeFunctionData({ abi: NEAR_ACCOUNT, data: tx.data as `0x${string}` });
     const p = w.posting!;
     if (call.functionName === "addKey") {
-      if (`0x${(call.args[1] as string).slice(2)}` === `0x${p.relayerKeyHex}`) p.onboarded.push(from);
+      // An Ethereum-address NEAR account exists only once NEAR reaches it; before that, NEAR refuses its transactions.
+      if (BigInt(w.accounts[from]?.amount ?? "0") === 0n) ok = false;
+      else if (`0x${(call.args[1] as string).slice(2)}` === `0x${p.relayerKeyHex}`) p.onboarded.push(from);
     } else {
       const [receiver, method, argsHex, , yocto] = call.args as [string, string, `0x${string}`, bigint, number];
       const deposit = value * 10n ** 6n + BigInt(yocto);

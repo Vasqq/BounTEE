@@ -97,7 +97,8 @@ async function usesAccessControl(url: string, to: string, account: string): Prom
   );
 }
 
-async function readContract(c: ReturnType<typeof config>) {
+/** What the bounty contract fixes for every posting, and the pause gas it asks per pause. */
+async function readContractTerms(c: ReturnType<typeof config>) {
   const [cfg, fees] = await Promise.all([
     view<{ usdc: string; seed: unknown; judge_build_hash: string }>(c, c.contract, "config"),
     view<{ posting_fee: string; pause_gas_per_pause: string }>(c, c.contract, "fees"),
@@ -116,14 +117,14 @@ async function readContract(c: ReturnType<typeof config>) {
 }
 
 export async function readBasics(): Promise<PostingBasics> {
-  return (await readContract(config())).basics;
+  return (await readContractTerms(config())).basics;
 }
 
 export async function readPosting(protocol: string, name: string, covered: { chainId: number; address: string }[]): Promise<PostingStatus> {
   const c = config();
   const id = { protocol, name };
   const [{ basics, pauseGasPerPause }, existing, role] = await Promise.all([
-    readContract(c),
+    readContractTerms(c),
     view<{ state: string } | null>(c, c.contract, "bounty", { id }),
     view<{ address: string }>(c, c.contract, "pause_role", { id }),
   ]);

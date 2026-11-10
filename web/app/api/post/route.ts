@@ -1,5 +1,6 @@
-// The posting flow's live status for one prospective bounty (D5, D17), read on each request.
-// Postings come from MetaMask, so the Protocol is a 0x… account; a bounty covers at most 8 contracts.
+// The posting flow's live reads (D5, D17), on each request: GET, what every posting shares, for
+// the rules before a wallet connects; POST, the status of one prospective bounty. Postings come
+// from MetaMask, so the Protocol is a 0x… account; a bounty covers at most 8 contracts.
 import { readBasics, readPosting } from "@/lib/posting.ts";
 import { respond } from "@/lib/respond.ts";
 

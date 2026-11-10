@@ -450,17 +450,17 @@ On a phone each row becomes two lines, 72px tall: the bounty and its status chip
 
 **Forms** (posting flow, open-exploit). Label above the field, `label-sm` in `ink-2`, 8px gap. The field is a `surface` fill with no border, `sm` radius, 48px tall to match the buttons, `body-md` text in `ink`, and the 2px `ok` focus ring. Fields are 16px apart. Help text is `body-sm` in `ink-3` under the field. Addresses and ids are typed in `data`. Disabled controls stay legible and say why in a line beneath.
 
-**Posting flow** (#31). The flow's steps are the dock's steps: the dock floats at the bottom and moves between them, with done steps' numbers turning `ok` only once their transaction lands. The exact step list is settled with Liam when #31 starts. Field and checklist rules below apply whatever the steps are. The coverage limit (R4.12) is one `body-sm` `ink-2` sentence under the covered-contracts field: "Only contracts that pay nothing to callers by design can be covered."
+**Posting flow** (#31). The flow's steps are the dock's steps: the dock floats at the bottom and moves between them, with done steps' numbers turning `ok` only once their transaction lands. The steps, settled with Liam on Nov 10, 2026: **Set rules**, **Set up pause**, **Add funds**, **Post bounty**. Each label starts with a verb, so the dock reads as a to-do list, and the step's heading uses the same words. Set up pause holds both the grants and the pause gas, since both act on the one pause-role address; Add funds asks for everything the posting costs (the bounty's USDC and the NEAR fees) in one place, right before posting. Continue never waits on a chain: Post bounty checks everything anyway. The coverage limit (R4.12) is one `body-sm` sentence above the covered-contracts rows: "Contracts that hold user funds, each with a pause() you can grant. Skip any that pay callers, like liquidations."
 
 **Posting checklist** (D5, D14, D17, D20). Numbered items "1." onward, laid out like the per-chain pause rows. Each item has:
 - Its number, which turns `ok` once the item lands on chain.
-- A `title`.
-- The explanation in `ink-2`. The pause-gas text is D5's, word for word in meaning.
-- A primary action, e.g. "Grant on Base".
-- "Copy for your multisig" as `button-secondary`.
+- A `title`, with the item's state at the right of the same row ("not granted", "ready", "received"), `ok` only once proven on chain.
+- At most one short line in `ink-2`; the longer why sits in a hover tooltip on its key phrase. The pause-gas tooltip is D5's, word for word in meaning.
+- A primary action, e.g. "Grant". Only the next thing to do on the page is `ink`.
+- "Copy for multisig" as `button-secondary`, only where there is a grant transaction to copy.
 - The tx chip once it lands.
 
-The NEAR step shows the Protocol's `0x…` account in a command block with Copy. The exploit-key step's action is "Sign with MetaMask". If the two signatures differ, the item shows one `ink` sentence saying so and offers a key-file field in its place (D20).
+Set up pause has one card per chain, holding a row per covered contract's grant and a row for that chain's pause gas, split by a `line` hairline. Add funds shows the Protocol's `0x…` account in a command block with Copy, then the bounty's USDC and the NEAR fees as items. Post bounty's first item is the exploit key, whose action is "Sign with MetaMask". If the two signatures differ, the item shows one `ink` sentence saying so and offers a key-file field in its place (D20).
 
 **"What you're risking" panel** (D15). A `panel` in the right column, built as the ledger without glyphs: `title-ledger` items, each with one sentence, listing D15's points and the R15.5 trusted parties. It stays in view beside the final two prompts. On a phone it sits directly above the two prompts.
 
