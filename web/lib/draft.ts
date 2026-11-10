@@ -3,6 +3,7 @@
 // browser never sends a posting the contract would refuse for its shape.
 import { parseBountyId, parseRules, type Rules } from "@bountee/formats";
 import { parseUnits } from "viem";
+import { coveredChain, net } from "./network.ts";
 import type { PostingStatus } from "./posting.ts";
 
 export interface Draft {
@@ -15,7 +16,7 @@ export interface Draft {
   delay: string;
 }
 
-export const emptyDraft = (): Draft => ({ name: "", covered: [{ chainId: 8453, address: "" }], proofChain: 8453, amount: "", minimum: "", endDate: "", delay: "30" });
+export const emptyDraft = (): Draft => ({ name: "", covered: [{ chainId: net.chains[0].id, address: "" }], proofChain: net.chains[0].id, amount: "", minimum: "", endDate: "", delay: "30" });
 
 /** The bounty ID's rule, as the contract applies it; the error to show, or null. */
 export function nameProblem(name: string, protocol: string): string | null {
@@ -58,13 +59,17 @@ export function draftProblems(d: Draft, protocol: string, decimals: number): Rec
 
 /** The rules to post: the Protocol's draft plus what BounTEE fixes (recency limit, seed, judge build). */
 export function rulesOf(d: Draft, s: PostingStatus, exploitPublicKey: string): Rules {
-  const usdc = s.chains.find((c) => c.id === d.proofChain)!.usdc;
+  const chainIds = [...new Set(d.covered.map((c) => c.chainId))];
   return parseRules({
     covered_contracts: d.covered.map((c) => ({ chain_id: c.chainId, address: c.address.toLowerCase() })),
-    proof_chain: d.proofChain,
     recency_limit_secs: s.fixed.recency_limit_secs,
-    // Theft is valued in the proof chain's USDC, one unit for one unit, as the minimum theft is.
-    listed_tokens: [{ token: usdc, price: "1" }],
+    // Theft is valued in each covered chain's USDC, one unit for one unit, as the minimum theft
+    // is (D27). The address is this build's, from the network table, never the server's.
+    listed_tokens: chainIds.map((id) => {
+      const chain = coveredChain(id);
+      if (!chain) throw new Error(`This app can't cover a contract on chain ${id}.`);
+      return { chain_id: id, token: chain.usdc, price: "1" };
+    }),
     seed: s.fixed.seed,
     bounty_amount: parseUnits(d.amount, s.usdcDecimals).toString(),
     minimum_theft: parseUnits(d.minimum, s.usdcDecimals).toString(),

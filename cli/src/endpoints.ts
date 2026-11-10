@@ -23,5 +23,8 @@ export const INTENTS_API = "https://1click.chaindefuser.com";
 /** OutLayer's API: its keystore (sealing) and its attestations. */
 export const KEYSTORE_API = { testnet: "https://testnet-api.outlayer.ai", mainnet: "https://api.outlayer.ai" } as const;
 
+/** NEAR's explorer, for an account's page (`address/<account>`). */
+export const NEAR_EXPLORER = { testnet: "https://testnet.nearblocks.io/", mainnet: "https://nearblocks.io/" } as const;
+
 /** A NEAR transaction's page on the explorer, for receipts' links. */
 export const NEAR_EXPLORER_TX = { testnet: "https://testnet.nearblocks.io/txns/", mainnet: "https://nearblocks.io/txns/" } as const;

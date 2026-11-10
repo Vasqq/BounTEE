@@ -7,6 +7,7 @@ import { chainChecks, type Check, type ConfigView } from "@bountee/cli/src/verif
 import type { BountyId } from "./bounties.ts";
 import { config, type Config } from "./config.ts";
 import { listOf, units } from "./format.ts";
+import { net, verifyCommand } from "./network.ts";
 import { view } from "./near.ts";
 
 export type RowStatus = "pass" | "fail" | "wait";
@@ -57,11 +58,11 @@ export async function readVerify(id: BountyId): Promise<VerifyResult | null> {
   const bounty = await view<BountyView | null>(c, c.contract, "bounty", { id });
   if (!bounty) return null;
   const cfg = await view<ConfigView>(c, c.contract, "config");
-  const near = new Near("mainnet", c.nearRpc);
+  const near = new Near(net.network, c.nearRpc);
   const checks = await chainChecks(
     {
       near,
-      network: "mainnet",
+      network: net.network,
       contract: c.contract,
       bounty: id,
       rpcs: Object.fromEntries(Object.values(c.chains).map((ch) => [ch.id, ch.rpc])),
@@ -97,5 +98,5 @@ export async function readVerify(id: BountyId): Promise<VerifyResult | null> {
       ? { name: "Re-run of the published exploit", status: "wait", detail: "published · re-run it with bountee verify", links: [] }
       : { name: "Re-run of the published exploit", status: "wait", detail: `not yet published · ${after}`, links: [] },
   ];
-  return { command: `bountee verify ${id.protocol}/${id.name} --network mainnet`, rows };
+  return { command: verifyCommand(id, c.contract), rows };
 }

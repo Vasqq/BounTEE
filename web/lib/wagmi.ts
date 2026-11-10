@@ -3,30 +3,34 @@
 // browser announces through EIP-6963. Reading and verifying never touch it (DESIGN.md, Voice
 // and copy): only the pages that sign mount it (components/WalletProvider.tsx).
 //
-// Chains: Base and Arbitrum One, where the Protocol grants pause roles and tops up pause gas,
-// and NEAR's Ethereum-compatible chain (NEP-518), through which the same MetaMask signs NEAR
-// transactions as the Protocol's 0x… NEAR account. Each RPC can be pointed elsewhere at build
-// time (the Playwright build points them at the test stand-in).
-import { defineChain } from "viem";
+// Chains, from the network table (D30): the chains a bounty can cover, where the Protocol
+// grants pause roles and tops up pause gas, and NEAR's Ethereum-compatible chain (NEP-518),
+// through which the same MetaMask signs NEAR transactions as the Protocol's 0x… NEAR account.
+// Each RPC can be pointed elsewhere at build time (the Playwright build points them at the
+// test stand-in).
+import { defineChain, type Transport } from "viem";
 import { createConfig, http } from "wagmi";
-import { arbitrum, base } from "wagmi/chains";
 import { injected } from "wagmi/connectors";
+import { net, type CoveredChainId } from "./network.ts";
 
-/** NEAR mainnet's Ethereum-compatible chain, as NEAR's ethereum-wallets module defines it. */
+/** NEAR's Ethereum-compatible chain, as NEAR's ethereum-wallets module defines it. */
 export const nearEvm = defineChain({
-  id: 397,
-  name: "NEAR Protocol",
+  id: net.nearEvm.id,
+  name: net.nearEvm.name,
   nativeCurrency: { decimals: 18, name: "NEAR", symbol: "NEAR" },
-  rpcUrls: { default: { http: [process.env.NEXT_PUBLIC_NEAR_ETH_RPC || "https://eth-rpc.mainnet.near.org"] } },
-  blockExplorers: { default: { name: "NEAR Explorer", url: "https://eth-explorer.near.org" } },
+  rpcUrls: { default: { http: [net.nearEvm.browserRpc ?? net.nearEvm.rpc] } },
+  blockExplorers: { default: { name: "NEAR Explorer", url: net.nearEvm.explorer } },
 });
 
+// wagmi types its chains as a non-empty tuple and its transports by those chains' IDs: built
+// from the table, both need saying so.
+const [first, ...rest] = net.chains.map((c) => c.viem);
+
 export const wagmiConfig = createConfig({
-  chains: [base, arbitrum, nearEvm],
+  chains: [first, ...rest, nearEvm],
   connectors: [injected({ target: "metaMask" })],
   transports: {
-    [base.id]: http(process.env.NEXT_PUBLIC_EVM_RPC_8453 || undefined),
-    [arbitrum.id]: http(process.env.NEXT_PUBLIC_EVM_RPC_42161 || undefined),
+    ...(Object.fromEntries(net.chains.map((c) => [c.id, http(c.browserRpc)])) as Record<CoveredChainId, Transport>),
     [nearEvm.id]: http(),
   },
   // Rendered on the server first: keep wallet state out of the first paint, restore it after.
