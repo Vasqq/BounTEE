@@ -1,7 +1,7 @@
 // Seam W, ticket #30: every bounty page's Verify section and per-chain pause, with
 // "Send pause" for a signed pause that hasn't landed.
 import { expect, test, type Page } from "@playwright/test";
-import { ARBITRUM, BASE, emptyWorld, post, rawPause, sentTxs, setWorld, win, type BountyId } from "./stand-ins/world.ts";
+import { ARBITRUM, BASE, emptyWorld, post, sentTxs, setWorld, win, type BountyId } from "./stand-ins/world.ts";
 
 const ID: BountyId = { protocol: "acme.near", name: "vault-v2" };
 const open = (page: Page) => page.goto(`/bounties/${ID.protocol}/${ID.name}`);
@@ -17,15 +17,15 @@ test("D6, D30: Verify shows each check as passing, failing or not yet published,
   await setWorld(page, w);
   await open(page);
   await expect(verify(page).getByText(`bountee verify ${ID.protocol}/${ID.name} --contract bounty.bountee.near --network mainnet`)).toBeVisible();
-  await expect(row(page, "Payout on NEAR")).toContainText("PASS");
+  await expect(row(page, "Payout on NEAR")).toContainText("Pass");
   await expect(row(page, "Payout on NEAR").getByRole("link")).toHaveAttribute("href", /^https:\/\/nearblocks\.io\/txns\//);
-  await expect(row(page, "Pauses landed")).toContainText("PASS");
-  await expect(row(page, "Enclave attestation")).toContainText("FAIL");
+  await expect(row(page, "Pauses landed")).toContainText("Pass");
+  await expect(row(page, "Enclave attestation")).toContainText("Fail");
   await expect(row(page, "Enclave attestation")).toContainText("OutLayer has no attestation");
-  await expect(row(page, "Re-run of the published exploit")).toContainText("WAIT");
-  await expect(row(page, "Re-run of the published exploit")).toContainText("not yet published");
+  await expect(row(page, "Re-run of the published exploit")).toContainText("Not yet run");
+  await expect(row(page, "Re-run of the published exploit")).toContainText("after the payout");
   // R7.7: verified only once the contract records it, so Arbitrum One's keeps this check waiting.
-  await expect(row(page, "Pauses verified on NEAR")).toContainText("WAIT");
+  await expect(row(page, "Pauses verified on NEAR")).toContainText("Not yet run");
   await expect(verify(page).getByText(/1 failing/)).toBeVisible();
 });
 
@@ -34,10 +34,10 @@ test("D6: before any claim wins, the checks that need a win wait for it", async 
   post(w, ID);
   await setWorld(page, w);
   await open(page);
-  await expect(row(page, "Payout on NEAR")).toContainText("WAIT");
-  await expect(row(page, "Enclave attestation")).toContainText("WAIT");
-  await expect(row(page, "Pauses landed")).toContainText("WAIT");
-  await expect(row(page, "Re-run of the published exploit")).toContainText("not yet published");
+  await expect(row(page, "Payout on NEAR")).toContainText("Not yet run");
+  await expect(row(page, "Enclave attestation")).toContainText("Not yet run");
+  await expect(row(page, "Pauses landed")).toContainText("Not yet run");
+  await expect(row(page, "Re-run of the published exploit")).toContainText("after the payout");
   await expect(verify(page).getByText(/failing/)).toHaveCount(0);
 });
 
@@ -61,7 +61,7 @@ test("R7.9: a signed pause that hasn't landed has Send pause, which sends it to 
   await send.click();
 
   // The stored signed pause, exactly, reached Arbitrum One and nothing else was sent.
-  await expect.poll(async () => (await sentTxs(page))[ARBITRUM]).toEqual([rawPause(ARBITRUM)]);
+  await expect.poll(async () => (await sentTxs(page))[ARBITRUM]).toEqual([arb.tx]);
   expect((await sentTxs(page))[BASE]).toBeUndefined();
   // It lands, and the row says so, linking the transaction.
   const landed = chainRow(page, "Arbitrum One").getByRole("listitem").filter({ hasText: "2. Landed" });

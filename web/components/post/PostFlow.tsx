@@ -21,7 +21,7 @@ import { wagmiConfig } from "@/lib/wagmi.ts";
 import { CommandBlock } from "../CommandBlock.tsx";
 import { ChainSelect } from "./ChainSelect.tsx";
 import { EndDate } from "./EndDate.tsx";
-import { Hint } from "./Hint.tsx";
+import { Hint } from "../Hint.tsx";
 import { ChainMark } from "../ChainMark.tsx";
 import { TxChip } from "../Chips.tsx";
 import { RiskPanel } from "./RiskPanel.tsx";

@@ -15,14 +15,16 @@ export function ChainMark({ chainId, name }: { chainId: number; name: string }) 
   const family = coveredChain(chainId)?.family;
   if (family === "base") {
     return (
-      <svg className="mark16" viewBox="0 0 1280 1280" role="img" aria-label={name}>
+      <svg className="mark16" viewBox="0 0 1280 1280" role="img">
+        <title>{name}</title>
         <path d={BASE_SQUARE} fill="#0000ff" />
       </svg>
     );
   }
   if (family === "arbitrum") {
     return (
-      <svg className="mark16" viewBox="-40 -30 454 480" role="img" aria-label={name}>
+      <svg className="mark16" viewBox="-40 -30 454 480" role="img">
+        <title>{name}</title>
         <rect x="-40" y="-30" width="454" height="480" rx="80" fill="#213147" />
         {ARB_MARK.map((d) => (
           <path key={d.slice(0, 12)} d={d} fill="#ffffff" />

@@ -27,14 +27,14 @@ export function EndDate({ value, onChange, onBlur, error }: { value: string; onC
   return (
     <div className="field">
       <span id={`${id}-label`}>End date</span>
-      <div className="terms" role="radiogroup" aria-labelledby={`${id}-label`}>
+      <div className="term-opts" role="radiogroup" aria-labelledby={`${id}-label`}>
         {TERMS.map((n) => (
-          <label key={n} className="term">
+          <label key={n} className="term-opt">
             <input type="radio" name={`${id}-term`} checked={term === n} onChange={() => (setExact(false), onChange(monthsFromNow(n)))} />
             <span>{n === 1 ? "1 month" : `${n} months`}</span>
           </label>
         ))}
-        <label className="term">
+        <label className="term-opt">
           <input type="radio" name={`${id}-term`} checked={exact} onChange={() => setExact(true)} />
           <span>Custom</span>
         </label>

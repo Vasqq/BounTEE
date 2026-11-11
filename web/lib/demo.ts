@@ -82,12 +82,12 @@ export async function readDemo(): Promise<Demo | null> {
   ]);
   const claimKey = sealed ? (await signedWithFunctionCallKey(c, sealed.tx, sealed.signer, c.contract)) === true : false;
   const landed: StoryTx[] = page.chains.flatMap((ch) => (ch.landed ? ch.pauses.map((p) => ({ chain: ch.chain, hash: p.hash, href: p.href })) : []));
-  const verified: StoryTx[] = page.chains.flatMap((ch) => (ch.verified ? [ch.verified.hash ? { chain: "NEAR", hash: ch.verified.hash, href: ch.verified.href } : { chain: "NEAR", hash: "", href: `${c.nearExplorer}address/${c.contract}`, label: `${ch.chain} recorded` }] : []));
+  const verified: StoryTx[] = page.chains.flatMap((ch) => (ch.verified ? [ch.verified.hash ? { chain: "NEAR", hash: ch.verified.hash, href: ch.verified.href } : { chain: "NEAR", hash: "", href: c.contractHref, label: `${ch.chain} recorded` }] : []));
   const chains = page.chains.map((ch) => ch.chain);
   const verdict = judged ? ((judged.data.verdict as { outcome?: string } | undefined)?.outcome ?? null) : null;
   return {
     contract: c.contract,
-    contractHref: `${c.nearExplorer}address/${c.contract}`,
+    contractHref: c.contractHref,
     chains,
     amount: page.amount,
     paidOnce: !!paid,

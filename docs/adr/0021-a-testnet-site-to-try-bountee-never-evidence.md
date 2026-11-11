@@ -6,6 +6,8 @@ Amended Nov 10 (Liam): the site's contract is `bounty2.bountee.testnet`, deploye
 
 Amended again Nov 10 (Liam): the site's contract is `bounty3.bountee.testnet`, deployed the same way, so its bounties' minimum thefts can stay in proportion to their few-USDC amounts. `bounty2.bountee.testnet` holds no keys either, so it stays deployed, unlinked.
 
+Amended a third time Nov 10 (Liam): the seeded bounty whose posting check failed now shows as "Not posted" (DESIGN.md, Bounty list). The state seeded is unchanged.
+
 ## Decisions
 
 - **Two sites, one codebase.** `NEXT_PUBLIC_NETWORK` is `mainnet` (the default) or `testnet`. It picks one table of every network value the app reads or signs with: NEAR RPCs and explorers, the bounty contract, NEAR's USDC, the MPC root key the pause-role address is derived from, the EVM chains and their explorers and USDC, NEAR's Ethereum-compatible chain (397 or 398), and the network the Verify command names. Every per-endpoint override that exists today still wins over the table.

@@ -10,6 +10,9 @@
 
 .chip.fail { color: var(--fail); background: var(--fail-wash); }
 .chip.warn { color: var(--warn); background: var(--warn-wash); }
+/* Live: a faint breathing dither dot before the word (components/Chips.tsx). */
+.chip.live { display: inline-flex; align-items: center; gap: 7px; }
+.chip.live .live-dither { display: block; flex: none; image-rendering: pixelated; }
 .chip.ok, .num.ok { transition: color var(--t2) var(--ease), background-color var(--t2) var(--ease); }
 
 /* nav: the current page's link turns ink */
@@ -50,36 +53,81 @@
 .panel-app p + p { margin-top: 12px; }
 .panel-app h3 { font-size: var(--fs-4); }
 .panel-app h3 + p { margin-top: 12px; }
-.panel-app ul.plain { margin-top: 12px; display: grid; gap: 8px; color: var(--ink-2); max-width: 36em; }
-.panel-app ul.plain li { padding-left: 18px; position: relative; }
-.panel-app ul.plain li::before { content: ""; position: absolute; left: 2px; top: 0.7em; width: 6px; height: 6px; border-radius: 2px; background: var(--line-2); }
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .datum { font-family: var(--mono); font-size: var(--fs-sm); }
 
 /* bounty list */
-.count { color: var(--ink-2); margin-top: 24px; }
-.list { width: 100%; margin-top: 16px; border-collapse: separate; border-spacing: 0 2px; }
+/* The line naming the contract the list was read from (R15.6). */
+.source { color: var(--ink-2); margin-top: 16px; font-size: var(--fs-sm); }
+.source a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; transition: text-decoration-color var(--t1) var(--ease); }
+.source a:hover { text-decoration-color: var(--ink); }
+.list-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; margin-top: 24px; }
+/* Live and Past: a segmented pair on a ground-2 track, the open one lifted a step, never ink (one ink action per view). */
+.tabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--r-sm); background: var(--ground-2); }
+.tabs a { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 4px; color: var(--ink-2); font: 500 var(--fs-sm)/1 var(--text); text-decoration: none;
+  transition: background-color var(--t1) var(--ease), color var(--t1) var(--ease), transform 160ms var(--ease); }
+/* Switching is instant (no fade on rows people scan); the press alone gives feedback. */
+.tabs a:active { transform: scale(0.97); }
+.tabs a .n { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+@media (hover: hover) and (pointer: fine) { .tabs a:hover { color: var(--ink); } }
+.tabs a[aria-current="page"] { background: var(--surface); color: var(--ink); }
+.tabs a:focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; }
+/* The phone and tablet sort; the table's headers sort above 900px. */
+.sort-select { display: none; align-items: center; gap: 8px; }
+.sort-select select { height: 44px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: var(--ground-2); color: var(--ink); font: 400 var(--fs-sm)/1 var(--text); }
+.sort-select select:focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; }
+/* Sortable headers: the label is the link; the arrow shows on the active column only. */
+.list th a { color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+.list th .hint-term { display: inline-flex; align-items: center; gap: 4px; }
+.list th a.sort:hover, .list th[data-active] { color: var(--ink); }
+.list th a:focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; border-radius: 2px; }
+.list th a.hint-term { cursor: pointer; }
+.list th.col-chains { width: 88px; }
+.list th.col-pays { width: 136px; }
+.list th.col-theft { width: 160px; }
+.list th.col-ends { width: 132px; }
+.sort-arrow { width: 12px; height: 12px; flex: none; }
+/* Fixed layout: the value columns keep their widths whatever the tab or sort shows, and the
+   bounty column takes the rest, its ID ending in an ellipsis rather than widening the table. */
+.list { width: 100%; margin-top: 16px; border-collapse: separate; border-spacing: 0 2px; table-layout: fixed; }
 .list th { font: 500 var(--fs-sm)/1 var(--text); color: var(--ink-3); text-align: left; padding: 0 16px 12px; white-space: nowrap; }
 .list th.r, .list td.r { text-align: right; }
 .list td { height: 56px; padding: 0 16px; background: var(--ground-2); transition: background-color var(--t2) var(--ease); white-space: nowrap; }
-.list td:first-child { border-radius: var(--r-sm) 0 0 var(--r-sm); width: 100%; }
+.list td:first-child { border-radius: var(--r-sm) 0 0 var(--r-sm); }
+.list .head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.list .head .chip { flex: none; }
 .list td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 0; }
 .list tr:hover td { background: var(--surface); }
-.list .id { font: 400 var(--fs-sm)/1 var(--mono); color: var(--ink); text-decoration: none; }
+.list .id { font: 400 var(--fs-sm)/1 var(--mono); color: var(--ink); text-decoration: none; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .list .id::after { content: ""; position: absolute; inset: 0; }
 .list tr { position: relative; }
 .marks { display: inline-flex; gap: 6px; vertical-align: middle; }
+/* Above the row's link, so each mark shows its chain's name on hover. */
+.list .marks { position: relative; z-index: 1; }
 .mark16 { width: 16px; height: 16px; flex: none; }
 .empty { margin-top: 16px; color: var(--ink-2); }
 .list .sub { display: none; }
+/* The Minimum theft note opens leftward: the column sits near the table's right edge. */
+.list th .hint-pop { left: auto; right: -12px; transform-origin: calc(100% - 24px) 100%; white-space: normal; }
 
 /* per-chain pause */
 .pauses { display: grid; gap: 16px; }
 .pause-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
 .pause-head { display: flex; align-items: center; gap: 12px; }
-.pause-head .mark16 { width: 20px; height: 20px; }
-.pause-head h3 { font-size: var(--fs-4); }
+.pause-head .mark16 { width: 20px; height: 20px; flex: none; display: block; }
+/* The serif's capitals sit high in its line box; 6px above them centres the name on the mark. */
+.pause-head h3 { font-size: var(--fs-4); line-height: 1; padding-top: 6px; }
 .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+/* A chain's pause as a small timeline, drawn like Verify's: a node per fact, green once on chain, the line
+   between two done facts green. */
+.ptl { gap: 0; }
+.ptl .step { position: relative; padding: 26px 18px 0 0; }
+.ptl .step .node { position: absolute; top: 0; left: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--ground-2); box-shadow: inset 0 0 0 2px var(--line-2); transition: background-color var(--t2) var(--ease), box-shadow var(--t2) var(--ease); }
+.ptl .step::before { content: ""; position: absolute; top: 5px; left: 16px; right: 4px; height: 2px; border-radius: 1px; background: var(--line); transition: background-color var(--t2) var(--ease); }
+.ptl .step:last-child::before { display: none; }
+.ptl .step.done .node { background: var(--ok); box-shadow: inset 0 0 0 2px var(--ok); }
+.ptl .step.linked::before { background: var(--ok); }
+.ptl .step .num.ok { color: var(--ink-3); } /* the node carries the green, as on Verify's timeline */
 .step .lbl { font: 500 var(--fs-ui)/1 var(--text); color: var(--ink-2); display: flex; gap: 6px; }
 .step .num { color: var(--ink-3); }
 .step .num.ok { color: var(--ok); }
@@ -92,8 +140,192 @@
 .send .btn:disabled { opacity: 0.6; cursor: default; }
 .send p { font-size: var(--fs-sm); color: var(--ink-3); }
 
+/* Bounty details (DESIGN.md, Bounty page): the header and figures answer what every reader asks
+   first; each block below has a plain heading. Tone steps, never lines; green only on chain facts. */
+.bounty-head .source { margin-top: 14px; }
+/* The live-read dot: it flashes once each time a fresh read of the chains lands (every 15 s). Grey: a read
+   proves nothing by itself, so it is never green. */
+.live-dot { display: inline-block; vertical-align: middle; margin: -2px 9px 0 1px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); animation: live-read 900ms var(--ease) both; }
+@keyframes live-read { 0% { background: var(--ink); box-shadow: 0 0 0 0 color-mix(in srgb, var(--ink) 45%, transparent); } 100% { background: var(--ink-3); box-shadow: 0 0 0 7px color-mix(in srgb, var(--ink) 0%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+/* The figures: type on one ground-2 band, never tiles. The money is the largest figure on the screen. */
+.figs { display: flex; flex-wrap: wrap; gap: 24px 32px;
+  padding: 28px clamp(24px, 3vw, 44px); border-radius: var(--r); background: var(--ground-2); }
+.fig { flex: 1 1 0; min-width: 120px; }
+.fig dt { font: 500 var(--fs-sm)/1 var(--text); color: var(--ink-3); }
+.fig dt .hint-term { color: inherit; }
+.fig dd { margin-top: 12px; color: var(--ink); font: 400 var(--fs-lead)/1.2 var(--text); font-variant-numeric: tabular-nums; }
+.fig.money dd { font: 360 var(--fs-4)/1 var(--display); letter-spacing: -0.03em; font-optical-sizing: auto; }
+.figs .hint-pop { white-space: normal; }
+/* A note in a right-hand figure opens leftward, so it never runs past the screen's edge. */
+.fig.claims .hint-pop { left: auto; right: -12px; transform-origin: calc(100% - 24px) 100%; }
+
+/* Winning claim as a ticket and its stub: the Summary band's labelled fields in two ground-2 parts, torn apart by
+   two notches cut into their facing edges (cut-outs, never a drawn line). */
+.ticket { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); gap: 3px; }
+.tk-main, .tk-stub { background: var(--ground-2); padding: 28px clamp(24px, 3vw, 44px); }
+.tk-main { border-radius: var(--r) 0 0 var(--r); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 32px; padding-right: clamp(32px, 4vw, 56px);
+  --n: radial-gradient(circle 11px at 100% 0, #0000 10.5px, #000 11px) top / 100% 51% no-repeat, radial-gradient(circle 11px at 100% 100%, #0000 10.5px, #000 11px) bottom / 100% 51% no-repeat;
+  -webkit-mask: var(--n); mask: var(--n); }
+.tk-stub { border-radius: 0 var(--r) var(--r) 0; display: grid; align-content: start; justify-items: start; gap: 10px;
+  --n: radial-gradient(circle 11px at 0 0, #0000 10.5px, #000 11px) top / 100% 51% no-repeat, radial-gradient(circle 11px at 0 100%, #0000 10.5px, #000 11px) bottom / 100% 51% no-repeat;
+  -webkit-mask: var(--n); mask: var(--n); }
+.tk-field dt, .tk-label { font: 500 var(--fs-sm)/1 var(--text); color: var(--ink-3); }
+.tk-field dd { margin-top: 12px; display: grid; justify-items: start; gap: 10px; min-width: 0; }
+.tk-field .tx { flex-wrap: wrap; flex: initial; max-width: 100%; }
+/* One line in one size: "3 USDC on NEAR" all in the title serif, the N mark at the capitals' height. */
+.tk-paid { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font: 360 var(--fs-4)/1 var(--display); letter-spacing: -0.03em; font-optical-sizing: auto; }
+.tk-on { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.near-mark { width: 18px; height: 18px; color: var(--ink); flex: none; }
+.chip.link.solo.ok { color: var(--ok); background: var(--ok-wash); }
+.tk-amount { font: 360 var(--fs-4)/1 var(--display); letter-spacing: -0.03em; font-optical-sizing: auto; color: var(--ink); }
+.tk-when { color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.5; margin-top: 2px; }
+.tk-stub .btn { margin-top: 4px; height: 38px; padding: 0 14px; font-size: var(--fs-sm); } /* button-nav's size */
+.tk-stub .term-mini { margin-top: 0; width: 100%; }
+@media (max-width: 900px) {
+  .ticket { grid-template-columns: 1fr; }
+  .tk-main { border-radius: var(--r) var(--r) 0 0; grid-template-columns: 1fr;
+    --n: radial-gradient(circle 11px at 0 100%, #0000 10.5px, #000 11px) left / 51% 100% no-repeat, radial-gradient(circle 11px at 100% 100%, #0000 10.5px, #000 11px) right / 51% 100% no-repeat; }
+  .tk-stub { border-radius: 0 0 var(--r) var(--r);
+    --n: radial-gradient(circle 11px at 0 0, #0000 10.5px, #000 11px) left / 51% 100% no-repeat, radial-gradient(circle 11px at 100% 0, #0000 10.5px, #000 11px) right / 51% 100% no-repeat; }
+}
+
+/* A proof list of chain facts (Winning claim, Payout): term on the left, its chips on the right. */
+.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 18px 40px; align-items: start; }
+.facts dt { font: 500 var(--fs-sm)/30px var(--text); color: var(--ink-3); }
+.facts dd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.facts .tx, .step .meta .tx { flex-wrap: wrap; flex: initial; } /* a chain chip and its link wrap rather than push past a phone's edge */
+.chip.link.solo { padding-right: 11px; transition: background-color var(--t2) var(--ease), color var(--t2) var(--ease); }
+.chip.link.solo a, .chip.link a { display: inline-flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
+@media (hover: hover) and (pointer: fine) { .chip.link.solo:hover { background: var(--line); color: var(--ink); } }
+.tx .chip.link.ok { color: var(--ok); background: var(--ok-wash); }
+.tx .chip.link.ok .cp { color: var(--ok); }
+
+.why p { color: var(--ink); }
+.why p + p { margin-top: 6px; color: var(--ink-2); }
+.why .btn { margin-top: 24px; }
+/* The open-exploit page's one line on who can open it, above its MetaMask button. */
+.send .who-opens { width: 100%; }
+
+/* Covered contracts: a table with column headers, built like the bounty list's rows (ground-2, 2px apart, no lines). */
+.dtable { width: 100%; border-collapse: separate; border-spacing: 0 2px; margin-top: 8px; }
+.app .block > h2 + .dtable { margin-top: 12px; }
+.dtable th { font: 500 var(--fs-sm)/1 var(--text); color: var(--ink-3); text-align: left; padding: 0 20px 10px; white-space: nowrap; }
+.dtable th.col-chain { width: 280px; }
+.dtable td { height: 56px; padding: 0 20px; background: var(--ground-2); color: var(--ink); font-size: var(--fs-sm); transition: background-color var(--t2) var(--ease); }
+@media (hover: hover) and (pointer: fine) { .dtable tbody tr:hover td { background: var(--surface); } }
+.dtable td:first-child { border-radius: var(--r-sm) 0 0 var(--r-sm); }
+.dtable td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.chain-cell { display: inline-flex; align-items: center; gap: 10px; font-size: var(--fs-ui); white-space: nowrap; }
+.chain-cell .mark16 { width: 18px; height: 18px; flex: none; display: block; }
+@media (max-width: 900px) {
+  .dtable th.col-chain { width: auto; }
+  .dtable th, .dtable td { padding-inline: 14px; }
+}
+/* On a phone a third column (Posting check) only fits if names and reasons wrap. */
+@media (max-width: 560px) {
+  .dtable th, .dtable td { padding-inline: 10px; }
+  .dtable th { white-space: normal; }
+  .dtable td { height: auto; padding-block: 12px; }
+  .chain-cell { white-space: normal; }
+}
+
+/* Rules: one panel, a ledger of short titles over one plain sentence each (the landing's Ledger, without glyphs). */
+/* A section's one-line summary, under its heading and outside its panel. */
+.app .block > h2 + .section-lead { margin-top: 8px; }
+.section-lead { color: var(--ink-2); font-size: var(--fs-ui); max-width: 48em; }
+.app .block > .section-lead + * { margin-top: 20px; }
+.app .block > .section-lead + .fold { margin-top: 0; } /* the folded panel brings its own 20px */
+.rule-list { margin-top: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 40px; }
+.rule-list li.wide { grid-column: span 2; }
+@media (max-width: 900px) { .rule-list { grid-template-columns: 1fr; gap: 24px; } .rule-list li.wide { grid-column: auto; } }
+.rule-list h3 { font: 500 var(--fs-ui)/1.3 var(--text); letter-spacing: 0; color: var(--ink); }
+.panel-app .rule-list p { margin-top: 8px; color: var(--ink-2); font-size: var(--fs-ui); line-height: 1.5; }
+.rule-list .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.rule-list a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; transition: text-decoration-color var(--t1) var(--ease); }
+.rule-list a:hover { text-decoration-color: var(--ink); }
+/* Folded once the bounty is settled: the FAQ's disclosure, its + turning 45°. */
+.fold-h button { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; letter-spacing: inherit; text-align: left; cursor: pointer; }
+.fold-h button:focus-visible { outline: 2px solid var(--ok); outline-offset: 4px; border-radius: 4px; }
+.fold-h button:active .pm { transform: scale(0.9); }
+[data-open] > .fold-h .pm svg { transform: rotate(45deg); }
+.fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--t2) var(--ease); }
+.fold > div { overflow: hidden; }
+.fold > div > .panel-app { margin-top: 20px; }
+[data-open] > .fold { grid-template-rows: 1fr; }
+
+/* A zero proves nothing, so the Verify summary's count stays ink until a check passes (landing terminal too). */
+.sum b.zero { color: var(--ink); }
+
+/* Verify as a proof timeline: the count of proven checks, then R15.1's checks in the order a bounty's
+   life proves them, each cell's segment filling once it passes, one after another (120 ms, then 140 ms apart). */
+.vsub h3 { font: 500 var(--fs-ui)/1.3 var(--text); letter-spacing: 0; color: var(--ink); }
+.panel-app .vsub p { margin-top: 4px; color: var(--ink-2); font-size: var(--fs-sm); max-width: none; }
+.vsub + .vcount { margin-top: 20px; }
+.vcount { font: 360 var(--fs-4)/1 var(--display); letter-spacing: -0.03em; font-optical-sizing: auto; color: var(--ink); font-variant-numeric: tabular-nums; }
+.vcount b { font-weight: inherit; transition: color var(--t2) var(--ease); }
+.vcount b.ok { color: var(--ok); }
+.vcount .fail-count { color: var(--fail); }
+/* One connected line with a node per check: a node fills green once its check passes, the line between two
+   passed checks turns green, and the furthest proven node pulses (grey on the first node until one passes). */
+.vtl { margin-top: 28px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.vstep { position: relative; display: grid; align-content: start; gap: 6px; padding: 28px 18px 0 0; font-size: var(--fs-sm); line-height: 1.45; min-width: 0; }
+.vstep .node { position: absolute; top: 0; left: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--ground); box-shadow: inset 0 0 0 2px var(--line-2);
+  transition: background-color var(--t2) var(--ease), box-shadow var(--t2) var(--ease); transition-delay: var(--row-d, 0ms); }
+.vstep::before { content: ""; position: absolute; top: 5px; left: 16px; right: 4px; height: 2px; border-radius: 1px; background: var(--line); transition: background-color var(--t2) var(--ease); transition-delay: var(--row-d, 0ms); }
+.vstep:last-child::before { display: none; }
+.vpanel.ran .vstep.pass .node { background: var(--ok); box-shadow: inset 0 0 0 2px var(--ok); }
+.vpanel.ran .vstep.fail .node { background: var(--fail); box-shadow: inset 0 0 0 2px var(--fail); }
+.vpanel.ran .vstep.linked::before { background: var(--ok); }
+/* The frontier's dithered halo sits behind its node (DitherHalo in Verify.tsx). */
+.vstep { isolation: isolate; }
+.vstep .halo { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: -1; pointer-events: none; image-rendering: pixelated; }
+.vstep .nm { color: var(--ink); font-weight: 500; }
+.vstep .n { color: var(--ink-3); }
+.vstep .st { font: 500 var(--fs-sm)/1.3 var(--text); }
+.vstep .st.pass { color: var(--ok); }
+.vstep .st.wait { color: var(--ink-3); }
+.vstep .st.fail { color: var(--fail); }
+.vstep .det { color: var(--ink-3); overflow-wrap: anywhere; }
+.vstep .det a { color: var(--ink-2); text-underline-offset: 3px; text-decoration-color: var(--line-2); }
+.vstep .det a:hover { color: var(--ink); }
+.vrun { margin-top: 40px; }
+.vlocal { margin-top: 14px; display: grid; gap: 2px; }
+.vlocal li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; padding: 12px 16px; background: var(--ground); font-size: var(--fs-sm); }
+.vlocal li:first-child { border-radius: var(--r-sm) var(--r-sm) 0 0; }
+.vlocal li:last-child { border-radius: 0 0 var(--r-sm) var(--r-sm); }
+.vlocal .nm { color: var(--ink); font-weight: 500; }
+.vlocal .st { font-weight: 500; }
+.vlocal .st.wait { color: var(--ink-3); }
+.vlocal .st.pass { color: var(--ok); }
+.vlocal .st.fail { color: var(--fail); }
+.vrun .term-mini { margin-top: 14px; align-items: flex-start; }
+.vrun .term-mini code { white-space: pre-wrap; overflow-wrap: break-word; padding-top: 7px; line-height: 1.5; }
+@media (max-width: 900px) {
+  .vtl { grid-template-columns: 1fr; }
+  .vstep { padding: 0 0 22px 28px; }
+  .vstep .node { top: 3px; }
+  .vstep::before { top: 19px; left: 5px; right: auto; bottom: 0; width: 2px; height: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .vstep .node, .vstep::before { transition: none; } }
+
+@media (max-width: 900px) {
+  .figs { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .fig.min .hint-pop, .fig.ends .hint-pop { left: auto; right: -12px; transform-origin: calc(100% - 24px) 100%; }
+  .fig.claims.first-col .hint-pop { left: -12px; right: auto; transform-origin: 24px 100%; }
+  .facts { grid-template-columns: 1fr; gap: 6px; }
+  .facts dd + dt { margin-top: 14px; }
+}
+
 /* empty, loading, error */
 .bar { display: inline-block; background: var(--surface); border-radius: 4px; vertical-align: middle; }
+/* On the bounty page the bars breathe, left to right, while the chains are read: an opacity step, never a
+   shimmer gradient (DESIGN.md, Empty, loading, error). */
+.bounty .bar { animation: skel 1.6s ease-in-out infinite; animation-delay: calc(var(--i, 0) * 110ms); }
+@keyframes skel { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+.rule-list p .bar { display: block; margin-top: 8px; }
+@media (prefers-reduced-motion: reduce) { .bounty .bar { animation: none; } }
 .failbox { display: grid; gap: 12px; justify-items: start; }
 .failbox p { color: var(--ink-2); }
 .dash { color: var(--ink-3); }
@@ -101,22 +333,24 @@
 @media (max-width: 900px) {
   .cols { grid-template-columns: 1fr; }
   .steps { grid-template-columns: 1fr; }
+  .ptl .step { padding: 0 0 20px 28px; }
+  .ptl .step .node { top: 2px; }
+  .ptl .step::before { top: 18px; left: 5px; right: auto; bottom: 0; width: 2px; height: auto; }
 }
-@media (max-width: 760px) {
-  /* bounty list rows become two lines */
+/* Bounty list rows become two lines wherever the five columns don't fit: below it the
+   bounty IDs would be cut to a stub (e2e/bounty-list.spec.ts checks 800px). */
+@media (max-width: 900px) {
   .list, .list tbody { display: block; }
   .list thead { display: none; }
+  .sort-select { display: flex; }
   .list tr { display: block; margin-bottom: 2px; background: var(--ground-2); border-radius: var(--r-sm); }
   .list tr:hover { background: var(--surface); }
   .list td { display: none; background: none; height: auto; }
-  .list td:first-child { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; align-content: center; gap: 4px 12px; width: auto; height: 72px; padding: 0 16px; border-radius: var(--r-sm); }
-  .list td:first-child .id { overflow: hidden; text-overflow: ellipsis; min-width: 0; white-space: nowrap; }
-  .list .sub { grid-column: 1 / -1; }
+  .list td:first-child { display: grid; align-content: center; gap: 4px; width: auto; height: 72px; padding: 0 16px; border-radius: var(--r-sm); }
+  .list .head { justify-content: space-between; }
   .list .sub { display: block; width: 100%; font: 400 var(--fs-sm)/1.5 var(--text); color: var(--ink-2); }
   .list .sub .marks { margin-left: 6px; }
-  .list .state-inline { display: inline-flex; }
 }
-@media (min-width: 761px) { .list .state-inline { display: none; } }
 @media (max-width: 560px) {
   .nav ul.app-links li.verify { display: none; }
 }
@@ -206,19 +440,19 @@ fieldset.covered > .btn { justify-self: start; }
 .suffixed > span { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--ink-3); font: 400 var(--fs-ui)/1 var(--text); pointer-events: none; }
 
 /* End date terms (components/post/EndDate.tsx): one segmented row of radios, the last opening an exact date. */
-.terms { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px; border-radius: var(--r-sm); background: var(--surface); }
-.term { position: relative; display: grid; }
-.term input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
-.term span { display: grid; place-items: center; height: 40px; padding: 0 6px; border-radius: 4px; color: var(--ink-2); font: 500 var(--fs-sm)/1 var(--text); white-space: nowrap;
+.term-opts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px; border-radius: var(--r-sm); background: var(--surface); }
+.term-opt { position: relative; display: grid; }
+.term-opt input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.term-opt span { display: grid; place-items: center; height: 40px; padding: 0 6px; border-radius: 4px; color: var(--ink-2); font: 500 var(--fs-sm)/1 var(--text); white-space: nowrap;
   transition: background-color var(--t1) var(--ease), color var(--t1) var(--ease); }
-@media (hover: hover) and (pointer: fine) { .term:hover span { color: var(--ink); } }
-.term input:checked + span { background: var(--ink); color: var(--ground); }
-.term input:focus-visible + span { outline: 2px solid var(--ok); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { .term-opt:hover span { color: var(--ink); } }
+.term-opt input:checked + span { background: var(--ink); color: var(--ground); }
+.term-opt input:focus-visible + span { outline: 2px solid var(--ok); outline-offset: 2px; }
 
 /* Field hints (components/post/PostFlow.tsx Field): the label wraps the input; the hint sits under it. */
 .field-main { display: grid; gap: 8px; }
 
-/* Hint tooltips (components/post/Hint.tsx): a dotted phrase that opens a small floating note above it. */
+/* Hint tooltips (components/Hint.tsx): a dotted phrase that opens a small floating note above it. */
 .hint { position: relative; }
 .hint-term { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline dotted var(--ink-3); text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: help; }
 .hint-term:focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; border-radius: 2px; }
