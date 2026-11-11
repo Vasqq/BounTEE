@@ -53,7 +53,7 @@ import { PAUSE_GAS_PER_PAUSE, parseRules, pauseRole } from "@bountee/formats";
 import { parseRpcFlags } from "../../src/broadcast.ts";
 import { CHAINS, defaultRpc, proofRpcs } from "../../src/chains.ts";
 import { rpc } from "../../src/proofs.ts";
-import { DEMO_READS, budgetClaims, whitehatNeed, type ClaimBudget, type ClaimPlan, type Read, type Role } from "./claim-budget.ts";
+import { DEMO_READS, budgetClaims, claimBalanceNeed, type ClaimBudget, type ClaimPlan, type Read, type Role } from "./claim-budget.ts";
 import { claimGas as claimGasFor } from "../../src/claim-flow.ts";
 import { formatNear, roundUpNear } from "../../src/near.ts";
 import { postingNeed } from "../../src/post.ts";
@@ -274,8 +274,8 @@ if (WHITEHAT) {
   // Each claim's draw, from the very proofs it will carry on the chain it is proven on
   // (claim-budget.ts). The cheat is filed on the first chain (Base); a win may be proven on any
   // covered chain (ADR-0020), so it is budgeted on each, from that chain's own proofs and header,
-  // and every win the run files is held at the costliest chain's. The Whitehat holds the
-  // largest draw plus what the others keep.
+  // and every win the run files is held at the costliest chain's. The claim balance holds every
+  // claim's whole draw (claimBalanceNeed).
   if (CLAIMS > 0) {
     for (const chain of CHAIN_IDS) winBudgets.push(...(await budgetClaims(proofRpcOf(chain), fees, [await claimPlan(chain, "win")])));
     const win = winBudgets.reduce((m, w) => (w.draw > m.draw ? w : m));
@@ -293,7 +293,8 @@ if (WHITEHAT) {
   const claimGasNear = claimGas.reduce((m, x) => (x > m ? x : m), 0n);
   // Claims draw from the claim balance; only what it lacks must still be free NEAR to top it up.
   const inClaimBalance = BigInt(await near.view<string>(CONTRACT, "claim_balance", { account_id: WHITEHAT }));
-  const toTopUp = whitehatNeed(claimBudgets) > inClaimBalance ? whitehatNeed(claimBudgets) - inClaimBalance : 0n;
+  const needInClaimBalance = claimBalanceNeed(claimBudgets);
+  const toTopUp = needInClaimBalance > inClaimBalance ? needInClaimBalance - inClaimBalance : 0n;
   needs.push(need(WHITEHAT, nearChain, "NEAR", (await near.freeNear(WHITEHAT)) ?? 0n, roundUpNear(toTopUp + claimGasNear), showNear));
 }
 const shownBudget = (c: ClaimBudget) => ({ chain_id: c.chain_id, input_bytes: c.input_bytes, draw: showNear(c.draw), refunded: showNear(c.refunded) });
@@ -301,7 +302,13 @@ stopIfShort(needs, {
   run: {
     claims: CLAIMS,
     disclosure_delay_days: DISCLOSURE_DELAY_DAYS,
-    ...(WHITEHAT ? { claim_budget: claimBudgets.map((c) => ({ kind: c.kind, ...shownBudget(c) })), win_budgets: winBudgets.map(shownBudget) } : {}),
+    ...(WHITEHAT
+      ? {
+          claim_budget: claimBudgets.map((c) => ({ kind: c.kind, ...shownBudget(c) })),
+          win_budgets: winBudgets.map(shownBudget),
+          claim_balance_need: showNear(claimBalanceNeed(claimBudgets)),
+        }
+      : {}),
   },
 });
 

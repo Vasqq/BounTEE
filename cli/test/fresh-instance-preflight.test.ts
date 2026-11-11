@@ -274,7 +274,7 @@ test("D21, R1.4: by default the mainnet preflight plans ADR-0018's run: 2 claims
 const near = (text: string) => BigInt(Math.round(Number(text.replace(/ NEAR$/, "") ) * 1e5)) * 10n ** 19n;
 
 /** D21: each claim is budgeted from the proofs it will carry on the proof chain, held by OutLayer above the free bytes. */
-test("D21: the Whitehat's budget follows each claim's input on the proof chain: the largest draw plus what the rest keep", async () => {
+test("D21: the Whitehat's budget follows each claim's input on the proof chain: every claim's whole draw in the claim balance", async () => {
   world.near.clear();
   world.node = 500;
   const r = await preflight();
@@ -302,12 +302,14 @@ test("D21: the Whitehat's budget follows each claim's input on the proof chain: 
   expect(cheat.input_bytes).toBeGreaterThan(win.input_bytes);
   // OutLayer holds the storage price for every input byte above the free 32 KiB (fees()).
   for (const c of [cheat, win]) expect(near(c.refunded)).toBe(BigInt(c.input_bytes - 32 * 1024) * 10n ** 19n);
-  // The claims run one at a time and each hold comes back: the cheat's whole draw, and the win's
-  // draw less its hold, plus one claim's gas in hand: `submit_claim` attaches the gas the contract
+  // OutLayer gives each hold back to the Whitehat's account, not the claim balance, which a
+  // claim key can't top up: the claim balance holds both claims' whole draws, plus one claim's
+  // gas in hand: `submit_claim` attaches the gas the contract
   // names for its size on the two covered chains (`claimGas`), the cheat's the largest, which NEAR
   // takes up front at its 1e9 yoctoNEAR minimum price before refunding what's unused.
   const whitehat = r.out.balances.find((b: any) => b.who === WHITEHAT);
-  const gasInHand = near(whitehat.need) - (near(cheat.draw) + near(win.draw) - near(win.refunded));
+  expect(near(r.out.run.claim_balance_need)).toBe(near(cheat.draw) + near(win.draw));
+  const gasInHand = near(whitehat.need) - (near(cheat.draw) + near(win.draw));
   const cheatGas = 220n * 10n ** 12n + 2n * 20n * 10n ** 12n + BigInt(cheat.input_bytes) * 600_000_000n;
   expect(gasInHand).toBeGreaterThanOrEqual(cheatGas * 10n ** 9n);
   expect(gasInHand).toBeLessThan(cheatGas * 10n ** 9n + YOCTO / 100n);

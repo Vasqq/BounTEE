@@ -124,13 +124,11 @@ export async function budgetClaims(url: string, fees: any, plans: ClaimPlan[]): 
 }
 
 /**
- * What the Whitehat holds at the run's peak: claims run one after another and OutLayer refunds
- * each one's hold at settlement, so the largest claim's whole draw, plus what every other claim
- * keeps (its job, its secret's storage, slack).
+ * What the Whitehat's claim balance must hold for the run: every claim's whole draw. OutLayer
+ * gives each job's hold back to the Whitehat's account, not to the claim balance, and a claim
+ * key can't top it up between claims, so nothing a claim draws is there for the next one (a
+ * testnet rehearsal of #35 found the agent's win refused after the cheat).
  */
-export function whitehatNeed(claims: ClaimBudget[]): bigint {
-  if (claims.length === 0) return 0n;
-  const kept = claims.map((c) => c.draw - c.refunded);
-  const biggest = claims.reduce((m, c, i) => (c.draw > claims[m]!.draw ? i : m), 0);
-  return claims.reduce((sum, c, i) => sum + (i === biggest ? c.draw : kept[i]!), 0n);
+export function claimBalanceNeed(claims: ClaimBudget[]): bigint {
+  return claims.reduce((sum, c) => sum + c.draw, 0n);
 }
