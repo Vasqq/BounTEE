@@ -178,13 +178,14 @@ export function bounty(id: BountyId, over: Partial<BountyView> = {}, network: Ne
   };
 }
 
-export function claim(id: number, bountyId: BountyId, state: string, verdict: { outcome: string; reason: string } | null, whitehat = "whitehat.near") {
+/** A claim record; `chainId` is the covered chain it was proven on (its `block.chain_id`). */
+export function claim(id: number, bountyId: BountyId, state: string, verdict: { outcome: string; reason: string } | null, whitehat = "whitehat.near", chainId: number = NETWORKS.mainnet.base) {
   return {
     id,
     record: {
       bounty: bountyId,
       whitehat,
-      block: { number: 38_000_000 + id, hash: evmHash(`block${id}`) },
+      block: { chain_id: chainId, number: 38_000_000 + id, hash: evmHash(`block${id}`) },
       header: "0xf90279",
       proofs_sha256: evmHash(`proofs${id}`),
       submitted_at_ns: "1794000000000000000",
@@ -245,7 +246,7 @@ export function post(w: World, id: BountyId, over: Partial<BountyView> = {}, gas
 /** File a claim and record its verdict, each in its own transaction, as the contract logs them. */
 export function judge(w: World, id: BountyId, claimId: number, outcome: "PAYS" | "ZERO", whitehat = "whitehat.near") {
   const verdict = { outcome, reason: outcome === "PAYS" ? "minimum_theft_reached" : "no_theft" };
-  w.claims.push(claim(claimId, id, "judged", verdict, whitehat));
+  w.claims.push(claim(claimId, id, "judged", verdict, whitehat, NETWORKS[w.network].base));
   w.nearTxs.push({
     hash: nearHash(`submit${claimId}`),
     signer: whitehat,
@@ -260,7 +261,7 @@ export function judge(w: World, id: BountyId, claimId: number, outcome: "PAYS" |
 
 /** A claim that has been filed and not yet judged: a claim in progress (R7.7). */
 export function claimInProgress(w: World, id: BountyId, claimId: number) {
-  w.claims.push(claim(claimId, id, "judging", null, "hunter.near"));
+  w.claims.push(claim(claimId, id, "judging", null, "hunter.near", NETWORKS[w.network].base));
   w.nearTxs.push({
     hash: nearHash(`submit${claimId}`),
     signer: "hunter.near",
@@ -271,8 +272,12 @@ export function claimInProgress(w: World, id: BountyId, claimId: number) {
 /** A raw transaction's hash, as its chain computes it. */
 export const hashOfRaw = (raw: string) => `0x${bytesToHex(keccak_256(hexToBytes(raw.replace(/^0x/, ""))))}`;
 
-/** The raw signed pause for a chain. */
-export const rawPause = (chain: number) => `0x02f8${chain.toString(16).padStart(6, "0")}deadbeef${"00".repeat(40)}`;
+/**
+ * The raw signed pause for a chain, from signing `n` (a real signer's nonce makes each signing's bytes, and so its
+ * hash, its own; a chain never gives one hash two outcomes, and the app keeps a landed receipt on that promise).
+ */
+export const rawPause = (chain: number, n = 0) => `0x02f8${chain.toString(16).padStart(6, "0")}${n.toString(16).padStart(8, "0")}deadbeef${"00".repeat(36)}`;
+let signings = 0;
 
 /**
  * Win the bounty with claim `claimId`: pauses signed for each covered contract, the payout,
@@ -286,8 +291,9 @@ export function win(
 ) {
   judge(w, id, claimId, "PAYS");
   const b = w.bounties.find((x) => x.id.name === id.name && x.id.protocol === id.protocol)!;
+  const signing = ++signings;
   b.signed_pauses = b.rules.covered_contracts.map((c: any) => {
-    const tx = rawPause(c.chain_id);
+    const tx = rawPause(c.chain_id, signing);
     return { chain_id: c.chain_id, contract: c.address, nonce: 0, tx, tx_hash: hashOfRaw(tx) };
   });
   b.state = "paid";

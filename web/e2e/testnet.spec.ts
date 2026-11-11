@@ -210,18 +210,30 @@ test("D30: on testnet every link on the bounty list and a bounty page is a testn
   post(w, { protocol: "tallowfen-swap.testnet", name: "amm" });
   await setWorld(page, w);
 
+  // The live bounty is on the Live tab, the paid one on Past.
   await page.goto("/bounties");
-  await expect(page.getByText("2 bounties")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Live 1" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("row", { name: /tallowfen-swap\.testnet\/amm/ })).toContainText("Live");
+  await page.getByRole("link", { name: "Past 1" }).click();
+  await expect(page).toHaveURL(/\?tab=past$/);
+  await expect(page.getByText("Read live from bounty3.bountee.testnet")).toBeVisible();
+  await expect(page.getByRole("link", { name: "bounty3.bountee.testnet" })).toHaveAttribute("href", "https://testnet.nearblocks.io/address/bounty3.bountee.testnet");
   const row = page.getByRole("row", { name: /brassmoor-lend\.testnet\/pool/ });
-  await expect(row.locator("svg[role=img][aria-label='Base Sepolia'] path").first()).toHaveAttribute("fill", "#0000ff");
-  await expect(row.locator("svg[role=img][aria-label='Arbitrum Sepolia'] rect").first()).toHaveAttribute("fill", "#213147");
+  await expect(row.getByRole("img", { name: "Base Sepolia" }).first().locator("path")).toHaveAttribute("fill", "#0000ff");
+  await expect(row.getByRole("img", { name: "Arbitrum Sepolia" }).first().locator("rect")).toHaveAttribute("fill", "#213147");
   for (const host of await linkHosts(page)) expect(TESTNET_HOSTS, host).toContain(host);
+  // Testnet's IDs carry the longer ".testnet" suffix; from tablet to laptop width the list still never scrolls sideways.
+  for (const width of [800, 901, 1024, 1090]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}px`).toBe(true);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.goto(`/bounties/${ID.protocol}/${ID.name}`);
   const base = page.getByRole("region", { name: "Pause on Base Sepolia" });
   await expect(base.getByRole("listitem").filter({ hasText: "2. Landed" }).getByRole("link", { name: /0x/ })).toHaveAttribute("href", /^https:\/\/sepolia\.basescan\.org\/tx\/0x/);
   await expect(page.getByRole("region", { name: "Pause on Arbitrum Sepolia" }).getByRole("listitem").filter({ hasText: "2. Landed" }).getByRole("link", { name: /0x/ })).toHaveAttribute("href", /^https:\/\/sepolia\.arbiscan\.io\/tx\/0x/);
-  await expect(base.locator("svg[role=img][aria-label='Base Sepolia'] path").first()).toHaveAttribute("fill", "#0000ff");
+  await expect(base.getByRole("img", { name: "Base Sepolia" }).first().locator("path")).toHaveAttribute("fill", "#0000ff");
   const verify = page.getByRole("region", { name: "Verify" });
   await expect(verify.getByText(`bountee verify ${ID.protocol}/${ID.name} --contract bounty3.bountee.testnet --network testnet`)).toBeVisible();
   await expect(verify.getByRole("listitem").filter({ hasText: "Payout on NEAR" }).getByRole("link").first()).toHaveAttribute("href", /^https:\/\/testnet\.nearblocks\.io\/txns\//);
@@ -236,8 +248,8 @@ test("D27, D31: on testnet a bounty page's rules read as mainnet's: a theft prov
   await setWorld(page, w);
   await page.goto(`/bounties/${ID.protocol}/${ID.name}`);
   const rules = page.getByRole("region", { name: "Rules" });
-  await expect(rules).toContainText("A theft proven on any covered chain wins: the Enclave replays each claim against that chain's state at a block at most 5 minutes old, under the judge build fixed at posting.");
-  await expect(rules).toContainText("Covers 2 contracts on Base Sepolia and Arbitrum Sepolia. A winning claim pauses every one of them.");
+  await expect(rules).toContainText("The first exploit proven on any covered chain. It pauses every covered contract, on every chain.");
+  await expect(rules).toContainText("Each exploit is tested against the chain as it was at most 5 minutes before it was submitted.");
   await expect(rules).not.toContainText(/undefined|chain \d/);
 });
 

@@ -66,7 +66,7 @@ test("R7.7: a pause that landed but reverted, or hit another contract, doesn't s
   await expect(step(page, "Base", "2. Landed")).toContainText("not yet");
 });
 
-test("D8: a warning shows when a chain's pause gas is below what its signed pause needs", async ({ page }) => {
+test("D8: a warning shows when a chain's pause gas is below what a pause needs", async ({ page }) => {
   const w = emptyWorld();
   post(w, ID);
   // Base holds less than one pause needs at its fee limit; Arbitrum One holds exactly enough.
@@ -74,9 +74,10 @@ test("D8: a warning shows when a chain's pause gas is below what its signed paus
   w.evm[ARBITRUM]!.balances[PAUSE_ROLE] = PAUSE_GAS_PER_PAUSE;
   await setWorld(page, w);
   await open(page);
-  const warn = chainRow(page, "Base").getByRole("note");
+  // Live, nothing signed: the warning stands at the top of the page, where the Protocol sees it first.
+  const warn = page.getByRole("note", { name: "Low pause gas on Base" });
   await expect(warn).toContainText("Low pause gas");
-  await expect(warn).toContainText("Pause gas on Base: 0.000209999999999999 ETH. The signed pause needs 0.00021 ETH. Top up the pause-role address.");
+  await expect(warn).toContainText("Pause gas on Base: 0.000209999999999999 ETH. A pause needs 0.00021 ETH. The Protocol can top up the address that sends the pause. The payout doesn't depend on it.");
   await expect(warn).toContainText(PAUSE_ROLE);
   await expect(chainRow(page, "Arbitrum One").getByText("Low pause gas")).toHaveCount(0);
 
@@ -84,7 +85,7 @@ test("D8: a warning shows when a chain's pause gas is below what its signed paus
   w.evm[BASE]!.balances[PAUSE_ROLE] = "1000000000000000";
   await setWorld(page, w);
   await page.reload();
-  await expect(chainRow(page, "Base")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Covered contracts" })).toBeVisible();
   await expect(page.getByText("Low pause gas")).toHaveCount(0);
 });
 
@@ -96,7 +97,7 @@ test("R15.6: the rules and amounts shown are the chain's", async ({ page }) => {
   await open(page);
   await expect(page.getByTestId("bounty-amount")).toHaveText("42 USDC");
   await expect(page.getByTestId("minimum-theft")).toHaveText("3.5 USDC");
-  await expect(page.getByText(/14 days after the payout/)).toBeVisible();
+  await expect(page.getByRole("region", { name: "Rules" }).getByText(/14 days after the payout/)).toBeVisible();
 });
 
 test("D27: the rules say a theft proven on any covered chain wins, naming no one proof chain", async ({ page }) => {
@@ -105,8 +106,8 @@ test("D27: the rules say a theft proven on any covered chain wins, naming no one
   await setWorld(page, w);
   await open(page);
   const rules = page.getByRole("region", { name: "Rules" });
-  await expect(rules).toContainText("A theft proven on any covered chain wins: the Enclave replays each claim against that chain's state at a block at most 5 minutes old, under the judge build fixed at posting.");
-  await expect(rules).toContainText("Covers 2 contracts on Base and Arbitrum One. A winning claim pauses every one of them.");
+  await expect(rules).toContainText("The first exploit proven on any covered chain. It pauses every covered contract, on every chain.");
+  await expect(rules).toContainText("Each exploit is tested against the chain as it was at most 5 minutes before it was submitted.");
   await expect(rules).not.toContainText(/undefined|chain \d/);
 });
 
@@ -124,7 +125,31 @@ test("D8: the warning shows for a signed pause that hasn't landed, and goes once
   w.evm[BASE]!.balances[PAUSE_ROLE] = "1";
   await setWorld(page, w);
   await open(page);
-  await expect(chainRow(page, "Arbitrum One").getByRole("note")).toContainText("Low pause gas");
+  await expect(chainRow(page, "Arbitrum One").getByRole("note")).toContainText("Pause gas on Arbitrum One: 0.000000000000000001 ETH. The signed pause needs 0.00021 ETH.");
   // Base's pause has landed: its gas no longer matters.
   await expect(chainRow(page, "Base").getByText("Low pause gas")).toHaveCount(0);
+});
+
+test("D28: a paid bounty names the chain and block its winning claim was proven on, with the payout", async ({ page }) => {
+  const w = emptyWorld();
+  post(w, ID);
+  win(w, ID, 0, { landed: [BASE, ARBITRUM], verified: [BASE, ARBITRUM] });
+  await setWorld(page, w);
+  await open(page);
+  const won = page.getByRole("region", { name: "Winning claim" });
+  await expect(won).toContainText("Base");
+  await expect(won.getByRole("link", { name: /block 38000000/ })).toHaveAttribute("href", "https://basescan.org/block/38000000");
+  await expect(won.getByRole("link", { name: /whitehat\.near/ })).toBeVisible();
+  await expect(won.getByRole("link", { name: /…/ }).first()).toHaveAttribute("href", /nearblocks\.io\/txns\//);
+});
+
+test("R7.7, R15.6: each block shows only where it applies, read from the chain", async ({ page }) => {
+  const w = emptyWorld();
+  post(w, ID);
+  await setWorld(page, w);
+  await open(page);
+  // Live: the contracts; no winner, and no line repeating the status chip.
+  await expect(page.getByText("Posting check passed")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Covered contracts" }).getByRole("link").first()).toHaveAttribute("href", /basescan\.org\/address\/0x/);
+  await expect(page.getByRole("region", { name: "Winning claim" })).toHaveCount(0);
 });

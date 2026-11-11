@@ -19,6 +19,7 @@ export function chains(): Record<number, ChainInfo> {
 }
 
 export function config() {
+  const contract = env("BOUNTY_CONTRACT", net.bountyContract);
   return {
     /** NEAR RPC: the command-line tool's (cli/src/endpoints.ts). */
     nearRpc: env("NEAR_RPC", NEAR_RPC[net.network]),
@@ -36,6 +37,8 @@ export function config() {
     chains: chains(),
     /** NEAR's Ethereum-compatible RPC (NEP-518), through which MetaMask signs as a 0x… NEAR account. */
     nearEth: { chainId: net.nearEvm.id, rpc: env("NEAR_ETH_RPC", net.nearEvm.rpc) },
+    /** The bounty contract's page on the NEAR explorer, where anyone can check what the site shows. */
+    contractHref: `${NEAR_EXPLORER[net.network]}address/${contract}`,
   };
 }
 

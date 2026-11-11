@@ -133,7 +133,7 @@ There is no live bounty for you to win. A win closes its bounty and pauses its v
 
 ## Try it on testnet
 
-The same web app also runs as a testnet site, on NEAR testnet, Base Sepolia and Arbitrum Sepolia, with no real money. Its address isn't set yet: it isn't hosted, and this section will name it once it is. Its bounty contract is `bounty3.bountee.testnet`, which takes Circle's testnet USDC and holds no keys. Its bounty list holds bounties from made-up Protocols in each state that lasts: Live, Live with claims judged, Paid, Ended unclaimed, Withdrawn and Check failed (seeded by `cli/test/testnet/site-seed.ts`).
+The same web app also runs as a testnet site, on NEAR testnet, Base Sepolia and Arbitrum Sepolia, with no real money. Its address isn't set yet: it isn't hosted, and this section will name it once it is. Its bounty contract is `bounty3.bountee.testnet`, which takes Circle's testnet USDC and holds no keys. Its bounty list holds bounties from made-up Protocols in each state that lasts: Live, Live with claims judged, Paid, Ended unclaimed, Withdrawn and Not posted, whose posting check failed (seeded by `cli/test/testnet/site-seed.ts`).
 
 To post a bounty there, you need MetaMask, testnet NEAR (`bountee init` creates a testnet account funded by NEAR's faucet), test USDC ([Circle's faucet](https://faucet.circle.com)) and a pausable contract you control on Base Sepolia or Arbitrum Sepolia. To claim from the command line, run `bountee init` for a testnet account, then `bountee test` and `bountee claim` against a Live bounty with `--contract bounty3.bountee.testnet --network testnet`.
 

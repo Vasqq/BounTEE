@@ -98,7 +98,7 @@ test("D30, D31: next build with NEXT_PUBLIC_NETWORK unset builds mainnet, which 
   await setWorld(page, emptyWorld());
   await served(async (origin) => {
     await page.goto(`${origin}/bounties`);
-    await expect(page.getByText("0 bounties")).toBeVisible();
+    await expect(page.getByText("No bounties are live.")).toBeVisible();
     await expect(page.getByRole("link", { name: "Try it on testnet" })).toHaveCount(0);
     await page.goto(origin);
     await expect(page.getByRole("contentinfo").getByRole("link", { name: "Source" })).toBeVisible();

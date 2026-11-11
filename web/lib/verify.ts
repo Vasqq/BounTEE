@@ -53,25 +53,36 @@ interface Publication {
   publishable_from_ns: string;
 }
 
+/** Paid bounties' fully passed checks, by contract and bounty. */
+const settled = new Map<string, Check[]>();
+
 export async function readVerify(id: BountyId): Promise<VerifyResult | null> {
   const c: Config = config();
   const bounty = await view<BountyView | null>(c, c.contract, "bounty", { id });
   if (!bounty) return null;
   const cfg = await view<ConfigView>(c, c.contract, "config");
   const near = new Near(net.network, c.nearRpc);
-  const checks = await chainChecks(
-    {
-      near,
-      network: net.network,
-      contract: c.contract,
-      bounty: id,
-      rpcs: Object.fromEntries(Object.values(c.chains).map((ch) => [ch.id, ch.rpc])),
-      outlayerApi: c.outlayerApi,
-      txApi: c.txApi,
-    },
-    bounty,
-    cfg,
-  );
+  // A paid bounty whose checks have all passed can't un-pass them: the chain is append-only. Those are kept for
+  // the server's life; anything not yet passing is read again on every request.
+  // Keyed by the signing too: the facts belong to that one win, whose pause hashes no other can share.
+  const key = `${c.contract}|${id.protocol}/${id.name}|${bounty.signed_pauses.map((p) => p.tx_hash).join(",")}`;
+  const kept = bounty.state === "paid" ? settled.get(key) : undefined;
+  const checks =
+    kept ??
+    (await chainChecks(
+      {
+        near,
+        network: net.network,
+        contract: c.contract,
+        bounty: id,
+        rpcs: Object.fromEntries(Object.values(c.chains).map((ch) => [ch.id, ch.rpc])),
+        outlayerApi: c.outlayerApi,
+        txApi: c.txApi,
+      },
+      bounty,
+      cfg,
+    ));
+  if (!kept && bounty.state === "paid" && checks.length > 0 && checks.every((x) => x.status === "pass")) settled.set(key, checks);
   // chainChecks always answers attestation and payout; a missing one would be a failure to show, not to hide.
   const one = (kind: Check["check"]): Check => checks.find((x) => x.check === kind) ?? { check: kind, status: "fail", detail: "the check didn't run" };
   const decimals = (await view<{ decimals: number }>(c, cfg.usdc, "ft_metadata")).decimals;

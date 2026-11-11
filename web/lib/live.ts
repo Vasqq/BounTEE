@@ -2,7 +2,7 @@
 // The app's live reads, as TanStack Query hooks: each asks the app's server, which reads the
 // chains on every request (R15.6). A failed read keeps the last good value on screen and says so.
 import { useQuery } from "@tanstack/react-query";
-import type { BountyId, BountyPage } from "./bounties.ts";
+import type { BountyId, BountyList, BountyPage } from "./bounties.ts";
 import type { Demo } from "./demo.ts";
 import type { ReleaseView } from "./release.ts";
 import type { VerifyResult } from "./verify.ts";
@@ -16,6 +16,22 @@ async function get<T>(url: string): Promise<T> {
 }
 
 export const bountyKey = (id: BountyId) => ["bounty", id.protocol, id.name] as const;
+
+/**
+ * The bounty list, seeded from the server's own read at `readAt` (ms), then re-read every 15 s
+ * while the tab is visible and whenever the window regains focus after 10 s, so bounties that are
+ * posted, end or pay move into place on their own. The rows on screen stay put while it reads.
+ */
+export function useBountyList(initial: BountyList, readAt: number) {
+  return useQuery({
+    queryKey: ["bounties"],
+    queryFn: async () => (await get<{ list: BountyList }>("/api/bounties")).list,
+    initialData: initial,
+    initialDataUpdatedAt: readAt,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  });
+}
 
 /** A bounty's page, re-read every 15 s, or every 3 s until `fastUntil` (a sent pause waiting to land, for at most two minutes). */
 export function useBounty(id: BountyId, fastUntil = 0) {
