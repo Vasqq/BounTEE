@@ -4389,3 +4389,36 @@ async fn r11_2_claims_of_every_size_are_judged_and_sign_every_pause() -> anyhow:
     }
     Ok(())
 }
+
+/// D7, D7.1: a paid claim's exploit is published, with the 150 Tgas the command-line tool's
+/// `publish` attaches (`cli/src/publish.ts`), whatever the claim's size, from a Base win's
+/// 160 KB to past mainnet's largest claim.
+#[tokio::test]
+async fn d7_a_mainnet_sized_claim_is_published_with_the_tools_gas() -> anyhow::Result<()> {
+    for kb in [160usize, 300, 600] {
+        let s = Sandbox::start_with_days().await?;
+        s.post_one_day_delay("vault").await?;
+        s.top_up(&s.whitehat, NearToken::from_near(10)).await?;
+        let proofs = proofs_of(kb);
+        let args = s.sized_claim_args("vault", &proofs);
+        let before = s.sign_requests().await?.len();
+        s.script(json!({ "output": PAYS })).await?;
+        let claim = s.file(&s.whitehat, &args).await?;
+        let requests = s.wait_for_sign_requests(before + 1).await?;
+        s.answer_from(&requests, before, &s.pause_key("vault"), false).await?;
+        claim.await?.into_result()?;
+        s.wait_for_bounty_state("vault", "paid").await?;
+        let from: u64 = s.published("vault").await?["publishable_from_ns"]
+            .as_str()
+            .unwrap()
+            .parse()?;
+        s.pass_time_to(from).await?;
+        s.script(json!({ "output": PUBLISHED })).await?;
+        let r = s.publish(&s.other, "vault", &proofs).await?.await?;
+        assert!(r.receipt_failures().is_empty(), "{kb} KB: {:?}", r.receipt_failures());
+        let published = s.published("vault").await?;
+        assert_eq!(published["state"], "published", "{kb} KB: {published}");
+        println!("PUBLISHED {kb} KB with 150 Tgas, {:.1} Tgas burnt", r.total_gas_burnt.as_gas() as f64 / 1e12);
+    }
+    Ok(())
+}
