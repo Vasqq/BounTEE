@@ -4,9 +4,10 @@
 // while `claim` followed a claim it had already filed ended the command with "fetch failed",
 // before it showed the claim's ID; an agent told only that would likely file again (#35).
 //
-// Sending the same bytes again is safe for what the tool sends: views and status reads; a NEAR
-// transaction already signed (same hash, so the network keeps one); a signed pause, where
-// "already known" counts as sent (broadcast.ts); and OutLayer's sealing, which stores nothing.
+// Only reads (GET) and JSON-RPC calls are sent again, where the same bytes are safe: views and
+// status reads; a NEAR transaction already signed (same hash, so the network keeps one); a
+// signed pause, where "already known" counts as sent (broadcast.ts). Other POSTs (OutLayer's
+// sealing, 1Click's quotes and deposits) fail as they did: a caller that cares retries itself.
 
 /** The errors Node's fetch gives for a request that got no HTTP answer. */
 const NETWORK_CODES = new Set([
@@ -42,6 +43,14 @@ export function describeError(e: unknown): string {
   return detail && !message.includes(detail) ? `${message} (${detail})` : message;
 }
 
+/** A GET, or a POST whose body is a JSON-RPC call held as a string (so it can be sent again). */
+function resendable(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): boolean {
+  if (input instanceof Request) return false;
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (method === "GET") return true;
+  return method === "POST" && typeof init?.body === "string" && /^\s*[\[{][^]*"jsonrpc"\s*:/.test(init.body);
+}
+
 /**
  * Make the global `fetch` send a request again when it gets no HTTP answer: `tries` times in
  * all, waiting `backoffMs`, then twice that, and so on (about a minute at the defaults). Call
@@ -52,6 +61,7 @@ export function retryNetworkErrors(o: { tries?: number; backoffMs?: number } = {
   const backoffMs = o.backoffMs ?? 1000;
   const send = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
+    if (!resendable(input, init)) return send(input, init);
     for (let attempt = 1; ; attempt++) {
       try {
         return await send(input, init);

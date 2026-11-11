@@ -54,7 +54,7 @@ import { proofsMatchingClaim, type ProofsSource } from "./claim-proofs.ts";
 import { KEYSTORE_API, NEAR_RPC, type Network } from "./endpoints.ts";
 import { formatNear, Near, parseNetwork } from "./near.ts";
 import { seal } from "./seal.ts";
-import { describeError } from "./transport.ts";
+import { describeError, isNetworkError } from "./transport.ts";
 import {
   claimStatus,
   formatReceipt,
@@ -233,12 +233,7 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
       throwOnFailure: false,
     });
   } catch (e) {
-    // The transaction was signed and sent, so it may have landed: filing again could pay for
-    // a second claim (#35).
-    throw new Error(
-      `the claim may have been filed (sending it failed: ${describeError(e)}). Don't file again: ` +
-        `look for ${whitehat}'s submit_claim on ${contract} first`,
-    );
+    throw mayHaveLanded(e, `${whitehat}'s submit_claim on ${contract}`, "the claim may have been filed", "file");
   }
   const status = outcome.status as { SuccessValue?: string; Failure?: unknown };
   if (status.SuccessValue === undefined) {
@@ -252,6 +247,16 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
   onStage({ stage: "sealed", claim_id: out.claim_id, tx_hash: out.tx_hash });
   if (args.includes("--no-wait")) return out;
   return seeThrough(args, { near, network, contract, whitehat, bounty }, out, [out.tx_hash], new Set(["sealed"]), onStage);
+}
+
+/**
+ * A send that got no answer from NEAR, after the transport's own resends, may still have
+ * landed: running it again could pay for a second claim or job (#35). Say so, rather than
+ * report a plain failure. Any other error is a failure before anything was sent.
+ */
+function mayHaveLanded(e: unknown, what: string, may: string, again: string): unknown {
+  if (!isNetworkError(e)) return e;
+  return new Error(`${may} (no answer from NEAR: ${describeError(e)}). Don't ${again} again: look for ${what} first`);
 }
 
 interface Context {
@@ -288,12 +293,17 @@ async function retryClaim(args: string[], c: Context & { given?: BountyId }, onS
   const added = await ensureClaimBalance(c.near, c.contract, c.whitehat, cost);
   if (added > 0n) out.topped_up_near = formatNear(added);
 
-  const outcome = await c.near.account(c.whitehat).signAndSendTransaction({
-    receiverId: c.contract,
-    actions: [actions.functionCall("retry_claim", retryArgs, gas, 0n)],
-    waitUntil: "EXECUTED_OPTIMISTIC",
-    throwOnFailure: false,
-  });
+  let outcome;
+  try {
+    outcome = await c.near.account(c.whitehat).signAndSendTransaction({
+      receiverId: c.contract,
+      actions: [actions.functionCall("retry_claim", retryArgs, gas, 0n)],
+      waitUntil: "EXECUTED_OPTIMISTIC",
+      throwOnFailure: false,
+    });
+  } catch (e) {
+    throw mayHaveLanded(e, `${c.whitehat}'s retry_claim of claim ${claimId} on ${c.contract}`, "the retry may have been sent", "retry");
+  }
   const status = outcome.status as { SuccessValue?: string; Failure?: unknown };
   if (status.SuccessValue === undefined) throw new Error(`the retry was refused: ${JSON.stringify(status.Failure ?? status)}`);
   out.tx_hash = outcome.transaction.hash;

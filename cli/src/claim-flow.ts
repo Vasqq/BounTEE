@@ -133,7 +133,7 @@ export function claimGas(fees: any, inputBytes: number, covered: number): bigint
     BigInt(covered) * BigInt(fees.claim_gas_per_covered_contract) +
     BigInt(inputBytes) * BigInt(fees.claim_gas_per_input_byte);
   if (gas > MAX_TX_GAS) {
-    throw new Error(`this claim's proofs are too large to file: it needs ${gas / 1_000_000_000_000n} Tgas, more than a transaction's 1000`);
+    throw new Error(`this claim's proofs are too large to file: it needs ${gas / 1_000_000_000_000n} Tgas, more than a transaction's ${MAX_TX_GAS / 1_000_000_000_000n}`);
   }
   return gas;
 }
