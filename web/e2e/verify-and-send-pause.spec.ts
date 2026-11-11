@@ -1,7 +1,7 @@
 // Seam W, ticket #30: every bounty page's Verify section and per-chain pause, with
 // "Send pause" for a signed pause that hasn't landed.
 import { expect, test, type Page } from "@playwright/test";
-import { ARBITRUM, BASE, emptyWorld, post, sentTxs, setWorld, win, type BountyId } from "./stand-ins/world.ts";
+import { ARBITRUM, BASE, CONTRACT, emptyWorld, post, sentTxs, setWorld, win, type BountyId } from "./stand-ins/world.ts";
 
 const ID: BountyId = { protocol: "acme.near", name: "vault-v2" };
 const open = (page: Page) => page.goto(`/bounties/${ID.protocol}/${ID.name}`);
@@ -16,7 +16,7 @@ test("D6, D30: Verify shows each check as passing, failing or not yet published,
   win(w, ID, 0, { landed: [BASE, ARBITRUM], verified: [BASE] });
   await setWorld(page, w);
   await open(page);
-  await expect(verify(page).getByText(`bountee verify ${ID.protocol}/${ID.name} --contract bounty.bountee.near --network mainnet`)).toBeVisible();
+  await expect(verify(page).getByText(`bountee verify ${ID.protocol}/${ID.name} --contract ${CONTRACT} --network mainnet`)).toBeVisible();
   await expect(row(page, "Payout on NEAR")).toContainText("Pass");
   await expect(row(page, "Payout on NEAR").getByRole("link")).toHaveAttribute("href", /^https:\/\/nearblocks\.io\/txns\//);
   await expect(row(page, "Pauses landed")).toContainText("Pass");

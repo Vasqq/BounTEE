@@ -51,10 +51,12 @@ export function useVerify(id: BountyId | null) {
   });
 }
 
-export function useDemo() {
+/** The demo bounty, starting from the server's read when the page was rendered (app/page.tsx), if it had one. */
+export function useDemo(initial?: Demo | null) {
   return useQuery({
     queryKey: ["demo"],
     queryFn: async () => (await get<{ demo: Demo | null }>("/api/demo")).demo,
+    initialData: initial ?? undefined,
     refetchInterval: 30_000,
   });
 }

@@ -50,6 +50,12 @@ interface Row {
   /** The network the command-line tool's `Near` client and the Verify command name. */
   network: Network;
   bountyContract: string;
+  /**
+   * The demo bounty the landing page tells (D4, ADR-0018), as `<protocol>/<name>` on
+   * `bountyContract`; `DEMO_BOUNTY` overrides it. Only mainnet has one (testnet's / is the
+   * bounty list, D31).
+   */
+  demoBounty: string | undefined;
   /** Circle's USDC on NEAR. */
   nearUsdc: string;
   /** The MPC network's root key a bounty's pause-role address is derived from (D25). */
@@ -77,7 +83,9 @@ interface Row {
 
 const MAINNET = {
   network: "mainnet",
-  bountyContract: "bounty.bountee.near",
+  /** The third mainnet deployment, which the Nov 10–11 demo run used (`bounty.bountee.near` and `bounty2.bountee.near` stay unused). */
+  bountyContract: "bounty3.bountee.near",
+  demoBounty: "demo.bountee.near/demo",
   nearUsdc: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
   mpcRootPublicKey: "secp256k1:3tFRbMqmoa6AAALMrEFAYCEoHcqKxeW38YptwowBVBtXK1vo36HDbUWuR6EZmoK4JcH6HDkNMGGqP1ouV7VZUWya",
   chains: [
@@ -121,6 +129,7 @@ const MAINNET = {
 const TESTNET = {
   network: "testnet",
   bountyContract: "bounty3.bountee.testnet",
+  demoBounty: undefined,
   /** Circle's USDC on NEAR testnet (6 decimals, read Nov 10). */
   nearUsdc: "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
   /** The root key `v1.signer-prod.testnet` derives from. */
