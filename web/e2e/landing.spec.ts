@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { ARBITRUM, BASE, CONTRACT, DEMO, emptyWorld, finishedDemo, judge, nearHash, post, setWorld, win, type World } from "./stand-ins/world.ts";
-import { SITES } from "./stand-ins/sites.ts";
+import { APPS, SITES } from "./stand-ins/sites.ts";
 
 const ORDER = ["Posted", "Sealed", "Checked", "Signed", "Paid", "Landed", "Verified", "Published"];
 const panel = (page: Page, i: number) => page.locator("#panels > li").nth(i);
@@ -233,3 +233,10 @@ test("D4, R15.6: the page's HTML, before any script runs, lists every step's tra
   await expect(all.locator("li").nth(5).locator("a")).toHaveCount(2);
 });
 
+test("D4: the page still tells the story when it is laid out with no size", async ({ page }) => {
+  await setWorld(page, finishedDemo());
+  await page.setContent(`<iframe src="${APPS.mainnet}/" style="width:0;height:0;border:0"></iframe>`);
+  const frame = page.frameLocator("iframe");
+  await expect(frame.locator("#panels > li")).toHaveCount(8);
+  await expect(frame.locator("#panels > li").nth(4)).toContainText("10 USDC went to the Whitehat's account, once.");
+});

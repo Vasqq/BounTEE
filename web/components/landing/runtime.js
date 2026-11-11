@@ -903,7 +903,9 @@ return {
   // the light: the pointer, or a slow drift once the pointer has rested
   const light = now => { if (now - lastMove < 2200) return [px, py]; const t = now / 1000; return [W * (0.5 + 0.36 * Math.sin(t * 0.19)), H * (0.55 + 0.3 * Math.sin(t * 0.31 + 1))]; };
   let map;
-  const size = () => { dpr = devicePixelRatio || 1; W = hero.clientWidth; H = hero.clientHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); map = buildMap(CELL); setup(); };
+  // A hero with no size (a page laid out with no viewport, or in a hidden frame) has nothing to
+  // draw, and a zero-size canvas makes getImageData throw: wait for a size before building.
+  const size = () => { dpr = devicePixelRatio || 1; W = hero.clientWidth; H = hero.clientHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); if (!W || !H) { map = null; return; } map = buildMap(CELL); setup(); };
 
   const CELL = 2, LINE = 1.1;
   let small, sctx, img;
@@ -927,6 +929,7 @@ return {
   const setupDither = setup;
   setup = () => { setupDither(); drawLines(); };
   const draw = now => {
+    if (!map) return;
     const P = reduce ? [] : packets(now), [lx, ly] = reduce ? [W * 0.78, H * 0.7] : light(now), { w, h, v } = map;
     img.data.fill(0);
     // the scan: only within the light, the lines become green dither
