@@ -380,6 +380,20 @@ impl Contract {
             }
             return self.pay_if_settled(&bounty_id);
         }
+        // The claim's own gas (`require_claim_gas`) pays for its job. Should the job still not
+        // fit, which only a change in NEAR's or OutLayer's costs could cause, the claim is left
+        // with no verdict, in its place and retryable, its job deposit back (R2.6): never
+        // `storing` for good, as a callback that ran out of gas left one on Nov 10 (#35).
+        let needed = gas::ON_CLAIM_JUDGED
+            .saturating_add(gas::receipt_bytes(input.len()))
+            .saturating_add(gas::job(input.len()));
+        if Self::gas_left(Gas::from_gas(0)) < needed {
+            claim.state = ClaimState::NoVerdict;
+            let who = claim.whitehat.clone();
+            Self::credit(&mut self.claim_balances, &who, job_deposit);
+            emit("claim_no_verdict", json!({ "claim_id": claim_id }));
+            return PromiseOrValue::Value(());
+        }
         claim.state = ClaimState::Judging;
         claim.step_started_at_block = U64(env::block_height());
         self.request_claim_job(claim_id, &input, job_deposit).into()
