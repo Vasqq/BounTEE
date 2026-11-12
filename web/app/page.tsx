@@ -1,5 +1,7 @@
 // The landing page: the finished mainnet demo bounty, told as a story (D4). No wallet.
 // A testnet build has no story to tell: its / is the bounty list (D31, ADR-0021).
+// The app's buttons open the testnet site when its address is set: it has bounties to try,
+// mainnet has none yet (D31, amended Nov 11).
 //
 // The demo bounty is read on the server too, so the page's HTML already carries every step's
 // transaction: a reader that runs no script (an AI judge fetching the page) can check them.
@@ -36,5 +38,5 @@ async function serverDemo(): Promise<Demo | null> {
 
 export default async function Home() {
   if (net.network === "testnet") redirect("/bounties");
-  return <Landing nearExplorer={config().nearExplorer} initialDemo={await serverDemo()} footerLinks={<TryTestnet />} />;
+  return <Landing nearExplorer={config().nearExplorer} initialDemo={await serverDemo()} footerLinks={<TryTestnet />} appSite={net.trySite?.replace(/\/$/, "")} />;
 }

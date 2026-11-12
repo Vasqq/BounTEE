@@ -49,7 +49,8 @@ function AllTransactions({ demo, nearExplorer }: { demo: Demo; nearExplorer: str
   );
 }
 
-export function Landing({ nearExplorer, initialDemo, footerLinks }: { nearExplorer: string; initialDemo?: Demo | null; footerLinks?: ReactNode }) {
+/** `appSite`: the site the app's buttons open, with no trailing slash; empty for this one (D31). */
+export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }: { nearExplorer: string; initialDemo?: Demo | null; footerLinks?: ReactNode; appSite?: string }) {
   const { data: demo = null } = useDemo(initialDemo);
   const demoId = useMemo(() => (demo ? { protocol: demo.story.protocol, name: demo.story.name } : null), [demo?.story.protocol, demo?.story.name]); // eslint-disable-line react-hooks/exhaustive-deps
   const { data: result } = useVerify(demoId);
@@ -75,7 +76,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks }: { nearExplor
             <li><a href="#trust">Trust</a></li>
             <li><a href="#faq">FAQ</a></li>
           </ul>
-          <a className="btn btn-ink" href="/bounties">Open the app</a>
+          <a className="btn btn-ink" href={`${appSite}/bounties`}>Open the app</a>
         </div>
       </header>
 
@@ -227,7 +228,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks }: { nearExplor
               <h2 className="rise">Put a bounty on your contracts.</h2>
               <p className="lead">Grant the pause role, add a few cents of pause gas, and post from the MetaMask you already use.</p>
               <div className="cta">
-                <a className="btn btn-ink" href="/post">Post a bounty</a>
+                <a className="btn btn-ink" href={`${appSite}/post`}>Post a bounty</a>
                 <a className="btn btn-line" href="https://github.com/Vasqq/bountee">Read the README</a>
               </div>
               <p className="fine">Posting connects MetaMask. Reading and verifying never do.</p>
