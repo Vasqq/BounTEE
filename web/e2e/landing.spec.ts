@@ -1,10 +1,11 @@
 // Seam W, ticket #29: the landing page tells the mainnet demo bounty as a story (D4), read
 // live from the chains (R15.6), with no wallet.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { ARBITRUM, BASE, CONTRACT, DEMO, emptyWorld, finishedDemo, judge, nearHash, post, setWorld, win, type World } from "./stand-ins/world.ts";
 import { APPS, SITES } from "./stand-ins/sites.ts";
+import { bounteeOnly, filesUnder, sentToBrowser } from "./stand-ins/bundle.ts";
 
 const ORDER = ["Posted", "Sealed", "Checked", "Signed", "Paid", "Landed", "Verified", "Published"];
 const panel = (page: Page, i: number) => page.locator("#panels > li").nth(i);
@@ -80,22 +81,21 @@ test("R15.6, D28: the story's amounts and delay are the bounty's on chain, and t
   await expect(page.getByRole("definition").filter({ hasText: "25 USDC" })).toContainText("25 USDC, once");
 });
 
-test("D4, ADR-0017: no testnet string or explorer link ships in the mainnet build", async ({ page }) => {
+test("D4, ADR-0017, ADR-0022: no testnet string or explorer link ships in the mainnet build", async ({ page }) => {
+  test.setTimeout(60_000);
   await setWorld(page, finishedDemo());
   await page.goto("/");
   await expect(panel(page, 0).locator("a").first()).toHaveAttribute("href", /nearblocks/);
   // The one exception is D31's link to the testnet site: its address (set on this build) and its words.
   const withoutTheLink = (text: string) => text.replaceAll(SITES.testnet, "").replaceAll("Try it on testnet", "");
-  const html = await page.content();
-  expect(html).toContain(SITES.testnet);
-  expect(withoutTheLink(html)).not.toMatch(/testnet|sepolia/i);
-  // And none in any file the browser is sent.
-  const files: string[] = [];
-  const walk = (dir: string) => readdirSync(dir).forEach((f) => (statSync(join(dir, f)).isDirectory() ? walk(join(dir, f)) : files.push(join(dir, f))));
-  walk(join(import.meta.dirname, "../.next/static"));
-  walk(join(import.meta.dirname, "../public"));
-  const hits = files.filter((f) => /testnet|sepolia/i.test(withoutTheLink(readFileSync(f, "utf8"))));
-  expect(hits).toEqual([]);
+  expect(await page.content()).toContain(SITES.testnet);
+  // None in any page's HTML or any file the browser is sent, but RainbowKit's chain metadata,
+  // which carries none of testnet's own values (ADR-0022, see sentToBrowser()).
+  const noTestnet = (text: string) => !/testnet|sepolia/i.test(withoutTheLink(text));
+  const { failing, walletLibraries } = await sentToBrowser(page, APPS.mainnet, join(import.meta.dirname, "../.next"), noTestnet);
+  expect(failing).toEqual([]);
+  for (const testnet of bounteeOnly("testnet")) expect(walletLibraries).not.toContain(testnet);
+  expect(filesUnder(join(import.meta.dirname, "../public")).filter((f) => !noTestnet(readFileSync(f, "utf8")))).toEqual([]);
 });
 
 test("D6, D30: the landing page's Verify lists the demo bounty's checks, read live, under a command naming mainnet's contract", async ({ page }) => {

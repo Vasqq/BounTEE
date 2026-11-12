@@ -9,12 +9,13 @@
 // D31, ticket #74: those two builds know no other site's address, so each is then started
 // (Seam W) and shows no link to the other site: the testnet badge is plain text.
 import { spawn, spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { pauseRole } from "@bountee/formats";
 import { emptyWorld, NETWORKS, setWorld, STAND_IN } from "./stand-ins/world.ts";
 import { DUMMY_PROJECT_ID, nearEndpoints, PORTS } from "./stand-ins/sites.ts";
+import { bounteeOnly, sentToBrowser } from "./stand-ins/bundle.ts";
 
 const WEB = join(import.meta.dirname, "..");
 const DIST = ".next-check";
@@ -56,12 +57,6 @@ const dotenv = (text: string) =>
       .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
   );
 
-const staticText = (dir: string): string =>
-  readdirSync(dir)
-    .map((f) => join(dir, f))
-    .map((p) => (statSync(p).isDirectory() ? staticText(p) : readFileSync(p, "utf8")))
-    .join("\n");
-
 test("D30: next build with NEXT_PUBLIC_NETWORK=foo exits non-zero, naming the setting", () => {
   const r = build({ NEXT_PUBLIC_NETWORK: "foo" });
   expect(r.status).not.toBe(0);
@@ -81,16 +76,20 @@ test("D30, D31, D36: next build with only web/.env.testnet.example's variables, 
   expect(vars).toEqual({ NEXT_PUBLIC_NETWORK: "testnet", NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: "" });
   const r = build({ ...vars, NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: DUMMY_PROJECT_ID });
   expect(r.status, r.stdout + r.stderr).toBe(0);
-  // What the browser is sent pins testnet's contract and asks MetaMask for NEAR testnet's chain,
-  // and carries none of mainnet's signing values: its USDC, root key, RPCs or NEAR's chain 397.
-  // (The landing page's script, mainnet's story, names mainnet's contract and explorers.)
-  const sent = staticText(join(WEB, DIST, "static"));
-  expect(sent).toContain("bounty3.bountee.testnet");
-  expect(sent).toContain("NEAR Protocol Testnet");
-  for (const mainnet of [NETWORKS.mainnet.usdc, pauseRole.MAINNET_ROOT_PUBLIC_KEY, "eth-rpc.mainnet.near.org", "mainnet.base.org", "arb1.arbitrum.io"]) expect(sent).not.toContain(mainnet);
-  // D31: with no mainnet address, the badge links nowhere and the nav has no Verify link.
   await setWorld(page, emptyWorld("testnet"));
   await served(async (origin) => {
+    // What the browser is sent pins testnet's contract and asks the wallet for NEAR testnet's
+    // chain, and carries none of mainnet's signing values: its USDC, root key, RPCs or NEAR's
+    // chain 397. (The landing page's script, mainnet's story, names mainnet's contract and
+    // explorers.) RainbowKit's chain metadata, if it names them, carries none of mainnet's own
+    // values (ADR-0022, see sentToBrowser()).
+    const mainnetValues = [NETWORKS.mainnet.usdc, pauseRole.MAINNET_ROOT_PUBLIC_KEY, "eth-rpc.mainnet.near.org", "mainnet.base.org", "arb1.arbitrum.io"];
+    const { failing, walletLibraries, all } = await sentToBrowser(page, origin, join(WEB, DIST), (text) => !mainnetValues.some((v) => text.includes(v)));
+    expect(all).toContain("bounty3.bountee.testnet");
+    expect(all).toContain("NEAR Protocol Testnet");
+    expect(failing).toEqual([]);
+    for (const mainnet of bounteeOnly("mainnet")) expect(walletLibraries).not.toContain(mainnet);
+    // D31: with no mainnet address, the badge links nowhere and the nav has no Verify link.
     await page.goto(`${origin}/bounties`);
     const nav = page.getByRole("banner");
     await expect(nav.getByText("Testnet", { exact: true })).toBeVisible();
@@ -105,13 +104,16 @@ test("D30, D31: next build with NEXT_PUBLIC_NETWORK unset builds mainnet, which 
   test.setTimeout(420_000);
   const r = build({});
   expect(r.status, r.stdout + r.stderr).toBe(0);
-  const sent = staticText(join(WEB, DIST, "static"));
-  expect(sent).toContain(NETWORKS.mainnet.usdc);
-  expect(sent).toContain("eth-rpc.mainnet.near.org");
-  expect(sent).not.toMatch(/testnet|sepolia/i);
-  // D31: no link to the testnet site on the bounty list or in the landing page's footer.
   await setWorld(page, emptyWorld());
   await served(async (origin) => {
+    // No testnet word in any page's HTML or any file the browser is sent, but RainbowKit's chain
+    // metadata, which carries none of testnet's own values (ADR-0022, see sentToBrowser()).
+    const { failing, walletLibraries, all } = await sentToBrowser(page, origin, join(WEB, DIST), (text) => !/testnet|sepolia/i.test(text));
+    expect(all).toContain(NETWORKS.mainnet.usdc);
+    expect(all).toContain("eth-rpc.mainnet.near.org");
+    expect(failing).toEqual([]);
+    for (const testnet of bounteeOnly("testnet")) expect(walletLibraries).not.toContain(testnet);
+    // D31: no link to the testnet site on the bounty list or in the landing page's footer.
     await page.goto(`${origin}/bounties`);
     await expect(page.getByText("No bounties are live.")).toBeVisible();
     await expect(page.getByRole("link", { name: "Try it on testnet" })).toHaveCount(0);

@@ -7,7 +7,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { encodeFunctionData, formatUnits, hexToBytes, keccak256, parseAbi, toHex, type Address } from "viem";
-import { useAccount, useConnect, useSignMessage } from "wagmi";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { useAccount, useSignMessage } from "wagmi";
 import { sendTransaction, switchChain, waitForTransactionReceipt } from "wagmi/actions";
 import { draftProblems, emptyDraft, nextLabel, rulesOf, slug, usdcUnits, type Draft } from "@/lib/draft.ts";
 import { exploitKeyMessage, keyFromFile, keyFromSignature, publicKeyText } from "@/lib/exploit-key.ts";
@@ -242,29 +243,23 @@ function Problem({ m }: { m: { isError: boolean; error: unknown } }) {
 }
 
 /**
- * MetaMask connects only when a step first needs it: the wallet's address is the Protocol's
+ * The wallet connects only when a step first needs it: the wallet's address is the Protocol's
  * NEAR account and part of the bounty's ID, which the pause-role address comes from (D13, D25).
+ * The button opens the wallet picker (D34); the step goes on once wagmi reports an account.
  */
 function WithWallet({ account, why, children }: { account?: string; why: string; children: ReactNode }) {
-  const { connectors, connectAsync } = useConnect();
-  const connect = useMutation({
-    mutationFn: async () => {
-      const mm = connectors.find((c) => c.id === "io.metamask") ?? connectors.find((c) => c.id === "metaMask");
-      if (!mm || !(await mm.getProvider().catch(() => null))) throw new Error("MetaMask isn't installed in this browser.");
-      await connectAsync({ connector: mm });
-    },
-  });
+  const { status } = useAccount();
+  // RainbowKit offers the picker only while no wallet is connected or connecting.
+  const { openConnectModal } = useConnectModal();
   if (account) return <>{children}</>;
+  const connecting = status === "connecting" || status === "reconnecting";
   return (
-    <>
-      <div className="send">
-        <button type="button" className="btn btn-ink" onClick={() => connect.mutate()} disabled={connect.isPending}>
-          {connect.isPending ? "Connecting" : "Connect MetaMask"}
-        </button>
-        <p>{why}</p>
-      </div>
-      <Problem m={connect} />
-    </>
+    <div className="send">
+      <button type="button" className="btn btn-ink" onClick={() => openConnectModal?.()} disabled={connecting}>
+        {connecting ? "Connecting" : "Connect MetaMask"}
+      </button>
+      <p>{why}</p>
+    </div>
   );
 }
 

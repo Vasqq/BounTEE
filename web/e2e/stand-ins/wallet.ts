@@ -59,15 +59,21 @@ export const addressOf = (walletKey: Uint8Array) => privateKeyToAccount(`0x${Buf
 /**
  * A MetaMask in the page, holding `walletKey`. It answers what wagmi asks of an injected
  * wallet: accounts, the current chain and switching it, `personal_sign` (or, with `unstable`, a
- * different signature each time, as a wallet that randomises its signatures would), and
+ * different signature each time, as a wallet that randomises its signatures would; with
+ * `rejectFirstSign`, the Protocol rejecting the first signature asked for), and
  * `eth_sendTransaction`, which the chain stand-in applies as the chain would. Every request's
  * method is recorded, and so is each chain it is asked to switch to or add. It starts on the
  * network's Base-family chain.
  */
-export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?: boolean; network?: Network } = {}) {
+export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?: boolean; rejectFirstSign?: boolean; network?: Network } = {}) {
   let n = 0;
+  let rejectNextSign = !!o.rejectFirstSign;
   const address = addressOf(walletKey);
   await page.exposeFunction("__personalSign", (hexMessage: string) => {
+    if (rejectNextSign) {
+      rejectNextSign = false;
+      return null;
+    }
     const message = Buffer.from(hexMessage.replace(/^0x/, ""), "hex").toString("utf8");
     const sig = Buffer.from(personalSign(walletKey, o.unstable ? `${message}${n++}` : message));
     return `0x${sig.toString("hex")}`;
@@ -111,8 +117,12 @@ export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?
             chainId = params![0].chainId;
             (listeners.chainChanged ?? []).forEach((f) => f(chainId));
             return null;
-          case "personal_sign":
-            return w.__personalSign(params![0]);
+          case "personal_sign": {
+            const sig = await w.__personalSign(params![0]);
+            // EIP-1193's 4001: the Protocol rejected the request in the wallet.
+            if (sig === null) throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+            return sig;
+          }
           case "eth_sendTransaction":
             return w.__sendTransaction(parseInt(chainId, 16), params![0]);
           default:
@@ -129,9 +139,22 @@ export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?
   }, { account: address, start: `0x${NETWORKS[o.network ?? "mainnet"].base.toString(16)}` });
 }
 
+/**
+ * Picks `wallet` in RainbowKit's wallet picker, which a page's connect button has just opened
+ * (D34): the page goes on once the wallet connects.
+ */
+export async function pickWallet(page: Page, wallet = "MetaMask") {
+  await page.getByRole("dialog").getByRole("button", { name: new RegExp(`^${wallet}`) }).click();
+}
+
 /** Each chain the page asked MetaMask to switch to or add, in order, with what it said of the chain. */
 export async function chainsAsked(page: Page): Promise<{ method: string; chainId: string; chainName?: string; rpcUrls?: string[] }[]> {
   return page.evaluate(() => (window as any).__chainsAsked);
+}
+
+/** Every method the page has asked the stand-in MetaMask for since the page loaded, in order. */
+export async function walletCalls(page: Page): Promise<string[]> {
+  return page.evaluate(() => (window as any).__walletCalls);
 }
 
 /** Whether the page has asked the stand-in MetaMask to connect (eth_requestAccounts). */

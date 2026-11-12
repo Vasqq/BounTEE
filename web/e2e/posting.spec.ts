@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { decodeFunctionData, keccak256, parseAbi, toHex } from "viem";
 import { pauseRole } from "@bountee/formats";
 import { ARBITRUM, BASE, CONTRACT, currentWorld, fundNear, NEAR_EVM, PAUSE_GAS_PER_PAUSE, post, postingWorld, setWorld, USDC, VAULT_ARB, VAULT_BASE } from "./stand-ins/world.ts";
-import { addressOf, exploitPublicKey, metamask, PROTOCOL_KEY, walletConnected, walletSent } from "./stand-ins/wallet.ts";
+import { addressOf, exploitPublicKey, metamask, pickWallet, PROTOCOL_KEY, walletCalls, walletConnected, walletSent } from "./stand-ins/wallet.ts";
 
 const ACCOUNT = addressOf(PROTOCOL_KEY).toLowerCase();
 const NAME = "vault-v2";
@@ -25,9 +25,10 @@ async function pickChain(page: Page, n: number, chain: string) {
   await page.getByRole("option", { name: chain }).click();
 }
 
-/** The rules need no wallet; MetaMask connects at the pause-role step, the first that needs its address. */
+/** The rules need no wallet; MetaMask connects at the pause-role step, the first that needs its address, picked in the wallet picker. */
 async function connect(page: Page, role = PAUSE_ROLE) {
   await step(page, 2).getByRole("button", { name: "Connect MetaMask" }).click();
+  await pickWallet(page);
   await expect(step(page, 2)).toContainText(role, { ignoreCase: true });
 }
 
@@ -243,6 +244,20 @@ test("D13: the rules are filled in before any wallet connects; MetaMask is asked
   expect(await walletConnected(page)).toBe(true);
 });
 
+test("D13: /post reloaded after connecting shows the same account with no click and no new connect request", async ({ page }) => {
+  await metamask(page, PROTOCOL_KEY);
+  await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
+  await page.goto("/post#3");
+  await step(page, 3).getByRole("button", { name: "Connect MetaMask" }).click();
+  await pickWallet(page);
+  await expect(step(page, 3)).toContainText(ACCOUNT);
+  await page.reload();
+  // The account is back without a click, and the wallet was never asked to connect again.
+  await expect(step(page, 3)).toContainText(ACCOUNT);
+  await expect(step(page, 3).getByRole("button", { name: "Connect MetaMask" })).toHaveCount(0);
+  expect(await walletCalls(page)).not.toContain("eth_requestAccounts");
+});
+
 test("D25: a name the Protocol already used is named as the reason once the wallet connects, with a fresh one a click away", async ({ page }) => {
   await metamask(page, PROTOCOL_KEY);
   const w = postingWorld(ACCOUNT, { onboarded: true });
@@ -253,6 +268,7 @@ test("D25: a name the Protocol already used is named as the reason once the wall
   await page.goto("/post");
   await fillRules(page);
   await step(page, 2).getByRole("button", { name: "Connect MetaMask" }).click();
+  await pickWallet(page);
   await expect(step(page, 2)).toContainText(`You've posted a bounty named ${NAME} before, and a name is never reused.`);
   await expect(step(page, 2).getByRole("button", { name: "Grant", exact: true })).toHaveCount(0);
   // One click takes the next free name, and the pause role for it follows.
