@@ -20,11 +20,11 @@ The core promises rest on things only NEAR provides. Each is backed by a mainnet
 
 | Promise | What on NEAR does it | Mainnet evidence |
 |---|---|---|
-| Nobody can take the bounty or block a valid payout: not the Protocol, not the Whitehat, not us (R2) | A **keyless contract**, `bounty2.bountee.near`, holds the USDC and the right to request pauses. Its account has no access keys, so only its code can move funds. | Deployment and key removal: _pending mainnet run_ <!-- MAINNET: contract deploy tx; access-key deletion tx --> |
-| One proven exploit pauses the bug on every chain at once (R7.1) | **Chain Signatures**: the contract asks NEAR's MPC network to sign a `pause()` from the bounty's own address on Base and on Arbitrum. No one holds that key. | Pause signing: _pending mainnet run_ <!-- MAINNET: sign-pauses tx --> · Pause on Base: _pending_ <!-- MAINNET: Base pause tx --> · Pause on Arbitrum: _pending_ <!-- MAINNET: Arbitrum pause tx --> |
-| A pause shown as "verified" really landed (R7.10) | **MPC foreign-chain transaction verification**: NEAR's MPC network checks the pause on Base and Arbitrum and the contract records it on NEAR. | Verified pauses: _pending mainnet run_ <!-- MAINNET: verify-pause tx (Base); verify-pause tx (Arbitrum) --> |
-| An AI agent can claim and be paid without holding the Whitehat's money keys (R14.2) | A **function-call access key** limited to the contract's two claim methods. NEAR itself refuses anything else signed with it. | Claim key added: _pending_ <!-- MAINNET: key add tx --> · Agent's claim: _pending_ <!-- MAINNET: agent's submit_claim tx --> · Payout: _pending_ <!-- MAINNET: payout tx --> |
-| The exploit stays sealed until the payout (R5) | **OutLayer** runs the judge in an Intel TDX enclave, and only jobs the keyless contract requests can open a sealed exploit. | Attestation for the winning claim: _pending mainnet run_ <!-- MAINNET: OutLayer attestation link for the winning claim --> |
+| Nobody can take the bounty or block a valid payout: not the Protocol, not the Whitehat, not us (R2) | A **keyless contract**, `bounty2.bountee.near`, holds the USDC and the right to request pauses. Its account has no access keys, so only its code can move funds. | Deployment and key removal: <!-- PENDING: contract deploy tx; access-key deletion tx --> |
+| One proven exploit pauses the bug on every chain at once (R7.1) | **Chain Signatures**: the contract asks NEAR's MPC network to sign a `pause()` from the bounty's own address on Base and on Arbitrum. No one holds that key. | Pause signing: <!-- PENDING: sign-pauses tx --> · Pause on Base: <!-- PENDING: Base pause tx --> · Pause on Arbitrum: <!-- PENDING: Arbitrum pause tx --> |
+| A pause shown as "verified" really landed (R7.10) | **MPC foreign-chain transaction verification**: NEAR's MPC network checks the pause on Base and Arbitrum and the contract records it on NEAR. | Verified pauses: <!-- PENDING: verify-pause tx (Base); verify-pause tx (Arbitrum) --> |
+| An AI agent can claim and be paid without holding the Whitehat's money keys (R14.2) | A **function-call access key** limited to the contract's two claim methods. NEAR itself refuses anything else signed with it. | Claim key added: <!-- PENDING: key add tx --> · Agent's claim: <!-- PENDING: agent's submit_claim tx --> · Payout: <!-- PENDING: payout tx --> |
+| The exploit stays sealed until the payout (R5) | **OutLayer** runs the judge in an Intel TDX enclave, and only jobs the keyless contract requests can open a sealed exploit. | Attestation for the winning claim: <!-- PENDING: OutLayer attestation link for the winning claim --> |
 
 ## Try it: no keys, no funds, no network
 
@@ -119,7 +119,7 @@ $ curl -s https://free.rpc.fastnear.com -H 'content-type: application/json' -d '
 **Everything about the demo bounty checks out.** This one also needs Docker, for the reproducible build. `verify` rebuilds the contract and the judge from this repo and compares their hashes with what ran, checks the enclave's attestation against Intel's certificates, the payout, each pause's landing and its verified record on NEAR, and re-runs the published exploit.
 
 ```console online
-$ bountee verify <MAINNET: demo bounty id> --contract bounty2.bountee.near --network mainnet
+$ bountee verify <!-- PENDING: demo bounty id --> --contract bounty2.bountee.near --network mainnet
 pass contract_code
 pass judge_build
 pass attestation
@@ -155,21 +155,21 @@ The bounty contract is `bounty2.bountee.near`. An earlier deployment, `bounty.bo
 
 | Step | Mainnet transaction |
 |---|---|
-| Bounty contract deployed (`bounty2.bountee.near`) | _pending_ <!-- MAINNET: deploy tx --> |
-| Judge build pinned by `bounty2.bountee.near` | _pending_ <!-- MAINNET: judge build hash --> |
-| Demo vault on Base | _pending_ <!-- MAINNET: Base vault address --> |
-| Demo vault on Arbitrum One | _pending_ <!-- MAINNET: Arbitrum vault address --> |
-| Bounty posted (10 USDC, minimum theft 1 USDC) | _pending_ <!-- MAINNET: post tx --> |
-| Cheat claim judged ZERO, nothing moved | _pending_ <!-- MAINNET: cheat claim tx; its verdict tx --> |
-| Agent's claim, filed with a claim key, judged PAYS | _pending_ <!-- MAINNET: agent claim tx; verdict tx --> |
-| Pauses signed | _pending_ <!-- MAINNET: sign-pauses tx --> |
-| Whitehat paid 10 USDC | _pending_ <!-- MAINNET: payout tx --> |
-| Pause landed on Base | _pending_ <!-- MAINNET: Base pause tx --> |
-| Pause landed on Arbitrum One | _pending_ <!-- MAINNET: Arbitrum pause tx --> |
-| Pause verified on NEAR, Base | _pending_ <!-- MAINNET: verify-pause tx, Base --> |
-| Pause verified on NEAR, Arbitrum One | _pending_ <!-- MAINNET: verify-pause tx, Arbitrum --> |
-| Exploit published after its disclosure delay | _pending_ <!-- MAINNET: publish tx --> |
-| Winnings withdrawn to Base through NEAR Intents (`bountee withdraw`) | _pending_ <!-- MAINNET: withdraw deposit tx on NEAR; delivery tx on Base (D12) --> |
+| Bounty contract deployed (`bounty2.bountee.near`) | <!-- PENDING: deploy tx --> |
+| Judge build pinned by `bounty2.bountee.near` | <!-- PENDING: judge build hash --> |
+| Demo vault on Base | <!-- PENDING: Base vault address --> |
+| Demo vault on Arbitrum One | <!-- PENDING: Arbitrum vault address --> |
+| Bounty posted (10 USDC, minimum theft 1 USDC) | <!-- PENDING: post tx --> |
+| Cheat claim judged ZERO, nothing moved | <!-- PENDING: cheat claim tx; its verdict tx --> |
+| Agent's claim, filed with a claim key, judged PAYS | <!-- PENDING: agent claim tx; verdict tx --> |
+| Pauses signed | <!-- PENDING: sign-pauses tx --> |
+| Whitehat paid 10 USDC | <!-- PENDING: payout tx --> |
+| Pause landed on Base | <!-- PENDING: Base pause tx --> |
+| Pause landed on Arbitrum One | <!-- PENDING: Arbitrum pause tx --> |
+| Pause verified on NEAR, Base | <!-- PENDING: verify-pause tx, Base --> |
+| Pause verified on NEAR, Arbitrum One | <!-- PENDING: verify-pause tx, Arbitrum --> |
+| Exploit published after its disclosure delay | <!-- PENDING: publish tx --> |
+| Winnings withdrawn to Base through NEAR Intents (`bountee withdraw`) | <!-- PENDING: withdraw deposit tx on NEAR; delivery tx on Base (D12) --> |
 
 ## Threat model
 
@@ -197,7 +197,7 @@ Nobody needs to trust the Whitehat, the broadcaster of a signed pause (anyone ca
 ### Timing
 
 - **Recency window: 5 minutes.** A claim is judged against its proof chain's state at a block no more than 5 minutes older than the claim. A bug the Protocol fixes itself on a chain stops being claimable there 5 minutes after the fix lands; it stays claimable on a chain where it isn't fixed.
-- **Verdict to pause: measured on the mainnet run.** A PAYS verdict is public on NEAR, so from that moment a watcher knows a covered contract has a bug, though not what it is, until the pauses land. On the demo bounty that window, from the PAYS verdict to the last pause landing, was _pending mainnet run_ <!-- MAINNET: verdict-to-last-pause-landed, in seconds (R7.8) -->. From the verdict to the last verified pause took _pending mainnet run_ <!-- MAINNET: verdict-to-last-verified-pause, in seconds -->.
+- **Verdict to pause: measured on the mainnet run.** A PAYS verdict is public on NEAR, so from that moment a watcher knows a covered contract has a bug, though not what it is, until the pauses land. On the demo bounty that window, from the PAYS verdict to the last pause landing, was <!-- PENDING: verdict-to-last-pause-landed, in seconds (R7.8) -->. From the verdict to the last verified pause took <!-- PENDING: verdict-to-last-verified-pause, in seconds -->.
 
 ### Stated limits
 
