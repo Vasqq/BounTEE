@@ -18,12 +18,12 @@ import "@rainbow-me/rainbowkit/styles.css";
 import { cssStringFromTheme, darkTheme, RainbowKitProvider, type DisclaimerComponent } from "@rainbow-me/rainbowkit";
 import { useEffect, type ReactNode } from "react";
 import { useConfig, useReconnect, WagmiProvider } from "wagmi";
-import { wagmiConfig } from "@/lib/wagmi.ts";
+import { APP_NAME, wagmiConfig } from "@/lib/wagmi.ts";
 
 export function WalletProvider({ children, reconnect }: { children: ReactNode; reconnect: boolean }) {
   return (
     <WagmiProvider config={wagmiConfig} reconnectOnMount={false}>
-      <RainbowKitProvider theme={null} modalSize="compact" appInfo={{ appName: "BounTEE", disclaimer: Disclaimer }}>
+      <RainbowKitProvider theme={null} modalSize="compact" appInfo={{ appName: APP_NAME, disclaimer: Disclaimer }}>
         <style>{`[data-rk]{${cssStringFromTheme(PICKER_THEME)}}`}</style>
         {reconnect && <ReconnectBrowserWallets />}
         {children}

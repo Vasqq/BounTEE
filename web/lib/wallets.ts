@@ -22,7 +22,8 @@ const browserWindow = (): WithEthereum | undefined => (typeof window === "undefi
  * RainbowKit 2.2.11's own MetaMask check (wallets/walletConnectors/metaMaskWallet), copied
  * because RainbowKit doesn't export it: MetaMask's flag, and none of the ~40 flags of wallets
  * that also set it. Keep it in step with the pinned version (web/package.json): the entry's
- * "installed" test and its connector then reject the same impostors RainbowKit does.
+ * "installed" test and its connector then reject the same impostors RainbowKit does. Like
+ * RainbowKit's, it is asked only about `window.ethereum`, never `window.ethereum.providers`.
  */
 function isMetaMask(ethereum: EthereumProvider | undefined): boolean {
   if (!ethereum?.isMetaMask) return false;

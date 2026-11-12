@@ -18,6 +18,7 @@ import { coveredChain, net } from "@/lib/network.ts";
 import type { EvmCall, PostingBasics, PostingStatus } from "@/lib/posting.ts";
 import { BOUNTY_CONTRACT, NEAR_USDC, pauseRoleOf } from "@/lib/pinned.ts";
 import { rulesInPlainEnglish } from "@/lib/rules.ts";
+import { useWalletConnecting } from "@/lib/wagmi.ts";
 import { wagmiConfig } from "@/lib/wagmi.ts";
 import { CommandBlock } from "../CommandBlock.tsx";
 import { ChainSelect } from "./ChainSelect.tsx";
@@ -248,11 +249,10 @@ function Problem({ m }: { m: { isError: boolean; error: unknown } }) {
  * The button opens the wallet picker (D34); the step goes on once wagmi reports an account.
  */
 function WithWallet({ account, why, children }: { account?: string; why: string; children: ReactNode }) {
-  const { status } = useAccount();
+  const connecting = useWalletConnecting();
   // RainbowKit offers the picker only while no wallet is connected or connecting.
   const { openConnectModal } = useConnectModal();
   if (account) return <>{children}</>;
-  const connecting = status === "connecting" || status === "reconnecting";
   return (
     <div className="send">
       <button type="button" className="btn btn-ink" onClick={() => openConnectModal?.()} disabled={connecting}>

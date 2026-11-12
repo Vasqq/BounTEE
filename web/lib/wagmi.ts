@@ -11,7 +11,7 @@
 // test stand-in).
 import { defineChain, type Transport } from "viem";
 import { connectorsForWallets } from "@rainbow-me/rainbowkit";
-import { createConfig, http } from "wagmi";
+import { createConfig, http, useAccount } from "wagmi";
 import { net, type CoveredChainId, type EvmChain } from "./network.ts";
 import { walletList } from "./wallets.ts";
 
@@ -44,10 +44,13 @@ const coveredEvm = (c: EvmChain) =>
 // from the table, both need saying so.
 const [first, ...rest] = net.chains.map(coveredEvm);
 
+/** The name the picker and WalletConnect show the wallet (components/WalletProvider.tsx reads it too). */
+export const APP_NAME = "BounTEE";
+
 export const wagmiConfig = createConfig({
   chains: [first, ...rest, nearEvm],
   // The WalletConnect project ID is inlined at build time, and every build has one (next.config.ts, D36).
-  connectors: connectorsForWallets(walletList, { appName: "BounTEE", projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID! }),
+  connectors: connectorsForWallets(walletList, { appName: APP_NAME, projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID! }),
   // No EIP-6963 discovery: the picker lists only lib/wallets.ts's wallets (D34).
   multiInjectedProviderDiscovery: false,
   transports: Object.fromEntries([...net.chains, net.nearEvm].map((c) => [c.id, http()])) as Record<CoveredChainId | typeof nearEvm.id, Transport>,
@@ -57,6 +60,12 @@ export const wagmiConfig = createConfig({
   // Receipts are read every second, so a grant or top-up ticks off as soon as it lands.
   pollingInterval: 1_000,
 });
+
+/** Whether wagmi is connecting or reconnecting a wallet: a connect button waits meanwhile. */
+export function useWalletConnecting(): boolean {
+  const { status } = useAccount();
+  return status === "connecting" || status === "reconnecting";
+}
 
 declare module "wagmi" {
   interface Register {
