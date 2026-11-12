@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { ARBITRUM, BASE, CONTRACT, DEMO, emptyWorld, finishedDemo, judge, nearHash, post, setWorld, win, type World } from "./stand-ins/world.ts";
 import { APPS, SITES } from "./stand-ins/sites.ts";
-import { bounteeOnly, filesUnder, sentToBrowser } from "./stand-ins/bundle.ts";
+import { filesUnder, sentToBrowser } from "./stand-ins/bundle.ts";
 
 const ORDER = ["Posted", "Sealed", "Checked", "Signed", "Paid", "Landed", "Verified", "Published"];
 const panel = (page: Page, i: number) => page.locator("#panels > li").nth(i);
@@ -89,12 +89,11 @@ test("D4, ADR-0017, ADR-0022: no testnet string or explorer link ships in the ma
   // The one exception is D31's link to the testnet site: its address (set on this build) and its words.
   const withoutTheLink = (text: string) => text.replaceAll(SITES.testnet, "").replaceAll("Try it on testnet", "");
   expect(await page.content()).toContain(SITES.testnet);
-  // None in any page's HTML or any file the browser is sent, but RainbowKit's chain metadata,
-  // which carries none of testnet's own values (ADR-0022, see sentToBrowser()).
+  // None in any page's HTML or any file the browser is sent, the app's signing code included;
+  // only RainbowKit's chain metadata table is left out (ADR-0022, see sentToBrowser()).
   const noTestnet = (text: string) => !/testnet|sepolia/i.test(withoutTheLink(text));
-  const { failing, walletLibraries } = await sentToBrowser(page, APPS.mainnet, join(import.meta.dirname, "../.next"), noTestnet);
+  const { failing } = await sentToBrowser(page, APPS.mainnet, join(import.meta.dirname, "../.next"), noTestnet);
   expect(failing).toEqual([]);
-  for (const testnet of bounteeOnly("testnet")) expect(walletLibraries).not.toContain(testnet);
   expect(filesUnder(join(import.meta.dirname, "../public")).filter((f) => !noTestnet(readFileSync(f, "utf8")))).toEqual([]);
 });
 

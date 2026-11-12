@@ -15,7 +15,7 @@ import { expect, test } from "@playwright/test";
 import { pauseRole } from "@bountee/formats";
 import { emptyWorld, NETWORKS, setWorld, STAND_IN } from "./stand-ins/world.ts";
 import { DUMMY_PROJECT_ID, nearEndpoints, PORTS } from "./stand-ins/sites.ts";
-import { bounteeOnly, sentToBrowser } from "./stand-ins/bundle.ts";
+import { sentToBrowser } from "./stand-ins/bundle.ts";
 
 const WEB = join(import.meta.dirname, "..");
 const DIST = ".next-check";
@@ -81,14 +81,12 @@ test("D30, D31, D36: next build with only web/.env.testnet.example's variables, 
     // What the browser is sent pins testnet's contract and asks the wallet for NEAR testnet's
     // chain, and carries none of mainnet's signing values: its USDC, root key, RPCs or NEAR's
     // chain 397. (The landing page's script, mainnet's story, names mainnet's contract and
-    // explorers.) RainbowKit's chain metadata, if it names them, carries none of mainnet's own
-    // values (ADR-0022, see sentToBrowser()).
+    // explorers.) Only RainbowKit's chain metadata table is left out (ADR-0022, see sentToBrowser()).
     const mainnetValues = [NETWORKS.mainnet.usdc, pauseRole.MAINNET_ROOT_PUBLIC_KEY, "eth-rpc.mainnet.near.org", "mainnet.base.org", "arb1.arbitrum.io"];
-    const { failing, walletLibraries, all } = await sentToBrowser(page, origin, join(WEB, DIST), (text) => !mainnetValues.some((v) => text.includes(v)));
+    const { failing, all } = await sentToBrowser(page, origin, join(WEB, DIST), (text) => !mainnetValues.some((v) => text.includes(v)));
     expect(all).toContain("bounty3.bountee.testnet");
     expect(all).toContain("NEAR Protocol Testnet");
     expect(failing).toEqual([]);
-    for (const mainnet of bounteeOnly("mainnet")) expect(walletLibraries).not.toContain(mainnet);
     // D31: with no mainnet address, the badge links nowhere and the nav has no Verify link.
     await page.goto(`${origin}/bounties`);
     const nav = page.getByRole("banner");
@@ -106,13 +104,12 @@ test("D30, D31: next build with NEXT_PUBLIC_NETWORK unset builds mainnet, which 
   expect(r.status, r.stdout + r.stderr).toBe(0);
   await setWorld(page, emptyWorld());
   await served(async (origin) => {
-    // No testnet word in any page's HTML or any file the browser is sent, but RainbowKit's chain
-    // metadata, which carries none of testnet's own values (ADR-0022, see sentToBrowser()).
-    const { failing, walletLibraries, all } = await sentToBrowser(page, origin, join(WEB, DIST), (text) => !/testnet|sepolia/i.test(text));
+    // No testnet word in any page's HTML or any file the browser is sent, the app's signing code
+    // included; only RainbowKit's chain metadata table is left out (ADR-0022, see sentToBrowser()).
+    const { failing, all } = await sentToBrowser(page, origin, join(WEB, DIST), (text) => !/testnet|sepolia/i.test(text));
     expect(all).toContain(NETWORKS.mainnet.usdc);
     expect(all).toContain("eth-rpc.mainnet.near.org");
     expect(failing).toEqual([]);
-    for (const testnet of bounteeOnly("testnet")) expect(walletLibraries).not.toContain(testnet);
     // D31: no link to the testnet site on the bounty list or in the landing page's footer.
     await page.goto(`${origin}/bounties`);
     await expect(page.getByText("No bounties are live.")).toBeVisible();
