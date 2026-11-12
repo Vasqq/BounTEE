@@ -530,7 +530,7 @@ Screens and panels on objects are `#19191a`.
 - Transactions are written as a chain chip plus a link. Once the transaction exists, the link shows the shortened hash and has a copy button. Before then, it says "tx pending" and points at the explorer root: nearblocks.io for NEAR, basescan.org for Base, arbiscan.io for Arbitrum One. Pending states give their reason after a middle dot: "pending · after 1 day".
 - Chain names are written in full: "Arbitrum One", never "Arbitrum" or "Arb". Amounts are written "10 USDC". Chains are listed as "NEAR, Base and Arbitrum One".
 - "Paused" means the pause transaction succeeded on that chain. Use "verified" only for what NEAR's MPC network confirmed. Never imply anything about the contract's code.
-- Mainnet only. No "testnet", "Sepolia", "rehearsal" or network toggle in any mainnet build (wallet libraries' own chain lists aside, ADR-0022). The network is a build setting, not a control. D17's faucet link exists only in the testnet build, the second site for trying BounTEE (ADR-0021).
+- Mainnet only. No "testnet", "Sepolia", "rehearsal" or network toggle in any mainnet build (RainbowKit's own chain metadata table aside, ADR-0022). The network is a build setting, not a control. D17's faucet link exists only in the testnet build, the second site for trying BounTEE (ADR-0021).
 - Wallets: "Posting connects your wallet. Reading and verifying never do." Name no wallet brand in copy; say "your wallet". No wallet prompt on public pages.
 
 ## Do's and Don'ts
