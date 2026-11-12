@@ -12,11 +12,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
 import { proofRpcs } from "../src/chains.ts";
+import { judgeWasm, type JudgeUsed } from "../src/test.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const fixture = fileURLToPath(new URL("./fixtures/usdc-zero/", import.meta.url));
-const repo = fileURLToPath(new URL("../../", import.meta.url));
-const wasm = `${repo}target/${readFileSync(`${repo}judge/wasm-target`, "utf8").trim()}/release/bountee-judge.wasm`;
+/** The checkout's default judge build, as the tool runs it. */
+let wasm: string;
 const PUBLIC_RPCS = proofRpcs(84532);
 const PUBLIC_RPC = PUBLIC_RPCS[0]!;
 const USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
@@ -39,13 +40,14 @@ let out: {
   attacker: string;
   rpc: string;
   saved: string;
-  judge: { wasm: string; sha256: string; bounty_build: string; same_as_bounty: boolean };
+  judge: JudgeUsed;
 };
 let latestBefore: number;
 let code: number | null;
 let stderr: string;
 
 beforeAll(() => {
+  wasm = judgeWasm();
   latestBefore = Number(cast(["block-number"]));
   const dir = mkdtempSync(join(tmpdir(), "bountee-test-"));
   const res = bountee([

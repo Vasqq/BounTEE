@@ -14,11 +14,13 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
+import { judgeWasm } from "../src/test.ts";
 import { bounteeOffline, offline } from "./offline.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
-const localJudge = `${repo}target/${target}/release/bountee-judge.wasm`;
+/** The checkout's default judge build, as the tool runs it (set before networking is cut). */
+let localJudge: string;
 const EXPLOIT = `${repo}demo/fixtures/exploit.json`;
 const CHEAT = `${repo}demo/fixtures/cheat.json`;
 
@@ -26,11 +28,7 @@ const sha256 = (file: string) => createHash("sha256").update(readFileSync(file))
 
 beforeAll(() => {
   // The judge is built before networking is cut, as a Verifier's checkout would have it.
-  const res = spawnSync("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], {
-    cwd: repo,
-    encoding: "utf8",
-  });
-  if (res.status !== 0) throw new Error(res.stderr);
+  localJudge = judgeWasm();
 }, 600_000);
 
 // The control: the sandbox really denies networking, so the tests below can't pass by reaching an RPC.
@@ -90,15 +88,9 @@ test("D2: test names the compiled judge it ran by its sha256, and whether it is 
 // whatever the caller's environment: an exported BOUNTEE_BOUNTY_CONTRACT doesn't rebuild it
 // for another contract behind the tool's back.
 test("D2: the default judge stays the checkout's default build when BOUNTEE_BOUNTY_CONTRACT is exported", () => {
-  const before = sha256(localJudge);
-  const res = spawnSync(process.execPath, [`${repo}cli/src/main.ts`, "test", "--job", EXPLOIT, "--json"], {
-    encoding: "utf8",
-    env: { ...process.env, BOUNTEE_BOUNTY_CONTRACT: "elsewhere.bountee.testnet" },
-    timeout: 600_000,
-  });
-  expect(res.status, res.stderr).toBe(0);
-  expect(JSON.parse(res.stdout).judge.sha256).toBe(before);
-  expect(sha256(localJudge)).toBe(before);
+  const res = bounteeOffline(["test", "--job", EXPLOIT, "--json"], { ...process.env, BOUNTEE_BOUNTY_CONTRACT: "elsewhere.bountee.testnet" });
+  expect(res.code, res.stderr).toBe(0);
+  expect(JSON.parse(res.stdout).judge).toMatchObject({ wasm: localJudge, sha256: sha256(localJudge) });
 }, 600_000);
 
 // D2, R3.9 (ticket #9 criterion 3): the enclave's build (pinned to the demo bounty's contract, built the

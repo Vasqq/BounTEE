@@ -15,20 +15,21 @@
 // passed over, none found is named, and a verdict that differs is named as such;
 // before publication it is "not yet published"), D7 at the tool (`publish` is refused
 // before the delay, and with proofs other than the claim's, before any transaction), and
-// R14.5 (JSON), and (#80) that rerun names the judge build it ran and whether it is the bounty's
-// pinned build, the program the enclave ran, pointing to `bountee verify` when it isn't. Misses: the real contract (seam C proves the gate and what is kept) and
-// OutLayer; no live run, since a disclosure delay is at least a day.
+// R14.5 (JSON), and (#80) that rerun names the judge build it ran and whether it is the
+// bounty's pinned build, the program the enclave ran, pointing to `bountee verify` when it
+// isn't. Misses: the real contract (seam C proves the gate and what is kept) and OutLayer; no
+// live run, since a disclosure delay is at least a day.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, test } from "vitest";
+import { judgeWasm } from "../src/test.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
-const repo = fileURLToPath(new URL("../../", import.meta.url));
 const fixtures = new URL("../../judge/tests/fixtures/", import.meta.url);
 /** The bounty contract a default build of the judge is pinned to (judge/src/sealed.rs). */
 const CONTRACT = "bounty.bountee.testnet";
@@ -50,17 +51,6 @@ let builtSha: string | undefined;
 const localSha = () => (builtSha ??= createHash("sha256").update(readFileSync(judgeWasm())).digest("hex"));
 
 // ---- The judge's publication, as OutLayer runs it for the bounty contract ------------------
-
-function judgeWasm(): string {
-  const target = readFileSync(join(repo, "judge/wasm-target"), "utf8").trim();
-  const wasm = join(repo, `target/${target}/release/bountee-judge.wasm`);
-  const env = { ...process.env };
-  delete env.BOUNTEE_BOUNTY_CONTRACT;
-  const b = spawnSync("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], { cwd: repo, stdio: "inherit", env });
-  expect(b.status).toBe(0);
-  expect(existsSync(wasm)).toBe(true);
-  return wasm;
-}
 
 function publish(name: string, claimId: number): string {
   const secret = readFileSync(new URL("sealed/alice-drain.txt", fixtures), "utf8").trim();

@@ -15,7 +15,7 @@
 // offline.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -109,11 +109,36 @@ function freePort(): Promise<number> {
  * BOUNTEE_BOUNTY_CONTRACT at build time. It is never a bounty's pinned build: only `bountee build`
  * reproduces that one (#80).
  */
-export function judgeWasm(o: { judge?: string }): string {
+export function judgeWasm(o: { judge?: string } = {}): string {
   if (o.judge) return resolve(o.judge);
   const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
   run("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], repo, { BOUNTEE_BOUNTY_CONTRACT: undefined });
-  return `${repo}target/${target}/release/bountee-judge.wasm`;
+  // Cargo replaces its output by unlinking and linking it again on every build, even one that
+  // changed nothing, so a build running alongside (another test, another command) can leave it
+  // missing for an instant. The tool therefore runs a copy named by its sha256, written whole
+  // and renamed into place, which no build touches; the bytes read are always whole.
+  const bytes = readWhole(`${repo}target/${target}/release/bountee-judge.wasm`);
+  const dir = `${repo}target/judges`;
+  const wasm = `${dir}/${createHash("sha256").update(bytes).digest("hex")}.wasm`;
+  if (!existsSync(wasm)) {
+    mkdirSync(dir, { recursive: true });
+    const part = `${wasm}.${randomBytes(8).toString("hex")}.part`;
+    writeFileSync(part, bytes);
+    renameSync(part, wasm);
+  }
+  return wasm;
+}
+
+/** A file cargo may be relinking: absent for an instant, never partial. */
+function readWhole(path: string): Buffer {
+  for (let tries = 0; ; tries++) {
+    try {
+      return readFileSync(path);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT" || tries >= 200) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
 }
 
 /** The compiled judge a replay ran, and whether it is the very build the bounty pins (the one the enclave runs). */
@@ -136,9 +161,10 @@ export function formatJudge(j: JudgeUsed): string[] {
     ...(j.same_as_bounty
       ? ["         the bounty's pinned build: the program the enclave runs"]
       : [
-          `         not the bounty's pinned build ${j.bounty_build}: a local build answers to another bounty contract`,
-          "         and records where it was built, so only bountee build's pinned Docker build reproduces that one;",
-          "         bountee verify rebuilds it and re-runs under it, or pass that build with --judge",
+          `         not the bounty's pinned build ${j.bounty_build}, so this verdict doesn't speak for the enclave's`,
+          "         program (a checkout's default build never is one: it answers to the default contract and records",
+          "         where it was built); bountee verify rebuilds the pinned build and re-runs under it, or build it with",
+          "         bountee build --contract <contract> --rev <the commit its metadata names> and pass it with --judge",
         ]),
   ];
 }

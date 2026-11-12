@@ -20,10 +20,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
+import { judgeWasm } from "../src/test.ts";
 import { offline } from "./offline.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
-const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
 const CHECKER = `${repo}scripts/check-readme-steps.ts`;
 const README = `${repo}README.md`;
 
@@ -41,13 +41,9 @@ function stepsIn(markdown: string): { command: string; online: boolean }[] {
 beforeAll(() => {
   // The judge and its scenario tests are built before networking is cut, as a Verifier's
   // checkout would have them after the README's setup.
-  for (const args of [
-    ["build", "--release", "-p", "bountee-judge", "--target", target],
-    ["test", "-p", "bountee-judge", "--test", "seam_j_scenarios", "--no-run"],
-  ]) {
-    const res = spawnSync("cargo", args, { cwd: repo, encoding: "utf8" });
-    if (res.status !== 0) throw new Error(res.stderr);
-  }
+  judgeWasm();
+  const res = spawnSync("cargo", ["test", "-p", "bountee-judge", "--test", "seam_j_scenarios", "--no-run"], { cwd: repo, encoding: "utf8" });
+  if (res.status !== 0) throw new Error(res.stderr);
 }, 600_000);
 
 test("R15.4: the checker runs every offline README step with no network and each shows its expected output", () => {
