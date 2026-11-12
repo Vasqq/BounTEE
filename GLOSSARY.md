@@ -8,6 +8,10 @@ Bug bounties that pay a whitehat automatically once an enclave proves their expl
 The team whose contracts a bounty covers. It posts and funds the bounty, commits the rules, and grants the pause role.
 _Avoid_: Client, project, customer
 
+**Protocol wallet**:
+The one Ethereum wallet, holding a plain key rather than a smart account, that a Protocol signs everything with: pause-role grants, pause gas, its `0x…` NEAR account and its exploit key.
+_Avoid_: MetaMask, signer, smart wallet
+
 **Security lead**:
 The person who acts for a Protocol in BounTEE.
 _Avoid_: Admin, owner
@@ -79,7 +83,7 @@ The proof chain's state at the recent block a claim names, proven by the claim. 
 _Avoid_: Freeze, fork, frozen code
 
 **Exploit key**:
-The Protocol's key for opening a winning exploit, derived from a MetaMask signature so there's no file to lose.
+The Protocol's key for opening a winning exploit, derived from a signature by the Protocol wallet so there's no file to lose.
 _Avoid_: Decryption key, private key
 
 **Verified pause**:

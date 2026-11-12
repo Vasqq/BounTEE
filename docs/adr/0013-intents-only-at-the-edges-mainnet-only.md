@@ -4,7 +4,8 @@ Protocols live on Base or Arbitrum and have never used NEAR; Whitehats want thei
 
 ## Consequences
 
-- Protocols sign in with MetaMask: NEAR's Ethereum-wallet support (NEP-518) names their NEAR account after their 0x address and works on testnet and mainnet, so one wallet grants pause roles and posts. MetaMask can't bundle transactions, so posting takes two prompts. Safe multisigs can't sign in to NEAR, so pause grants also offer "copy for your multisig".
+- Protocols sign in with MetaMask (amended Nov 12 by ADR-0022: any wallet it lists): NEAR's Ethereum-wallet support (NEP-518) names their NEAR account after their 0x address and works on testnet and mainnet, so one wallet grants pause roles and posts. MetaMask can't bundle transactions, so posting takes two prompts. Safe multisigs can't sign in to NEAR, so pause grants also offer "copy for your multisig".
 - A MetaMask-only Protocol still needs a little native NEAR for gas and the posting fee.
 - An AI agent's claim key can't withdraw (R14.3): an agent can earn but never move winnings.
+- Since ADR-0022, what this section says of MetaMask holds for every wallet that ADR lists.
 - Supersedes the "NEAR Intents" line in the spec's out-of-scope list.

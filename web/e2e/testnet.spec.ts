@@ -7,7 +7,7 @@ import { decodeFunctionData, keccak256, parseAbi, toHex } from "viem";
 import { pauseRole } from "@bountee/formats";
 import { currentWorld, emptyWorld, fundNear, NETWORKS, post, postingWorld, setWorld, VAULT_ARB, VAULT_BASE, win, type BountyId } from "./stand-ins/world.ts";
 import { SITES } from "./stand-ins/sites.ts";
-import { addressOf, chainsAsked, exploitPublicKey, metamask, PROTOCOL_KEY, walletSent } from "./stand-ins/wallet.ts";
+import { addressOf, chainsAsked, exploitPublicKey, metamask, pickWallet, PROTOCOL_KEY, walletSent } from "./stand-ins/wallet.ts";
 
 const T = NETWORKS.testnet;
 const M = NETWORKS.mainnet;
@@ -61,9 +61,10 @@ async function fillRules(page: Page) {
   await s.getByRole("button", { name: "Continue" }).click();
 }
 
-/** MetaMask connects at the pause step, the first that needs its address. */
+/** MetaMask connects at the pause step, the first that needs its address, picked in the wallet picker. */
 async function connect(page: Page) {
-  await step(page, 2).getByRole("button", { name: "Connect MetaMask" }).click();
+  await step(page, 2).getByRole("button", { name: "Connect wallet" }).click();
+  await pickWallet(page);
 }
 
 test("D30, D17: posting on testnet asks MetaMask for chain 398 and the Sepolia chains, grants to testnet's pause-role address and links NEAR's faucet", async ({ page }) => {
@@ -103,7 +104,7 @@ test("D30, D17: posting on testnet asks MetaMask for chain 398 and the Sepolia c
   // 4. The exploit key is bound to testnet's contract; NEAR signing goes through NEAR testnet's
   // Ethereum-compatible chain, which MetaMask is asked to add by name; the bounty posts on NEAR testnet.
   const post4 = step(page, 4);
-  await post4.getByRole("button", { name: "Sign with MetaMask" }).click();
+  await post4.getByRole("button", { name: "Sign with your wallet" }).click();
   await expect(post4).toContainText(exploitPublicKey(PROTOCOL_KEY, { protocol: ACCOUNT, name: NAME }, "testnet"));
   await post4.getByRole("button", { name: "Enable NEAR signing" }).click();
   await expect(state(page, /Enable NEAR signing/)).toHaveText("done");

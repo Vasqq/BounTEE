@@ -1,4 +1,4 @@
-// NEAR transactions signed by MetaMask as the Protocol's 0x… NEAR account (D13, NEP-518).
+// NEAR transactions signed by the Protocol's Ethereum wallet as the Protocol's 0x… NEAR account (D13, NEP-518).
 // Each NEAR action is one transaction on NEAR's Ethereum-compatible chain, calling the
 // account's wallet contract; NEAR's relayer turns it into the NEAR transaction. The encoding
 // is NEAR's own (@near-wallet-selector/ethereum-wallets 10.1.4): `functionCall(receiver,
@@ -54,7 +54,7 @@ export async function enableNearSigning(account: Address, relayerKey: string): P
   return settle(hash);
 }
 
-/** One NEAR function call, signed in MetaMask. `deposit` in yoctoNEAR. */
+/** One NEAR function call, signed in the Protocol's wallet. `deposit` in yoctoNEAR. */
 export async function nearFunctionCall(o: { receiverId: string; method: string; args: unknown; gas: bigint; deposit: bigint }): Promise<string> {
   await onNear();
   const gas = o.gas <= MAX_GAS ? o.gas : MAX_GAS;
