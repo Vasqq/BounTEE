@@ -30,3 +30,10 @@ test("D31: the mainnet bounty list and the landing page's footer link to the tes
   await page.goto("/");
   await expect(page.getByRole("contentinfo").getByRole("link", { name: "Try it on testnet" })).toHaveAttribute("href", SITES.testnet);
 });
+
+test("D31: the mainnet landing page's Open the app and Post a bounty buttons open the testnet site", async ({ page }) => {
+  await setWorld(page, finishedDemo());
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: "Open the app" })).toHaveAttribute("href", `${SITES.testnet}/bounties`);
+  await expect(page.getByRole("link", { name: "Post a bounty" })).toHaveAttribute("href", `${SITES.testnet}/post`);
+});

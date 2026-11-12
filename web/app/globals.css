@@ -124,6 +124,20 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
 .js .panels { grid-template-areas: "p"; gap: 0; }
 .js .panel { grid-area: p; opacity: 0; transform: translateY(10px); pointer-events: none; transition: opacity var(--t2) var(--ease), transform var(--t2) var(--ease); }
 .js .panel.on { opacity: 1; transform: none; pointer-events: auto; }
+/* Every step's transactions, under the story: the FAQ's disclosure row, then the bounty list's
+   rows (ground-2, 2px apart, no row lines: Principle 3) holding the panels' chips. */
+.all-tx { margin-top: 8px; padding-bottom: 40px; }
+.all-tx summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 22px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.all-tx summary::-webkit-details-marker { display: none; }
+.all-tx summary:hover { color: var(--ink); }
+.all-tx[open] summary .pm svg { transform: rotate(45deg); }
+.all-tx ol { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 2px; }
+.all-tx li { display: grid; grid-template-columns: 28px 120px 1fr; gap: 12px; align-items: center; padding: 10px 14px; background: var(--ground-2); border-radius: var(--r-sm); }
+.all-tx li .n { color: var(--ink-3); font-size: var(--fs-sm); }
+.all-tx li .name { color: var(--ink-2); }
+.all-tx li .meta { margin-top: 0; }
+.all-tx .verify-foot a { color: var(--ink-2); text-underline-offset: 3px; text-decoration-color: var(--line-2); }
 
 /* dock */
 .dock { position: fixed; left: 50%; bottom: 20px; z-index: 25; transform: translate(-50%, 16px); opacity: 0; visibility: hidden;
@@ -254,6 +268,8 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
 }
 @media (max-width: 560px) {
   .nav .wrap { justify-content: space-between; }
+  .all-tx li { grid-template-columns: 28px 1fr; }
+  .all-tx li .meta { grid-column: 1 / -1; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

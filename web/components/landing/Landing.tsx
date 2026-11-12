@@ -3,8 +3,10 @@
 // read live (lib/demo.ts) in place of the prototype's placeholders. The pictures, story panels,
 // dock and hero motion are the prototype's own script (runtime.js).
 import { useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
+import type { Demo } from "@/lib/demo.ts";
 import { listOf } from "@/lib/format.ts";
 import { useDemo, useVerify } from "@/lib/live.ts";
+import { TxChip, TxPending } from "../Chips.tsx";
 import { VerifyRun } from "../Verify.tsx";
 import { Wordmark } from "../Wordmark.tsx";
 import { startLanding } from "./runtime.js";
@@ -12,13 +14,44 @@ import { startLanding } from "./runtime.js";
 const DASH = "–";
 /** The prototype's staggered entrance: `--d` delays a `.rise`. */
 const delay = (d: string) => ({ "--d": d }) as CSSProperties;
+/** The story's eight steps, as the panels name them (runtime.js `STEPS`). */
+const STEPS = ["Posted", "Sealed", "Checked", "Signed", "Paid", "Landed", "Verified", "Published"];
+const PLUS = <span className="pm" aria-hidden="true"><svg viewBox="0 0 10 10"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></span>;
 
 /**
- * `nearExplorer`: the explorer the proof links point at before the demo bounty is read.
- * `footerLinks`: links the server adds to the footer (the link to the testnet site, D31).
+ * Every step's transactions as plain links, in the page's HTML (the server reads the demo
+ * bounty too, app/page.tsx), so a reader that runs no script can check each one. The chips are
+ * the app's own (Chips.tsx); the steps and their text are the server's (lib/demo.ts).
  */
-export function Landing({ nearExplorer, footerLinks }: { nearExplorer: string; footerLinks?: ReactNode }) {
-  const { data: demo = null } = useDemo();
+function AllTransactions({ demo, nearExplorer }: { demo: Demo; nearExplorer: string }) {
+  const s = demo.story;
+  return (
+    <details className="all-tx wrap">
+      <summary>All eight steps&apos; transactions{PLUS}</summary>
+      <ol>
+        {STEPS.map((name, i) => {
+          const txs = s.steps[i] ?? [];
+          const last = i === STEPS.length - 1;
+          return (
+            <li key={name}>
+              <span className="n">{i + 1}.</span>
+              <span className="name">{name}</span>
+              <span className="meta">
+                {txs.map((tx, k) => (tx.hash ? <TxChip key={k} chain={tx.chain} hash={tx.hash} href={tx.href} /> : <TxPending key={k} chain={tx.chain} explorer={tx.href} />))}
+                {!txs.length && (last && s.publishPending ? <><span className="chip">NEAR</span><span className="chip mute">{s.publishPending}</span></> : <TxPending chain="NEAR" explorer={nearExplorer} />)}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      <p className="verify-foot">Read live from <a href={demo.contractHref} target="_blank" rel="noopener">{demo.contract}</a>. The same, as data: <a href="/api/demo">/api/demo</a>.</p>
+    </details>
+  );
+}
+
+/** `appSite`: the site the app's buttons open, with no trailing slash; empty for this one (D31). */
+export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }: { nearExplorer: string; initialDemo?: Demo | null; footerLinks?: ReactNode; appSite?: string }) {
+  const { data: demo = null } = useDemo(initialDemo);
   const demoId = useMemo(() => (demo ? { protocol: demo.story.protocol, name: demo.story.name } : null), [demo?.story.protocol, demo?.story.name]); // eslint-disable-line react-hooks/exhaustive-deps
   const { data: result } = useVerify(demoId);
   // The prototype's script draws the story; it starts once and takes each new read in place.
@@ -43,7 +76,7 @@ export function Landing({ nearExplorer, footerLinks }: { nearExplorer: string; f
             <li><a href="#trust">Trust</a></li>
             <li><a href="#faq">FAQ</a></li>
           </ul>
-          <a className="btn btn-ink" href="/bounties">Open the app</a>
+          <a className="btn btn-ink" href={`${appSite}/bounties`}>Open the app</a>
         </div>
       </header>
 
@@ -91,6 +124,7 @@ export function Landing({ nearExplorer, footerLinks }: { nearExplorer: string; f
               </div>
             </div>
           </div>
+          {demo && <AllTransactions demo={demo} nearExplorer={nearExplorer} />}
         </section>
 
         <section className="who" id="who" aria-labelledby="whoH">
@@ -194,7 +228,7 @@ export function Landing({ nearExplorer, footerLinks }: { nearExplorer: string; f
               <h2 className="rise">Put a bounty on your contracts.</h2>
               <p className="lead">Grant the pause role, add a few cents of pause gas, and post from the MetaMask you already use.</p>
               <div className="cta">
-                <a className="btn btn-ink" href="/post">Post a bounty</a>
+                <a className="btn btn-ink" href={`${appSite}/post`}>Post a bounty</a>
                 <a className="btn btn-line" href="https://github.com/Vasqq/bountee">Read the README</a>
               </div>
               <p className="fine">Posting connects MetaMask. Reading and verifying never do.</p>

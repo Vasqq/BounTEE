@@ -6,7 +6,7 @@ import type { BountyView } from "@bountee/cli/src/status.ts";
 import { chainChecks, type Check, type ConfigView } from "@bountee/cli/src/verify-chain.ts";
 import type { BountyId } from "./bounties.ts";
 import { config, type Config } from "./config.ts";
-import { listOf, units } from "./format.ts";
+import { listOf, units, utcMinute } from "./format.ts";
 import { net, verifyCommand } from "./network.ts";
 import { view } from "./near.ts";
 
@@ -107,7 +107,7 @@ export async function readVerify(id: BountyId): Promise<VerifyResult | null> {
     pauseRow(c, "Pauses verified on NEAR", checks.filter((x) => x.check === "pause_verified"), "no pause is signed yet"),
     pub?.state === "published"
       ? { name: "Re-run of the published exploit", status: "wait", detail: "published · re-run it with bountee verify", links: [] }
-      : { name: "Re-run of the published exploit", status: "wait", detail: `not yet published · ${after}`, links: [] },
+      : { name: "Re-run of the published exploit", status: "wait", detail: `not yet published · ${pub ? `publishable from ${utcMinute(pub.publishable_from_ns)}` : after}`, links: [] },
   ];
   return { command: verifyCommand(id, c.contract), rows };
 }

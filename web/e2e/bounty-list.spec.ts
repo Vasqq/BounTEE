@@ -1,7 +1,7 @@
 // Seam W, ticket #29: the bounty list, read live from the chains (R15.6). Its Live and Past
 // tabs, its sort and its layout are DESIGN.md's (Bounty list, settled with Liam on Nov 10, 2026).
 import { expect, test, type Page } from "@playwright/test";
-import { emptyWorld, post, rules, setWorld } from "./stand-ins/world.ts";
+import { CONTRACT, emptyWorld, post, rules, setWorld } from "./stand-ins/world.ts";
 
 /** The list's bounty IDs, top to bottom, retried until the page that was navigated to shows them. */
 const expectIds = (page: Page, want: string[]) => expect(page.locator(".list tbody .id")).toHaveText(want);
@@ -19,8 +19,8 @@ test("R15.6: the bounty list shows what the bounty contract holds now, not value
   await setWorld(page, w);
   await page.goto("/bounties");
   // The list names the contract it read, linked to the explorer, so anyone can check it there.
-  await expect(page.getByText("Read live from bounty.bountee.near")).toBeVisible();
-  await expect(page.getByRole("link", { name: "bounty.bountee.near" })).toHaveAttribute("href", "https://nearblocks.io/address/bounty.bountee.near");
+  await expect(page.getByText(`Read live from ${CONTRACT}`)).toBeVisible();
+  await expect(page.getByRole("link", { name: CONTRACT })).toHaveAttribute("href", `https://nearblocks.io/address/${CONTRACT}`);
   await expect(tab(page, /^Live 2$/)).toHaveAttribute("aria-current", "page");
   const row = page.getByRole("row", { name: /acme\.near\/vault-v2/ });
   await expect(row).toContainText("10 USDC");

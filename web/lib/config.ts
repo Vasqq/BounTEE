@@ -18,6 +18,13 @@ export function chains(): Record<number, ChainInfo> {
   );
 }
 
+/** A cache time in whole seconds; anything else is refused rather than read as "no cache". */
+function cacheSecs(text: string): number {
+  const n = Number(text);
+  if (!Number.isInteger(n) || n < 0) throw new Error(`DEMO_CACHE_SECS is "${text}": it must be a whole number of seconds`);
+  return n;
+}
+
 export function config() {
   const contract = env("BOUNTY_CONTRACT", net.bountyContract);
   return {
@@ -32,8 +39,14 @@ export function config() {
     nearExplorer: NEAR_EXPLORER[net.network],
     nearExplorerTx: NEAR_EXPLORER_TX[net.network],
     contract: env("BOUNTY_CONTRACT", net.bountyContract),
-    /** The mainnet demo bounty the landing page tells (ADR-0018), as `<protocol>/<name>`; unset until it is posted. */
-    demoBounty: process.env.DEMO_BOUNTY || null,
+    /** The mainnet demo bounty the landing page tells (ADR-0018), as `<protocol>/<name>`: the network table's, unless `DEMO_BOUNTY` is set. */
+    demoBounty: process.env.DEMO_BOUNTY || net.demoBounty || null,
+    /**
+     * How long the landing page's server read of the demo bounty is reused, in seconds (it
+     * takes about 15 s, and its transactions can't change). `DEMO_CACHE_SECS=0` reads it on
+     * every request, as the test suite does, since each spec puts the chains in a new state.
+     */
+    demoCacheSecs: cacheSecs(env("DEMO_CACHE_SECS", "60")),
     chains: chains(),
     /** NEAR's Ethereum-compatible RPC (NEP-518), through which MetaMask signs as a 0x… NEAR account. */
     nearEth: { chainId: net.nearEvm.id, rpc: env("NEAR_ETH_RPC", net.nearEvm.rpc) },

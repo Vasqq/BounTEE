@@ -12,6 +12,9 @@ export function units(raw: string | bigint, decimals: number): string {
 /** A NEAR timestamp in nanoseconds as an ISO date, the way the bounty list shows "Ends". */
 export const isoDate = (ns: string) => new Date(Number(BigInt(ns) / 1_000_000n)).toISOString().slice(0, 10);
 
+/** A contract time in nanoseconds, to the minute in UTC: "2026-11-12 04:37 UTC". */
+export const utcMinute = (ns: string) => `${new Date(Number(BigInt(ns) / 1_000_000n)).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+
 /** The first 6 characters, an ellipsis, the last 4 (DESIGN.md, Chips). */
 export const shortHash = (hash: string) => (hash.length > 12 ? `${hash.slice(0, 6)}…${hash.slice(-4)}` : hash);
 

@@ -26,6 +26,8 @@ function appServer(on: number, distDir: string, chain: { covered: number[]; near
       NEXT_DIST_DIR: distDir,
       ...nearEndpoints(chains),
       DEMO_BOUNTY: "0x9f2c3e1a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e/mainnet-demo",
+      // Each spec puts the chains in a new state, so the landing page's server read isn't reused.
+      DEMO_CACHE_SECS: "0",
       NEAR_ETH_RPC: evm(chain.nearEvm),
       NEXT_PUBLIC_NEAR_ETH_RPC: evm(chain.nearEvm),
       ...Object.fromEntries(chain.covered.flatMap((id) => [[`EVM_RPC_${id}`, evm(id)], [`NEXT_PUBLIC_EVM_RPC_${id}`, evm(id)]])),

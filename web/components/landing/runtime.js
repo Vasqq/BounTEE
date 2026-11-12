@@ -17,7 +17,7 @@ const X = { near: 'https://nearblocks.io/', base: 'https://basescan.org/', arb: 
 // anything not on chain yet, a value is an en dash and a transaction is "tx pending".
 const DASH = '–';
 const CHAIN_EXPLORER = { Base: X.base, 'Arbitrum One': X.arb };
-const live = { protocol: null, name: null, amount: DASH, min: DASH, delay: null, pauses: null, chains: null, steps: [], checked: false, claimKey: null, verdict: null, cheat: false, paidOnce: false, landed: null, verified: null, published: false };
+const live = { protocol: null, name: null, amount: DASH, min: DASH, delay: null, pauses: null, chains: null, steps: [], checked: false, claimKey: null, verdict: null, cheat: false, cheatByWhitehat: false, provenOn: null, oneTx: false, publishPending: 'pending', command: null, paidOnce: false, landed: null, verified: null, published: false };
 const BOUNTY = {
   actor: 'agent', who: 'Whitehat',
   get name() { return live.name || DASH; }
@@ -37,23 +37,25 @@ function stepsFor() {
         ? `The Protocol granted BounTEE the pause role on its vault on ${chainList()}, topped up pause gas, and locked ${live.amount} behind rules nobody can change.`
         : `The Protocol locks ${live.amount} behind rules nobody can change, once the posting check confirms the pause role and pause gas on ${chainList()}.`,
       tx: tx(0, [t('NEAR', X.near)]) },
-    { d: live.claimKey
+    { d: (live.claimKey
         ? 'The Whitehat\'s AI agent, holding only a claim key, sealed the exploit it found so only the bounty contract\'s enclave job can read it, and filed the claim. The key can claim and nothing else.'
-        : 'The Whitehat seals the exploit so only the bounty contract\'s enclave job can read it, and files the claim.',
+        : 'The Whitehat seals the exploit so only the bounty contract\'s enclave job can read it, and files the claim.') +
+        (live.oneTx ? ' Filing, judging, signing and payout ran in this one NEAR transaction.' : ''),
       tx: tx(1, [t('NEAR', X.near)]) },
     { d: (live.verdict === 'PAYS'
-          ? `The Enclave replayed the exploit with revm against a covered chain's recent state. It took more than the ${live.min} minimum theft.`
+          ? `The Enclave replayed the exploit with revm against ${live.provenOn ? `${live.provenOn.chain} at block ${live.provenOn.block.toLocaleString('en-US')}` : 'a covered chain\'s recent state'}. It took more than the ${live.min} minimum theft.`
           : `The Enclave replays the exploit with revm against a covered chain's recent state, and pays only a theft of at least the ${live.min} minimum.`) +
-        (live.cheat ? ' An earlier cheat claim, passed off as theft, scored zero and nothing moved.' : ''),
-      chips: [...(live.verdict === 'PAYS' ? [['ok', 'Verdict PAYS']] : []), ...(live.cheat ? [['mute', 'Cheat claim: ZERO']] : [])], tx: tx(2, [t('NEAR', X.near)]) },
+        (live.cheat ? ` An earlier cheat claim${live.cheatByWhitehat ? ', filed by the Whitehat with their own key,' : ''} passed off as theft, scored zero and nothing moved.` : ''),
+      chips: [...(live.verdict === 'PAYS' ? [['ok', 'Verdict PAYS']] : []), ...(live.cheat && !(ex[2] || []).some(x => x.chain === 'Cheat claim: ZERO') ? [['mute', 'Cheat claim: ZERO']] : [])], tx: tx(2, [t('NEAR', X.near)]) },
     { d: `NEAR's MPC network ${ex[3] && ex[3].length ? 'signed' : 'signs'} a pause for every covered contract. Only the bounty contract can ask it to, and only after a PAYS verdict.`, tx: tx(3, [t('NEAR MPC', X.near)]) },
     { d: live.paidOnce ? `${live.amount} went to the Whitehat's account, once.` : `${live.amount} goes to the Whitehat's account, once.`, chips: live.paidOnce ? [['ok', live.amount]] : [], tx: tx(4, [t('NEAR', X.near)]) },
-    { d: `The signed pauses reach ${chainList()}. Anyone can send them; nobody can change them.` + (all(live.landed) ? ' Every covered vault now reads paused.' : ''), tx: tx(5, (live.chains || []).map(c => t(c, CHAIN_EXPLORER[c] || X.near))) },
+    { d: `The signed pauses reach ${chainList()}. Anyone can send them; nobody can change them.` + (all(live.landed) ? ' Every pause transaction landed.' : ''), tx: tx(5, (live.chains || []).map(c => t(c, CHAIN_EXPLORER[c] || X.near))) },
     { d: 'NEAR\'s MPC network confirms each pause in a block safe from reorganisation, and the bounty contract records it as a verified pause.', chips: live.verified ? [[all(live.verified) ? 'ok' : 'mute', `${live.verified[0]} of ${live.verified[1]} verified`]] : [], tx: tx(6, [t('NEAR', X.near)]) },
-    { d: `After the ${days(live.delay)} disclosure delay the winning exploit is published, so anyone can re-run it. Until then only the Protocol can open it.`, tx: tx(7, []), pending: live.published ? null : `pending · after ${live.delay == null ? DASH : live.delay === 1 ? '1 day' : live.delay + ' days'}` }
+    { d: `After the ${days(live.delay)} disclosure delay the winning exploit is published, so anyone can re-run it. Until then only the Protocol can open it.`, tx: tx(7, []), pending: live.publishPending }
   ];
 }
-const cmdFor = () => `bountee verify ${live.name ? live.protocol + '/' + live.name : '<protocol>/<name>'} --contract bounty.bountee.near --network mainnet`;
+// The server's command (lib/network.ts `verifyCommand`), so the contract and network are the table's.
+const cmdFor = () => live.command || 'bountee verify <protocol>/<name>';
 const ext = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4 2h6v6M10 2 3 9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
 const short = h => h.length > 12 ? `${h.slice(0, 6)}…${h.slice(-4)}` : h;
 const copyIco = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M8.5 1.5h-6a1 1 0 0 0-1 1v6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
@@ -901,7 +903,9 @@ return {
   // the light: the pointer, or a slow drift once the pointer has rested
   const light = now => { if (now - lastMove < 2200) return [px, py]; const t = now / 1000; return [W * (0.5 + 0.36 * Math.sin(t * 0.19)), H * (0.55 + 0.3 * Math.sin(t * 0.31 + 1))]; };
   let map;
-  const size = () => { dpr = devicePixelRatio || 1; W = hero.clientWidth; H = hero.clientHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); map = buildMap(CELL); setup(); };
+  // A hero with no size (a page laid out with no viewport, or in a hidden frame) has nothing to
+  // draw, and a zero-size canvas makes getImageData throw: wait for a size before building.
+  const size = () => { dpr = devicePixelRatio || 1; W = hero.clientWidth; H = hero.clientHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); if (!W || !H) { map = null; return; } map = buildMap(CELL); setup(); };
 
   const CELL = 2, LINE = 1.1;
   let small, sctx, img;
@@ -925,6 +929,7 @@ return {
   const setupDither = setup;
   setup = () => { setupDither(); drawLines(); };
   const draw = now => {
+    if (!map) return;
     const P = reduce ? [] : packets(now), [lx, ly] = reduce ? [W * 0.78, H * 0.7] : light(now), { w, h, v } = map;
     img.data.fill(0);
     // the scan: only within the light, the lines become green dither
