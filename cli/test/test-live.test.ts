@@ -5,6 +5,7 @@
 // and the tests check what it printed and saved against the chain, read back with `cast`,
 // and against the compiled judge run by hand on the saved inputs.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,6 +39,7 @@ let out: {
   attacker: string;
   rpc: string;
   saved: string;
+  judge: { wasm: string; sha256: string; bounty_build: string; same_as_bounty: boolean };
 };
 let latestBefore: number;
 let code: number | null;
@@ -65,6 +67,14 @@ beforeAll(() => {
 test("D3 D2 R14.5: a harmless Foundry script on live Base Sepolia prints ZERO as JSON", () => {
   expect(code, stderr).toBe(0);
   expect(out.verdict).toStrictEqual({ outcome: "ZERO", reason: "below_minimum_theft" });
+});
+
+// D2, R14.5 (#80): live test names the compiled judge it ran by its sha256, and whether that is
+// the bounty's pinned build, as `test --job` and `rerun` do.
+test("D2 R14.5: live test names the judge build it ran and whether it is the bounty's pinned build", () => {
+  const rules = JSON.parse(readFileSync(`${fixture}rules.json`, "utf8"));
+  const sha = createHash("sha256").update(readFileSync(wasm)).digest("hex");
+  expect(out.judge).toStrictEqual({ wasm, sha256: sha, bounty_build: rules.judge_build_hash, same_as_bounty: `0x${sha}` === rules.judge_build_hash });
 });
 
 // R2.9, ADR-0014: the claim's block is a recent one of the real chain, named by its real hash.

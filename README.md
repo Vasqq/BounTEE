@@ -36,7 +36,7 @@ cargo build --release -p bountee-judge --target wasm32-wasip2   # the judge the 
 alias bountee='node cli/src/main.ts'   # in a script, use `pnpm bountee` instead
 ```
 
-Each step below is a command and what it prints. They replay recorded jobs (the exact judge input: a block header, its state proofs and the exploit, all committed in the repo) through the judge compiled from this repo. The enclave's build differs from yours only in the bounty contract it answers to, so `bountee test` notes that yours is "not the bounty's pinned build", and `--judge` runs any build. They spend nothing and send nothing.
+Each step below is a command and what it prints. They replay recorded jobs (the exact judge input: a block header, its state proofs and the exploit, all committed in the repo) through the judge compiled from this repo. The enclave's build answers to the bounty's own contract and is built in a pinned Docker image, so `bountee test` notes that yours is "not the bounty's pinned build"; `bountee verify` rebuilds the pinned one, and `--judge` runs any build. They spend nothing and send nothing.
 
 **1. A real exploit of the demo vault pays.** Fresh accounts walk away with the vault's USDC.
 

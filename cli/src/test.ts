@@ -54,6 +54,7 @@ export interface TestResult {
   transactions: number;
   proofs: number;
   saved: string;
+  judge: JudgeUsed;
   diagnostics: string[];
 }
 
@@ -80,8 +81,11 @@ async function loadRules(o: TestOptions): Promise<Rules> {
 
 // ---- Local processes ---------------------------------------------------------------------------------
 
-function run(cmd: string, args: string[], cwd: string, env: Record<string, string> = {}) {
-  const res = spawnSync(cmd, args, { cwd, encoding: "utf8", env: { ...process.env, ...env }, maxBuffer: 64 << 20 });
+/** Run `cmd`; `env` adds variables, and an `undefined` one is removed from the environment. */
+function run(cmd: string, args: string[], cwd: string, env: Record<string, string | undefined> = {}) {
+  const merged: Record<string, string | undefined> = { ...process.env, ...env };
+  for (const k of Object.keys(merged)) if (merged[k] === undefined) delete merged[k];
+  const res = spawnSync(cmd, args, { cwd, encoding: "utf8", env: merged, maxBuffer: 64 << 20 });
   if (res.error) throw new Error(`${cmd}: ${res.error.message}`);
   if (res.status !== 0) throw new Error(`${cmd} ${args[0]} failed:\n${res.stdout}\n${res.stderr}`.trim());
   return res.stdout;
@@ -98,12 +102,45 @@ function freePort(): Promise<number> {
   });
 }
 
+/**
+ * The judge a local replay runs: `--judge`, else the checkout's default build. That build is
+ * rebuilt on every use (a no-op when nothing changed), so it never lags the sources, and it is
+ * pinned to the default contract whatever the caller exported, since the judge reads
+ * BOUNTEE_BOUNTY_CONTRACT at build time. It is never a bounty's pinned build: only `bountee build`
+ * reproduces that one (#80).
+ */
 export function judgeWasm(o: { judge?: string }): string {
   if (o.judge) return resolve(o.judge);
   const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
-  const wasm = `${repo}target/${target}/release/bountee-judge.wasm`;
-  if (!existsSync(wasm)) run("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], repo);
-  return wasm;
+  run("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], repo, { BOUNTEE_BOUNTY_CONTRACT: undefined });
+  return `${repo}target/${target}/release/bountee-judge.wasm`;
+}
+
+/** The compiled judge a replay ran, and whether it is the very build the bounty pins (the one the enclave runs). */
+export interface JudgeUsed {
+  wasm: string;
+  sha256: string;
+  bounty_build: string;
+  same_as_bounty: boolean;
+}
+
+export function judgeUsed(wasm: string, bountyBuild: string): JudgeUsed {
+  const sha256 = createHash("sha256").update(readFileSync(wasm)).digest("hex");
+  return { wasm, sha256, bounty_build: bountyBuild, same_as_bounty: `0x${sha256}` === bountyBuild };
+}
+
+/** The judge lines `test` and `rerun` print: which build ran, and whether a verdict from it speaks for the enclave. */
+export function formatJudge(j: JudgeUsed): string[] {
+  return [
+    `judge:   ${j.wasm} (sha256 ${j.sha256})`,
+    ...(j.same_as_bounty
+      ? ["         the bounty's pinned build: the program the enclave runs"]
+      : [
+          `         not the bounty's pinned build ${j.bounty_build}: a local build answers to another bounty contract`,
+          "         and records where it was built, so only bountee build's pinned Docker build reproduces that one;",
+          "         bountee verify rebuilds it and re-runs under it, or pass that build with --judge",
+        ]),
+  ];
 }
 
 /** The Foundry project holding the script: the nearest directory with a foundry.toml. */
@@ -219,6 +256,7 @@ export async function testCommand(o: TestOptions): Promise<TestResult> {
         transactions: exploit.transactions.length,
         proofs: replay.proofs.length,
         saved,
+        judge: judgeUsed(wasm, rules.judge_build_hash),
         diagnostics,
       };
     } catch (e) {
@@ -235,8 +273,7 @@ export interface ReplayResult {
   verdict: Verdict;
   block: BlockRef;
   job: string;
-  /** The compiled judge that gave the verdict, and whether it is the very build the bounty pins (the one the enclave runs). */
-  judge: { wasm: string; sha256: string; bounty_build: string; same_as_bounty: boolean };
+  judge: JudgeUsed;
   transactions: number;
   proofs: number;
   diagnostics: string[];
@@ -246,16 +283,14 @@ export interface ReplayResult {
 export function replayJob(o: { job: string; judge?: string }): ReplayResult {
   const replay = parseReplay(JSON.parse(readFileSync(o.job, "utf8")).replay);
   const wasm = judgeWasm(o);
-  const sha256 = createHash("sha256").update(readFileSync(wasm)).digest("hex");
   const { verdict, stderr } = runJudge(wasm, replay);
   const diagnostics = stderr.split("\n").map((l) => l.trim()).filter(Boolean);
   if (!verdict) throw new Error(`the judge gave no verdict:\n${diagnostics.join("\n")}`);
-  const bounty_build = replay.rules.judge_build_hash;
   return {
     verdict,
     block: replay.block,
     job: resolve(o.job),
-    judge: { wasm, sha256, bounty_build, same_as_bounty: `0x${sha256}` === bounty_build },
+    judge: judgeUsed(wasm, replay.rules.judge_build_hash),
     transactions: replay.exploit.transactions.length,
     proofs: replay.proofs.length,
     diagnostics,
@@ -267,10 +302,7 @@ export function formatReplayResult(r: ReplayResult): string {
     `verdict: ${r.verdict.outcome} (${r.verdict.reason})`,
     `block:   ${r.block.number} ${r.block.hash} (recorded header and proofs, no RPC)`,
     `exploit: ${r.transactions} transaction(s), ${r.proofs} proven account(s), from ${r.job}`,
-    `judge:   ${r.judge.wasm} (sha256 ${r.judge.sha256})`,
-    r.judge.same_as_bounty
-      ? "         the bounty's pinned build: the program the enclave runs"
-      : `         not the bounty's pinned build ${r.judge.bounty_build} (that build differs only in the contract it answers to; pass it with --judge to run the enclave's exact program)`,
+    ...formatJudge(r.judge),
     ...r.diagnostics.map((d) => `judge:   ${d}`),
   ].join("\n");
 }
@@ -282,6 +314,7 @@ export function formatTestResult(r: TestResult): string {
     `exploit: ${r.transactions} transaction(s) from fresh account ${r.attacker}`,
     `proofs:  ${r.proofs} account(s), from ${r.rpc}`,
     `saved:   ${r.saved}`,
+    ...formatJudge(r.judge),
     ...r.diagnostics.map((d) => `judge:   ${d}`),
   ].join("\n");
 }

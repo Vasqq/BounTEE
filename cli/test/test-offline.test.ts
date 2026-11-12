@@ -79,7 +79,27 @@ test("D2: test names the compiled judge it ran by its sha256, and whether it is 
   // default build is pinned to another contract, so it is never that exact build.
   expect(out.judge.bounty_build).toBe("0xc4222111c3523dae3bd7b3002fb63ddf254231bd9f437c497acf4d5962a1df45");
   expect(out.judge.same_as_bounty).toBe(false);
+  // #80: the text says so, names the pinned build and how to run it, and claims no more.
+  const text = bounteeOffline(["test", "--job", EXPLOIT]).stdout;
+  expect(text).toContain("not the bounty's pinned build 0xc4222111c3523dae3bd7b3002fb63ddf254231bd9f437c497acf4d5962a1df45");
+  expect(text).toContain("bountee verify");
+  expect(text).not.toMatch(/differs only/);
 });
+
+// D2 (#80): the default judge is the checkout's own build, pinned to the default contract,
+// whatever the caller's environment: an exported BOUNTEE_BOUNTY_CONTRACT doesn't rebuild it
+// for another contract behind the tool's back.
+test("D2: the default judge stays the checkout's default build when BOUNTEE_BOUNTY_CONTRACT is exported", () => {
+  const before = sha256(localJudge);
+  const res = spawnSync(process.execPath, [`${repo}cli/src/main.ts`, "test", "--job", EXPLOIT, "--json"], {
+    encoding: "utf8",
+    env: { ...process.env, BOUNTEE_BOUNTY_CONTRACT: "elsewhere.bountee.testnet" },
+    timeout: 600_000,
+  });
+  expect(res.status, res.stderr).toBe(0);
+  expect(JSON.parse(res.stdout).judge.sha256).toBe(before);
+  expect(sha256(localJudge)).toBe(before);
+}, 600_000);
 
 // D2, R3.9 (ticket #9 criterion 3): the enclave's build (pinned to the demo bounty's contract, built the
 // way deploy.ts builds it) passed with --judge gives the same verdicts as the local build.

@@ -17,8 +17,7 @@
 //   the clear, beside the claim's block and header. It replays the exploit under the compiled
 //   judge from that header and the claim's proofs with no RPC (R2.9), and compares the
 //   verdict with the enclave's.
-import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
 import {
   parseAccountProof,
@@ -37,7 +36,7 @@ import { actions } from "near-api-js";
 import { proofsMatchingClaim, type ProofsSource } from "./claim-proofs.ts";
 import { events, Near, tgas } from "./near.ts";
 import { runJudge } from "./proofs.ts";
-import { judgeWasm } from "./test.ts";
+import { formatJudge, judgeUsed, judgeWasm, type JudgeUsed } from "./test.ts";
 
 /** The `published_exploit` view (contract/src/publication.rs). */
 interface PublicationView {
@@ -123,7 +122,7 @@ export interface RerunResult {
   /** The verdict the enclave gave, as the contract recorded it. */
   enclave_verdict: Verdict | null;
   same_verdict: boolean;
-  judge: { wasm: string; sha256: string; same_as_bounty: boolean };
+  judge: JudgeUsed;
   exploit: Exploit;
   /** Where the replay job was saved, with `--out`. */
   out?: string;
@@ -152,7 +151,6 @@ export async function rerunPublished(o: { near: Near; contract: string; bounty: 
   };
   if (o.out) writeFileSync(o.out, `${toJson({ replay })}\n`);
   const wasm = judgeWasm({ judge: o.judge });
-  const digest = createHash("sha256").update(readFileSync(wasm)).digest("hex");
   const { verdict, stderr } = runJudge(wasm, replay);
   if (!verdict) throw new Error(`the judge gave no verdict:\n${stderr.trim()}`);
   const enclave = pub.verdict === null ? null : parseVerdict(pub.verdict);
@@ -164,7 +162,7 @@ export async function rerunPublished(o: { near: Near; contract: string; bounty: 
     verdict,
     enclave_verdict: enclave,
     same_verdict: enclave !== null && enclave.outcome === verdict.outcome && enclave.reason === verdict.reason,
-    judge: { wasm, sha256: digest, same_as_bounty: `0x${digest}` === replay.rules.judge_build_hash },
+    judge: judgeUsed(wasm, replay.rules.judge_build_hash),
     exploit: released.exploit,
     ...(o.out ? { out: o.out } : {}),
   };
@@ -178,7 +176,7 @@ export function formatRerunResult(r: RerunResult): string {
     `enclave: ${enclave}`,
     r.same_verdict ? "same verdict as the enclave" : "NOT the enclave's verdict",
     `block:   ${r.block.number} ${r.block.hash}`,
-    `judge:   ${r.judge.wasm} (sha256 ${r.judge.sha256})${r.judge.same_as_bounty ? ", the bounty's pinned build" : ""}`,
+    ...formatJudge(r.judge),
     ...(r.out ? [`job saved to ${r.out} (bountee test --job runs it again)`] : []),
   ].join("\n");
 }
