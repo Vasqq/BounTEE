@@ -1,8 +1,9 @@
 // Test stand-ins for the Protocol's side of opening a winning exploit: a browser wallet
 // (MetaMask, or another wallet by its provider flags) that signs with a known Ethereum key, and
-// a release encrypted to that key's exploit key exactly as the judge's release job writes it (formats/src/job.rs, BounTEE release v1). The signing and key
-// derivation are the command-line tool's own (cli/src/open-exploit.ts), so the page has to
-// derive the same key the terminal does.
+// a release encrypted to that key's exploit key exactly as the judge's release job writes it
+// (formats/src/job.rs, BounTEE release v1). The signing and key derivation are the
+// command-line tool's own (cli/src/open-exploit.ts), so the page has to derive the same key the
+// terminal does.
 import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from "node:crypto";
 import { deflateRawSync } from "node:zlib";
 import type { Page } from "@playwright/test";
