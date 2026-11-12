@@ -304,6 +304,7 @@ This document uses SHALL and SHALL NOT for every requirement. A SHOULD or MAY ca
 | D31 | A testnet build SHALL look and behave as a mainnet build except for one "Testnet" badge beside the wordmark in the nav on every page, linking to the mainnet site. Its `/` SHALL lead to the bounty list and SHALL NOT show the mainnet demo story, and its nav's Verify link SHALL lead to the mainnet site's Verify section. A mainnet build SHALL link to the testnet site from its bounty list and its landing page's footer. While the testnet site's address is set, the mainnet landing page's "Open the app" and "Post a bounty" SHALL open the testnet site's bounty list and posting flow. A link to the other site SHALL be shown only when that site's address is set. | ADR-0021 | W | T |
 | D32 | On testnet, the web app's posting flow SHALL link to Circle's faucet for test USDC beside the Protocol's USDC balance. | ADR-0021 | W | T |
 | D33 | A script SHALL deploy the testnet site's bounty contract on Circle's testnet USDC and seed it with bounties from fictional Protocols in each lasting public state: Live, Live with claims judged, Paid, Ended unclaimed, Withdrawn and Not posted (a failed posting check). Verified by a recorded testnet run (a testnet run is this requirement's own subject, not evidence for any other, ADR-0017). | ADR-0021 | T | A |
+| D34 | The README SHALL name the landing page's eight demo steps in the same words and order, and cite for them the transactions the landing page reads (D4); a script SHALL check both. | Spec | T | T |
 
 *Amended Nov 8 (ADR-0020):* any covered chain can be a claim's proof chain. D1 is rewritten, R1.1, R1.4, R2.8 and R3.8 follow it, R15.7 states the replay's per-chain limits, and D26–D29 are new.
 
@@ -312,3 +313,5 @@ This document uses SHALL and SHALL NOT for every requirement. A SHOULD or MAY ca
 *Amended Nov 11:* D31's mainnet landing page sends its app buttons to the testnet site, which has bounties to try; mainnet has none yet.
 
 *Amended again Nov 10 (Liam):* the public state of a bounty whose posting check failed reads "Not posted", not "Check failed" (DESIGN.md, Bounty list); D33 follows.
+
+*Amended Nov 12 (spec #82, the final README):* the README tells the landing page's story in its words and with its transactions; D34 is new, and R15.4's script checks it alongside the README's steps, links and placeholders.
