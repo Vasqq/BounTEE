@@ -467,11 +467,13 @@ Up to 900px wide (tablets and phones) the headers are hidden, so a "Sort by" sel
 - "Copy for multisig" as `button-secondary`, only where there is a grant transaction to copy.
 - The tx chip once it lands.
 
-Set up pause has one card per chain, holding a row per covered contract's grant and a row for that chain's pause gas, split by a `line` hairline. Add funds shows the Protocol's `0x…` account in a command block with Copy, then the bounty's USDC and the NEAR fees as items. Post bounty's first item is the exploit key, whose action is "Sign with MetaMask". If the two signatures differ, the item shows one `ink` sentence saying so and offers a key-file field in its place (D20).
+Set up pause has one card per chain, holding a row per covered contract's grant and a row for that chain's pause gas, split by a `line` hairline. Add funds shows the Protocol's `0x…` account in a command block with Copy, then the bounty's USDC and the NEAR fees as items. Post bounty's first item is the exploit key, whose action is "Sign with your wallet". If the two signatures differ, the item shows one `ink` sentence saying so and offers a key-file field in its place (D20).
+
+**Wallet picker** (D34, ADR-0022). "Connect wallet" in Set up pause and "Open with your wallet" on the open-exploit page open RainbowKit's connect modal; the app draws no other wallet UI and no account chip in the nav. The modal is RainbowKit's compact one, in its dark theme set to our tokens: `surface` background, `ink` text, `ink` accent with `ground` text on it, `line` borders, the body font, `rounded.sm` corners. It lists only the wallets ADR-0022 names (Brave Wallet only in Brave), with one line beneath: "Only wallets that can sign on NEAR are shown."
 
 **"What you're risking" panel** (D15). A `panel` in the right column, built as the ledger without glyphs: `title-ledger` items, each with one sentence, listing D15's points and the R15.5 trusted parties. It stays in view beside the final two prompts. On a phone it sits directly above the two prompts.
 
-**Open-exploit page** (#32). Before payout, one sentence: "This exploit opens once the Whitehat is paid." After payout, one sentence, "Only the Protocol that posted this bounty can open it, with the wallet it posted from.", then `button-primary` "Open with MetaMask". The opened exploit shows in a terminal with Copy, followed by the line: "Unpausing is up to your own governance."
+**Open-exploit page** (#32). Before payout, one sentence: "This exploit opens once the Whitehat is paid." After payout, one sentence, "Only the Protocol that posted this bounty can open it, with the wallet it posted from.", then `button-primary` "Open with your wallet". The opened exploit shows in a terminal with Copy, followed by the line: "Unpausing is up to your own governance."
 
 **Empty, loading, error.**
 - Empty keeps the block's frame and heading and adds one `ink-2` sentence ("No bounties are live.").
@@ -528,8 +530,8 @@ Screens and panels on objects are `#19191a`.
 - Transactions are written as a chain chip plus a link. Once the transaction exists, the link shows the shortened hash and has a copy button. Before then, it says "tx pending" and points at the explorer root: nearblocks.io for NEAR, basescan.org for Base, arbiscan.io for Arbitrum One. Pending states give their reason after a middle dot: "pending · after 1 day".
 - Chain names are written in full: "Arbitrum One", never "Arbitrum" or "Arb". Amounts are written "10 USDC". Chains are listed as "NEAR, Base and Arbitrum One".
 - "Paused" means the pause transaction succeeded on that chain. Use "verified" only for what NEAR's MPC network confirmed. Never imply anything about the contract's code.
-- Mainnet only. No "testnet", "Sepolia", "rehearsal" or network toggle in any mainnet build. The network is a build setting, not a control. D17's faucet link exists only in the testnet build, the second site for trying BounTEE (ADR-0021).
-- Wallets: "Posting connects MetaMask. Reading and verifying never do." No wallet prompt on public pages.
+- Mainnet only. No "testnet", "Sepolia", "rehearsal" or network toggle in any mainnet build (wallet libraries' own chain lists aside, ADR-0022). The network is a build setting, not a control. D17's faucet link exists only in the testnet build, the second site for trying BounTEE (ADR-0021).
+- Wallets: "Posting connects your wallet. Reading and verifying never do." Name no wallet brand in copy; say "your wallet". No wallet prompt on public pages.
 
 ## Do's and Don'ts
 
