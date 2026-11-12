@@ -1,25 +1,9 @@
 // Seam W, ticket #94: the public pages name no wallet brand (D37), on the testnet build; the
-// mainnet build's side is in wallet-brands.spec.ts. The brand list is pinned by spec #89.
+// mainnet build's side is in wallet-brands.spec.ts. The brand list, pinned by spec #89, and the
+// scan are in stand-ins/brands.ts.
 import { expect, test, type Page } from "@playwright/test";
+import { brandsNamed } from "./stand-ins/brands.ts";
 import { claimInProgress, emptyWorld, judge, NETWORKS, post, rules, setWorld, win, type BountyId, type BountyView } from "./stand-ins/world.ts";
-
-/** Spec #89's pinned brand list, matched case-sensitively. Its twins are in wallet-brands.spec.ts and signing-copy.spec.ts: keep them in step. */
-const BRANDS = ["MetaMask", "Rabby", "Zerion", "Brave Wallet", "WalletConnect", "Reown", "Coinbase", "Phantom", "Rainbow", "Trust Wallet", "OKX", "Ledger Live"];
-
-/** As in wallet-brands.spec.ts, copied since a spec can't import a spec: every wallet brand the page names, in text or attributes. */
-async function brandsNamed(page: Page): Promise<string[]> {
-  return page.evaluate((brands) => {
-    const texts = [document.title, ...[...document.head.querySelectorAll("meta[content]")].map((m) => m.getAttribute("content") ?? "")];
-    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-      if (!n.parentElement?.closest("script, style, noscript, template")) texts.push(n.textContent ?? "");
-    }
-    for (const el of document.querySelectorAll("*")) {
-      for (const a of el.attributes) if (/^(aria-|title$|alt$|placeholder$)/.test(a.name)) texts.push(a.value);
-    }
-    return texts.flatMap((t) => brands.filter((b) => t.includes(b)).map((b) => `${b}: ${t.trim().slice(0, 120)}`));
-  }, BRANDS);
-}
 
 const T = NETWORKS.testnet;
 const PAID: BountyId = { protocol: "brassmoor-lend.testnet", name: "pool" };

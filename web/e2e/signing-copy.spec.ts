@@ -5,6 +5,7 @@
 // What this seam misses: how the picker looks (its theme on DESIGN.md's tokens), which the
 // front-end check-in's screenshots show, and real wallets' own windows, which name themselves.
 import { expect, test, type Page } from "@playwright/test";
+import { brandsNamed } from "./stand-ins/brands.ts";
 import { emptyWorld, fundNear, post, postingWorld, setWorld, VAULT_ARB, VAULT_BASE, win, type BountyId, type World } from "./stand-ins/world.ts";
 import { addressOf, exploitPublicKey, metamask, OTHER_KEY, pickWallet, PROTOCOL_KEY, release } from "./stand-ins/wallet.ts";
 
@@ -13,35 +14,9 @@ const ID: BountyId = { protocol: "0x9f2c3e1a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e", n
 const NEAR = 10n ** 24n;
 const EXPLOIT_PAGE = `/bounties/${ID.protocol}/${ID.name}/exploit`;
 
-/** Spec #89's pinned brand list, matched case-sensitively. Its twins are in wallet-brands.spec.ts and wallet-brands.testnet.spec.ts: keep them in step. */
-const BRANDS = ["MetaMask", "Rabby", "Zerion", "Brave Wallet", "WalletConnect", "Reown", "Coinbase", "Phantom", "Rainbow", "Trust Wallet", "OKX", "Ledger Live"];
-
-/**
- * Every wallet brand the page names outside the open picker, with the text that names it: in
- * its text, shown or not (a hint's tooltip), its title and head meta tags, and every element's
- * aria-*, title, alt and placeholder attributes. Scripts and styles are code, not copy. The
- * open picker (its dialog) is left out: listing wallets by name is its job (D34). As
- * wallet-brands.spec.ts's, but for the picker.
- */
-async function brandsNamed(page: Page): Promise<string[]> {
-  return page.evaluate((brands) => {
-    const picker = (n: Node | null) => !!(n instanceof Element ? n : n?.parentElement)?.closest("[role=dialog]");
-    const texts = [document.title, ...[...document.head.querySelectorAll("meta[content]")].map((m) => m.getAttribute("content") ?? "")];
-    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-      if (!n.parentElement?.closest("script, style, noscript, template") && !picker(n)) texts.push(n.textContent ?? "");
-    }
-    for (const el of document.querySelectorAll("*")) {
-      if (picker(el)) continue;
-      for (const a of el.attributes) if (/^(aria-|title$|alt$|placeholder$)/.test(a.name)) texts.push(a.value);
-    }
-    return texts.flatMap((t) => brands.filter((b) => t.includes(b)).map((b) => `${b}: ${t.trim().slice(0, 120)}`));
-  }, BRANDS);
-}
-
 /** Checks the page names no wallet brand outside the picker, naming the step in any failure. */
 async function noBrand(page: Page, at: string) {
-  expect(await brandsNamed(page), at).toEqual([]);
+  expect(await brandsNamed(page, { outsidePicker: true }), at).toEqual([]);
 }
 
 const step = (page: Page, n: number) => page.getByRole("region", { name: new RegExp(`^${n}\\. `) });
