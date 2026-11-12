@@ -115,14 +115,17 @@ for (const [name, at] of Object.entries(PAGES)) {
 const posting = PAGES.posting;
 const funding = (page: Page) => page.getByRole("region", { name: /^3\. / });
 
-test("D34: with a Zerion injected, picking Zerion connects its account", async ({ page }) => {
-  await blockWalletConnect(page);
+test("D34, D36: with a Zerion injected, picking Zerion connects its account, and WalletConnect is never contacted", async ({ page }) => {
+  const tried = await blockWalletConnect(page);
   await wallet(page, PROTOCOL_KEY, { as: "Zerion" });
   await posting.open(page);
   await posting.connect(page).click();
   await pickWallet(page, "Zerion");
   await expect(funding(page)).toContainText(ACCOUNT);
   expect(await walletCalls(page)).toContain("eth_requestAccounts");
+  // A browser wallet needs no WalletConnect, so picking one contacts it no more than loading does.
+  await settled(page);
+  expect(tried).toEqual([]);
 });
 
 // Each of these sets MetaMask's flag beside its own, so MetaMask's entry must not take it: the
