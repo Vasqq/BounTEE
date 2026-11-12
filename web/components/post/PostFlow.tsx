@@ -1,9 +1,9 @@
 "use client";
-// The posting flow (#31): a Protocol posts a bounty with the MetaMask it already uses (D13).
+// The posting flow (#31): a Protocol posts a bounty with the Ethereum wallet it already uses (D13).
 // Four steps, moved between with the floating dock (DESIGN.md, Posting flow). Everything
-// checked is read live (lib/posting.ts) and ticked off only once it is on chain; MetaMask signs
+// checked is read live (lib/posting.ts) and ticked off only once it is on chain; the wallet signs
 // the EVM grants and top-ups directly, and NEAR transactions as the Protocol's 0x… account.
-// The rules need no wallet: MetaMask connects at the first step that needs its address.
+// The rules need no wallet: the wallet connects at the first step that needs its address.
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { encodeFunctionData, formatUnits, hexToBytes, keccak256, parseAbi, toHex, type Address } from "viem";
@@ -37,7 +37,7 @@ const eth = (wei: string | bigint) => units(wei, 18);
 /** A wallet error as one sentence: a rejection says so; anything else, what the wallet or chain said. */
 function walletError(e: unknown): string {
   const err = e as { shortMessage?: string; message?: string; code?: number; cause?: { code?: number } };
-  if (err.code === 4001 || err.cause?.code === 4001 || /reject|denied/i.test(err.message ?? "")) return "MetaMask didn't send it.";
+  if (err.code === 4001 || err.cause?.code === 4001 || /reject|denied/i.test(err.message ?? "")) return "Your wallet didn't send it.";
   return err.shortMessage ?? err.message ?? "Something went wrong.";
 }
 
@@ -79,7 +79,7 @@ const PAUSER_ROLE = keccak256(toHex("PAUSER_ROLE"));
 
 /**
  * The server's answer, checked against what this build pins before any of it reaches
- * MetaMask: the bounty contract, NEAR's USDC, and the pause-role address derived here. Each
+ * the wallet: the bounty contract, NEAR's USDC, and the pause-role address derived here. Each
  * grant's calldata is rebuilt here too, so the server only says which contracts use
  * AccessControl, never what to sign.
  */
@@ -97,7 +97,7 @@ function trusted(s: PostingStatus, protocol: string, name: string): PostingStatu
   };
 }
 
-/** Send one EVM transaction from MetaMask on its chain and wait for it to land. */
+/** Send one EVM transaction from the wallet on its chain and wait for it to land. */
 async function sendOn(call: EvmCall) {
   // Widened to number: wagmi types a send by the wallet setup's chains, which are built from the table untyped by ID.
   const chainId: number | undefined = coveredChain(call.chainId)?.id;
@@ -172,7 +172,7 @@ export function PostFlow() {
   return (
     <>
       <h1 className="page-title">Post a bounty</h1>
-      <p className="lead">Everything signs with MetaMask. No NEAR wallet needed.</p>
+      <p className="lead">Everything signs with your wallet. No NEAR wallet needed.</p>
       <div className="post-grid">
         <div>
           {[basicsQuery, q].map((x, i) =>
@@ -256,7 +256,7 @@ function WithWallet({ account, why, children }: { account?: string; why: string;
   return (
     <div className="send">
       <button type="button" className="btn btn-ink" onClick={() => openConnectModal?.()} disabled={connecting}>
-        {connecting ? "Connecting" : "Connect MetaMask"}
+        {connecting ? "Connecting" : "Connect wallet"}
       </button>
       <p>{why}</p>
     </div>
@@ -556,15 +556,15 @@ function FundStep({ s, account, draft, done, next }: { s?: PostingStatus; accoun
   return (
     <Step n={3} title={STEPS[2]}>
       <p className="step-lead">Send both to your NEAR account, from an exchange or another wallet. Each ticks off once it arrives.</p>
-      <WithWallet account={account} why="Your NEAR account is your MetaMask address.">
+      <WithWallet account={account} why="Your NEAR account is your wallet's address.">
         {account && (
           <div className="form">
             <div className="field">
               <span>Your NEAR account</span>
               <CommandBlock text={account} />
               <small>
-                Your MetaMask address, on NEAR.{" "}
-                <Hint tip="NEAR accepts Ethereum addresses as accounts, and MetaMask signs for this one. No NEAR wallet needed.">Why this address?</Hint>
+                Your wallet's address, on NEAR.{" "}
+                <Hint tip="NEAR accepts Ethereum addresses as accounts, and your wallet signs for this one. No NEAR wallet needed.">Why this address?</Hint>
               </small>
             </div>
           </div>
@@ -760,14 +760,14 @@ function PostStep(p: {
                 <>
                   <p>
                     The winning exploit opens only with this key.{" "}
-                    <Hint tip="It comes from one MetaMask signature of a message naming this bounty. Sign the same message again later to open the exploit: there's no file to keep.">
+                    <Hint tip="It comes from your wallet's signature of a message naming this bounty. Sign the same message again later to open the exploit: there's no file to keep.">
                       No file to keep
                     </Hint>
                     .
                   </p>
                   <div className="send">
                     <button type="button" className={ink(ready && !keyed)} onClick={() => sign.mutate()} disabled={!s || !draft.name || sign.isPending}>
-                      {sign.isPending ? "Signing" : "Sign with MetaMask"}
+                      {sign.isPending ? "Signing" : "Sign with your wallet"}
                     </button>
                   </div>
                   <Problem m={sign} />
@@ -778,7 +778,7 @@ function PostStep(p: {
           <Item n={2} title="Enable NEAR signing" done={onboarded}>
             {!onboarded && s && (
               <>
-                <p>Lets MetaMask sign for your NEAR account. Free, and needed once.</p>
+                <p>Lets your wallet sign for your NEAR account. Free, and needed once.</p>
                 <div className="send">
                   <button type="button" className={ink(ready && keyed && !onboarded)} onClick={() => enable.mutate()} disabled={!ready || enable.isPending || enable.isSuccess}>
                     {enable.isPending ? "Enabling" : enable.isSuccess ? "Confirming" : "Enable NEAR signing"}

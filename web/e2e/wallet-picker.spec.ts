@@ -31,7 +31,7 @@ const PAGES = {
       await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
       await page.goto("/post#3");
     },
-    connect: (page: Page) => page.getByRole("region", { name: /^3\. / }).getByRole("button", { name: "Connect MetaMask" }),
+    connect: (page: Page) => page.getByRole("region", { name: /^3\. / }).getByRole("button", { name: "Connect wallet" }),
   },
   "open-exploit": {
     beforeClick: "nothing",
@@ -39,7 +39,7 @@ const PAGES = {
       await setWorld(page, paidAndReleased());
       await page.goto(`/bounties/${ID.protocol}/${ID.name}/exploit`);
     },
-    connect: (page: Page) => page.getByRole("button", { name: "Open with MetaMask" }),
+    connect: (page: Page) => page.getByRole("button", { name: "Open with your wallet" }),
   },
 } as const;
 
@@ -82,8 +82,8 @@ async function settled(page: Page) {
   await page.waitForTimeout(1_000);
 }
 
-/** The wallet entries in the open picker: its buttons with a wallet icon. */
-const entries = (page: Page) => page.getByRole("dialog").getByRole("button").filter({ has: page.getByRole("img") });
+/** The wallet entries in the open picker: its buttons with a wallet icon, not the compact modal's Info button. */
+const entries = (page: Page) => page.getByRole("dialog").getByRole("button").filter({ has: page.getByRole("img") }).filter({ hasNot: page.getByRole("img", { name: "Info", exact: true }) });
 
 for (const [name, at] of Object.entries(PAGES)) {
   test(`D34, D36: on the ${name} page with no wallet injected, the picker lists exactly MetaMask, Rabby Wallet and Zerion, MetaMask enabled`, async ({ page }) => {

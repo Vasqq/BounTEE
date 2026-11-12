@@ -205,7 +205,7 @@
 .why p { color: var(--ink); }
 .why p + p { margin-top: 6px; color: var(--ink-2); }
 .why .btn { margin-top: 24px; }
-/* The open-exploit page's one line on who can open it, above its MetaMask button. */
+/* The open-exploit page's one line on who can open it, above its wallet button. */
 .send .who-opens { width: 100%; }
 
 /* Covered contracts: a table with column headers, built like the bounty list's rows (ground-2, 2px apart, no lines). */

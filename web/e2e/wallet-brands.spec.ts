@@ -3,7 +3,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { ARBITRUM, BASE, claimInProgress, finishedDemo, judge, post, rules, setWorld, win, type BountyId, type BountyView } from "./stand-ins/world.ts";
 
-/** Spec #89's pinned brand list, matched case-sensitively. Its twin is in wallet-brands.testnet.spec.ts: keep the two in step. */
+/** Spec #89's pinned brand list, matched case-sensitively. Its twins are in wallet-brands.testnet.spec.ts and signing-copy.spec.ts: keep them in step. */
 const BRANDS = ["MetaMask", "Rabby", "Zerion", "Brave Wallet", "WalletConnect", "Reown", "Coinbase", "Phantom", "Rainbow", "Trust Wallet", "OKX", "Ledger Live"];
 
 /**

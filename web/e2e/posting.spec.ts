@@ -27,7 +27,7 @@ async function pickChain(page: Page, n: number, chain: string) {
 
 /** The rules need no wallet; MetaMask connects at the pause-role step, the first that needs its address, picked in the wallet picker. */
 async function connect(page: Page, role = PAUSE_ROLE) {
-  await step(page, 2).getByRole("button", { name: "Connect MetaMask" }).click();
+  await step(page, 2).getByRole("button", { name: "Connect wallet" }).click();
   await pickWallet(page);
   await expect(step(page, 2)).toContainText(role, { ignoreCase: true });
 }
@@ -115,7 +115,7 @@ test("D13, D5, D17, D20, D15, D27: one MetaMask sets up the pause, adds funds an
   const risk = page.getByRole("complementary", { name: "What you're risking" });
   await expect(risk).toBeVisible();
   const key = exploitPublicKey(PROTOCOL_KEY, { protocol: ACCOUNT, name: NAME });
-  await post.getByRole("button", { name: "Sign with MetaMask" }).click();
+  await post.getByRole("button", { name: "Sign with your wallet" }).click();
   await expect(state(page, /Your exploit key/)).toHaveText("signed");
   await post.getByRole("button", { name: "Enable NEAR signing" }).click();
   await expect(state(page, /Enable NEAR signing/)).toHaveText("done");
@@ -187,7 +187,7 @@ test("D20: a wallet whose signatures differ falls back to a saved key file", asy
   await fillRules(page);
   await connect(page);
   await page.getByRole("navigation", { name: "Posting steps" }).getByRole("button", { name: "4. Post bounty" }).click();
-  await page.getByRole("button", { name: "Sign with MetaMask" }).click();
+  await page.getByRole("button", { name: "Sign with your wallet" }).click();
   await expect(step(page, 4)).toContainText("gave two different signatures");
   // The fallback: a saved X25519 key, 32 bytes as hex.
   await step(page, 4).getByLabel("Exploit key file").setInputFiles({ name: "exploit-key.hex", mimeType: "text/plain", buffer: Buffer.from("11".repeat(32)) });
@@ -234,7 +234,7 @@ test("D13: the rules are filled in before any wallet connects; MetaMask is asked
   await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
   await page.goto("/post");
   const rules = step(page, 1);
-  await expect(rules.getByRole("button", { name: "Connect MetaMask" })).toHaveCount(0);
+  await expect(rules.getByRole("button", { name: "Connect wallet" })).toHaveCount(0);
   await rules.getByRole("combobox", { name: "Chain" }).first().click();
   await expect(page.getByRole("option")).toHaveText(["Base", "Arbitrum One"]);
   await page.keyboard.press("Escape");
@@ -248,13 +248,13 @@ test("D13: /post reloaded after connecting shows the same account with no click 
   await metamask(page, PROTOCOL_KEY);
   await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
   await page.goto("/post#3");
-  await step(page, 3).getByRole("button", { name: "Connect MetaMask" }).click();
+  await step(page, 3).getByRole("button", { name: "Connect wallet" }).click();
   await pickWallet(page);
   await expect(step(page, 3)).toContainText(ACCOUNT);
   await page.reload();
   // The account is back without a click, and the wallet was never asked to connect again.
   await expect(step(page, 3)).toContainText(ACCOUNT);
-  await expect(step(page, 3).getByRole("button", { name: "Connect MetaMask" })).toHaveCount(0);
+  await expect(step(page, 3).getByRole("button", { name: "Connect wallet" })).toHaveCount(0);
   expect(await walletCalls(page)).not.toContain("eth_requestAccounts");
 });
 
@@ -267,7 +267,7 @@ test("D25: a name the Protocol already used is named as the reason once the wall
   await setWorld(page, w);
   await page.goto("/post");
   await fillRules(page);
-  await step(page, 2).getByRole("button", { name: "Connect MetaMask" }).click();
+  await step(page, 2).getByRole("button", { name: "Connect wallet" }).click();
   await pickWallet(page);
   await expect(step(page, 2)).toContainText(`You've posted a bounty named ${NAME} before, and a name is never reused.`);
   await expect(step(page, 2).getByRole("button", { name: "Grant", exact: true })).toHaveCount(0);
