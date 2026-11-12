@@ -1,10 +1,12 @@
 // Seam W, ticket #31: a Protocol posts a bounty from the browser with MetaMask. The stand-in
 // MetaMask holds a test key; the chain stand-in applies what it sends, as each chain would.
+// Ticket #95 walks the same journey with the stand-in presenting as Rabby (D35); what a real
+// Rabby does in its own dialogs is D35's recorded testnet run, not this seam.
 import { expect, test, type Page } from "@playwright/test";
 import { decodeFunctionData, keccak256, parseAbi, toHex } from "viem";
 import { pauseRole } from "@bountee/formats";
 import { ARBITRUM, BASE, CONTRACT, currentWorld, fundNear, NEAR_EVM, PAUSE_GAS_PER_PAUSE, post, postingWorld, setWorld, USDC, VAULT_ARB, VAULT_BASE } from "./stand-ins/world.ts";
-import { addressOf, exploitPublicKey, metamask, pickWallet, PROTOCOL_KEY, walletCalls, walletConnected, walletSent } from "./stand-ins/wallet.ts";
+import { addressOf, exploitPublicKey, metamask, pickWallet, PROTOCOL_KEY, wallet, walletCalls, walletConnected, walletSent, type Listed, type WalletRun } from "./stand-ins/wallet.ts";
 
 const ACCOUNT = addressOf(PROTOCOL_KEY).toLowerCase();
 const NAME = "vault-v2";
@@ -25,10 +27,10 @@ async function pickChain(page: Page, n: number, chain: string) {
   await page.getByRole("option", { name: chain }).click();
 }
 
-/** The rules need no wallet; MetaMask connects at the pause-role step, the first that needs its address, picked in the wallet picker. */
-async function connect(page: Page, role = PAUSE_ROLE) {
+/** The rules need no wallet; the wallet connects at the pause-role step, the first that needs its address, picked in the wallet picker. */
+async function connect(page: Page, { role = PAUSE_ROLE, as }: { role?: string; as?: Listed } = {}) {
   await step(page, 2).getByRole("button", { name: "Connect wallet" }).click();
-  await pickWallet(page);
+  await pickWallet(page, as);
   await expect(step(page, 2)).toContainText(role, { ignoreCase: true });
 }
 
@@ -48,103 +50,114 @@ async function fillRules(page: Page) {
   await s.getByRole("button", { name: "Continue" }).click();
 }
 
-test("D13, D5, D17, D20, D15, D27: one MetaMask sets up the pause, adds funds and posts on NEAR as the Protocol's 0x… account", async ({ page }) => {
-  // Every step, end to end: eleven wallet prompts and their receipts.
-  test.setTimeout(120_000);
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await metamask(page, PROTOCOL_KEY);
-  await setWorld(page, postingWorld(ACCOUNT, { near: "0", usdc: "10000000" }));
-  await page.goto("/post");
+/**
+ * The full posting journey, one per wallet: MetaMask, and Rabby, which also sets MetaMask's flag
+ * and is picked as "Rabby Wallet", so no step may depend on which listed wallet connected (D35).
+ */
+const JOURNEYS: WalletRun[] = [
+  { as: "MetaMask", title: "D13, D5, D17, D20, D15, D27: one MetaMask sets up the pause, adds funds and posts on NEAR as the Protocol's 0x… account" },
+  { as: "Rabby", title: "D35, D13, D5, D17, D20, D15, D27: one Rabby, picked as Rabby Wallet, sets up the pause, adds funds and posts on NEAR as the Protocol's 0x… account" },
+];
 
-  // 1. Set rules, with the coverage limit stated (R4.12).
-  await expect(step(page, 1).getByRole("button", { name: "pay callers nothing" })).toBeVisible();
-  await expect(step(page, 1)).toContainText("can be covered, so no liquidations.");
-  await fillRules(page);
-  // D27: two chains covered, and still no question about where the theft is proven.
-  await expect(page.getByText(/prove the theft/i)).toHaveCount(0);
+for (const { as, title } of JOURNEYS) {
+  test(title, async ({ page }) => {
+    // Every step, end to end: eleven wallet prompts and their receipts.
+    test.setTimeout(120_000);
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await wallet(page, PROTOCOL_KEY, { as });
+    await setWorld(page, postingWorld(ACCOUNT, { near: "0", usdc: "10000000" }));
+    await page.goto("/post");
 
-  // 2. Set up pause: a card per chain, its grant and its pause gas each ticked off as it lands (D5).
-  // MetaMask connects here.
-  await connect(page);
-  await expect(taskState(page, /Base/, /Pause role/)).toHaveText("not granted");
-  await task(page, /Base/, /Pause role/).getByRole("button", { name: "Grant", exact: true }).click();
-  await expect(taskState(page, /Base/, /Pause role/)).toHaveText("granted", { timeout: 15_000 });
-  await task(page, /Arbitrum One/, /Pause role/).getByRole("button", { name: "Grant", exact: true }).click();
-  await expect(taskState(page, /Arbitrum One/, /Pause role/)).toHaveText("granted", { timeout: 15_000 });
-  const sent = await walletSent(page);
-  const role = parseAbi(["function grantRole(bytes32 role, address account)"]);
-  for (const [chain, vault] of [[BASE, VAULT_BASE], [ARBITRUM, VAULT_ARB]] as const) {
-    const grant = sent[chain]!.find((t) => t.to?.toLowerCase() === vault)!;
-    expect(decodeFunctionData({ abi: role, data: grant.data as `0x${string}` }).args).toEqual([keccak256(toHex("PAUSER_ROLE")), expect.stringMatching(new RegExp(PAUSE_ROLE, "i"))]);
-  }
-  // The pause gas, with D5's plain explanation behind its phrase, shown when the phrase is focused.
-  const gas = task(page, /Base/, /Pause gas/);
-  await gas.getByRole("button", { name: "Pause gas" }).focus();
-  await expect(gas.getByRole("tooltip")).toBeVisible();
-  await expect(gas).toContainText("Pausing is a real Base transaction, paid from the address above, so it needs a few cents of ETH there in advance");
-  await expect(gas).toContainText("your bounty's funds on NEAR can't pay for it");
-  await expect(gas).toContainText("nobody can take the gas back, you included");
-  await expect(gas).toContainText("Nobody presses pause: a proven exploit triggers it.");
-  await gas.getByRole("button", { name: /^Send / }).click();
-  await expect(taskState(page, /Base/, /Pause gas/)).toHaveText("funded", { timeout: 15_000 });
-  await task(page, /Arbitrum One/, /Pause gas/).getByRole("button", { name: /^Send / }).click();
-  await expect(taskState(page, /Arbitrum One/, /Pause gas/)).toHaveText("funded", { timeout: 15_000 });
-  await expect(state(page, /Base/)).toHaveText("ready");
-  await expect(state(page, /Arbitrum One/)).toHaveText("ready");
-  const topUp = (await walletSent(page))[BASE]!.find((t) => t.to?.toLowerCase() === PAUSE_ROLE)!;
-  expect(BigInt(topUp.value!)).toBe(BigInt(PAUSE_GAS_PER_PAUSE));
-  await page.getByRole("button", { name: "Continue" }).click();
+    // 1. Set rules, with the coverage limit stated (R4.12).
+    await expect(step(page, 1).getByRole("button", { name: "pay callers nothing" })).toBeVisible();
+    await expect(step(page, 1)).toContainText("can be covered, so no liquidations.");
+    await fillRules(page);
+    // D27: two chains covered, and still no question about where the theft is proven.
+    await expect(page.getByText(/prove the theft/i)).toHaveCount(0);
 
-  // 3. Add funds: the NEAR account with Copy, the bounty's USDC and the NEAR fees, each ticked off
-  // once it arrives (D17). No faucet on mainnet.
-  const funds = step(page, 3);
-  await expect(funds).toContainText(ACCOUNT);
-  await expect(state(page, /Bounty/)).toHaveText("received");
-  await expect(item(page, /Fees/)).toContainText("0.7 NEAR");
-  await expect(funds.getByRole("link", { name: /faucet/i })).toHaveCount(0);
-  await expect(state(page, /Fees/)).not.toHaveText("received");
-  await fundNear(page, ACCOUNT, String(NEAR));
-  await expect(state(page, /Fees/)).toHaveText("received", { timeout: 15_000 });
-  await page.getByRole("button", { name: "Continue" }).click();
+    // 2. Set up pause: a card per chain, its grant and its pause gas each ticked off as it lands (D5).
+    // The wallet connects here.
+    await connect(page, { as });
+    await expect(taskState(page, /Base/, /Pause role/)).toHaveText("not granted");
+    await task(page, /Base/, /Pause role/).getByRole("button", { name: "Grant", exact: true }).click();
+    await expect(taskState(page, /Base/, /Pause role/)).toHaveText("granted", { timeout: 15_000 });
+    await task(page, /Arbitrum One/, /Pause role/).getByRole("button", { name: "Grant", exact: true }).click();
+    await expect(taskState(page, /Arbitrum One/, /Pause role/)).toHaveText("granted", { timeout: 15_000 });
+    const sent = await walletSent(page);
+    const role = parseAbi(["function grantRole(bytes32 role, address account)"]);
+    for (const [chain, vault] of [[BASE, VAULT_BASE], [ARBITRUM, VAULT_ARB]] as const) {
+      const grant = sent[chain]!.find((t) => t.to?.toLowerCase() === vault)!;
+      expect(decodeFunctionData({ abi: role, data: grant.data as `0x${string}` }).args).toEqual([keccak256(toHex("PAUSER_ROLE")), expect.stringMatching(new RegExp(PAUSE_ROLE, "i"))]);
+    }
+    // The pause gas, with D5's plain explanation behind its phrase, shown when the phrase is focused.
+    const gas = task(page, /Base/, /Pause gas/);
+    await gas.getByRole("button", { name: "Pause gas" }).focus();
+    await expect(gas.getByRole("tooltip")).toBeVisible();
+    await expect(gas).toContainText("Pausing is a real Base transaction, paid from the address above, so it needs a few cents of ETH there in advance");
+    await expect(gas).toContainText("your bounty's funds on NEAR can't pay for it");
+    await expect(gas).toContainText("nobody can take the gas back, you included");
+    await expect(gas).toContainText("Nobody presses pause: a proven exploit triggers it.");
+    await gas.getByRole("button", { name: /^Send / }).click();
+    await expect(taskState(page, /Base/, /Pause gas/)).toHaveText("funded", { timeout: 15_000 });
+    await task(page, /Arbitrum One/, /Pause gas/).getByRole("button", { name: /^Send / }).click();
+    await expect(taskState(page, /Arbitrum One/, /Pause gas/)).toHaveText("funded", { timeout: 15_000 });
+    await expect(state(page, /Base/)).toHaveText("ready");
+    await expect(state(page, /Arbitrum One/)).toHaveText("ready");
+    const topUp = (await walletSent(page))[BASE]!.find((t) => t.to?.toLowerCase() === PAUSE_ROLE)!;
+    expect(BigInt(topUp.value!)).toBe(BigInt(PAUSE_GAS_PER_PAUSE));
+    await page.getByRole("button", { name: "Continue" }).click();
 
-  // 4. Post bounty: the rules read back, the risk panel beside the prompts (D5, D15), the exploit
-  // key from one MetaMask signature (asked twice to check it repeats) (D20), then post. NEAR
-  // signing is enabled once, for free, just before the first NEAR transaction.
-  const post = step(page, 4);
-  await expect(post).toContainText("Pays 10 USDC to the first Whitehat whose claim takes at least 1 USDC");
-  const risk = page.getByRole("complementary", { name: "What you're risking" });
-  await expect(risk).toBeVisible();
-  const key = exploitPublicKey(PROTOCOL_KEY, { protocol: ACCOUNT, name: NAME });
-  await post.getByRole("button", { name: "Sign with your wallet" }).click();
-  await expect(state(page, /Your exploit key/)).toHaveText("signed");
-  await post.getByRole("button", { name: "Enable NEAR signing" }).click();
-  await expect(state(page, /Enable NEAR signing/)).toHaveText("done");
-  await post.getByRole("button", { name: "Prepay the posting fee" }).click();
-  await post.getByRole("button", { name: "Post the bounty" }).click();
-  await expect(post).toContainText("Your bounty is live.", { timeout: 15_000 });
+    // 3. Add funds: the NEAR account with Copy, the bounty's USDC and the NEAR fees, each ticked off
+    // once it arrives (D17). No faucet on mainnet.
+    const funds = step(page, 3);
+    await expect(funds).toContainText(ACCOUNT);
+    await expect(state(page, /Bounty/)).toHaveText("received");
+    await expect(item(page, /Fees/)).toContainText("0.7 NEAR");
+    await expect(funds.getByRole("link", { name: /faucet/i })).toHaveCount(0);
+    await expect(state(page, /Fees/)).not.toHaveText("received");
+    await fundNear(page, ACCOUNT, String(NEAR));
+    await expect(state(page, /Fees/)).toHaveText("received", { timeout: 15_000 });
+    await page.getByRole("button", { name: "Continue" }).click();
 
-  // On NEAR: posted by the 0x… account, with the exploit key from the signature in its rules.
-  const w = await currentWorld(page);
-  const b = w.bounties.find((x) => x.id.name === NAME)!;
-  expect(b.id.protocol).toBe(ACCOUNT);
-  expect(b.rules.exploit_public_key).toBe(key);
-  expect(b.rules.covered_contracts).toEqual([{ chain_id: BASE, address: VAULT_BASE }, { chain_id: ARBITRUM, address: VAULT_ARB }]);
-  expect(b.rules.bounty_amount).toBe("10000000");
-  expect(b.rules.minimum_theft).toBe("1000000");
-  expect(b.rules.disclosure_delay_days).toBe(1);
-  // Theft is valued in each covered chain's USDC, one for one (D27).
-  expect(b.rules.listed_tokens).toEqual([expect.objectContaining({ chain_id: BASE, price: "1" }), expect.objectContaining({ chain_id: ARBITRUM, price: "1" })]);
-  // Every NEAR transaction went through NEAR's Ethereum-compatible chain, from the same wallet,
-  // encoded as NEP-518 has it: onboarding to the account itself, then the two posting prompts.
-  const nearTxs = (await walletSent(page))[NEAR_EVM]!;
-  expect(nearTxs).toHaveLength(3);
-  const hashed = (account: string) => `0x${keccak256(toHex(account)).slice(26)}`;
-  expect(nearTxs.map((t) => t.to?.toLowerCase())).toEqual([hashed(ACCOUNT), hashed(CONTRACT), hashed(USDC)]);
-  const call = parseAbi(["function functionCall(string receiver_id, string method_name, bytes args, uint64 gas, uint32 yoctoNear) payable"]);
-  const [, method, , nearGas, yocto] = decodeFunctionData({ abi: call, data: nearTxs[2]!.data as `0x${string}` }).args;
-  expect([method, nearGas, yocto, BigInt(nearTxs[2]!.value!)]).toEqual(["ft_transfer_call", 270n * 10n ** 12n, 1, 0n]);
-  await expect(post.getByRole("link", { name: "See your bounty" })).toHaveAttribute("href", `/bounties/${ACCOUNT}/${NAME}`);
-});
+    // 4. Post bounty: the rules read back, the risk panel beside the prompts (D5, D15), the exploit
+    // key from one wallet signature (asked twice to check it repeats) (D20), then post. NEAR
+    // signing is enabled once, for free, just before the first NEAR transaction.
+    const post = step(page, 4);
+    await expect(post).toContainText("Pays 10 USDC to the first Whitehat whose claim takes at least 1 USDC");
+    const risk = page.getByRole("complementary", { name: "What you're risking" });
+    await expect(risk).toBeVisible();
+    const key = exploitPublicKey(PROTOCOL_KEY, { protocol: ACCOUNT, name: NAME });
+    await post.getByRole("button", { name: "Sign with your wallet" }).click();
+    await expect(state(page, /Your exploit key/)).toHaveText("signed");
+    await post.getByRole("button", { name: "Enable NEAR signing" }).click();
+    await expect(state(page, /Enable NEAR signing/)).toHaveText("done");
+    await post.getByRole("button", { name: "Prepay the posting fee" }).click();
+    await post.getByRole("button", { name: "Post the bounty" }).click();
+    await expect(post).toContainText("Your bounty is live.", { timeout: 15_000 });
+
+    // On NEAR: posted by the 0x… account, with the exploit key from the signature in its rules.
+    const w = await currentWorld(page);
+    const b = w.bounties.find((x) => x.id.name === NAME)!;
+    expect(b.id.protocol).toBe(ACCOUNT);
+    expect(b.rules.exploit_public_key).toBe(key);
+    expect(b.rules.covered_contracts).toEqual([{ chain_id: BASE, address: VAULT_BASE }, { chain_id: ARBITRUM, address: VAULT_ARB }]);
+    expect(b.rules.bounty_amount).toBe("10000000");
+    expect(b.rules.minimum_theft).toBe("1000000");
+    expect(b.rules.disclosure_delay_days).toBe(1);
+    // Theft is valued in each covered chain's USDC, one for one (D27).
+    expect(b.rules.listed_tokens).toEqual([expect.objectContaining({ chain_id: BASE, price: "1" }), expect.objectContaining({ chain_id: ARBITRUM, price: "1" })]);
+    // Every NEAR transaction went through NEAR's Ethereum-compatible chain, from the same wallet,
+    // encoded as NEP-518 has it: onboarding to the account itself, then the two posting prompts.
+    const nearTxs = (await walletSent(page))[NEAR_EVM]!;
+    expect(nearTxs).toHaveLength(3);
+    const hashed = (account: string) => `0x${keccak256(toHex(account)).slice(26)}`;
+    expect(nearTxs.map((t) => t.to?.toLowerCase())).toEqual([hashed(ACCOUNT), hashed(CONTRACT), hashed(USDC)]);
+    const call = parseAbi(["function functionCall(string receiver_id, string method_name, bytes args, uint64 gas, uint32 yoctoNear) payable"]);
+    const [, method, , nearGas, yocto] = decodeFunctionData({ abi: call, data: nearTxs[2]!.data as `0x${string}` }).args;
+    expect([method, nearGas, yocto, BigInt(nearTxs[2]!.value!)]).toEqual(["ft_transfer_call", 270n * 10n ** 12n, 1, 0n]);
+    await expect(post.getByRole("link", { name: "See your bounty" })).toHaveAttribute("href", `/bounties/${ACCOUNT}/${NAME}`);
+  });
+}
 
 test("D14: each grant can be copied for a multisig", async ({ page }) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -285,5 +298,5 @@ test("D25: the name the pause-role address comes from is typed in plain words an
   await step(page, 1).getByLabel("Contract address").first().fill(VAULT_BASE);
   await step(page, 1).getByLabel("Bounty amount").fill("10");
   await step(page, 1).getByRole("button", { name: "Continue" }).click();
-  await connect(page, pauseRole.address(pauseRole.MAINNET_ROOT_PUBLIC_KEY, CONTRACT, { protocol: ACCOUNT, name: "lending-pool-v1" }));
+  await connect(page, { role: pauseRole.address(pauseRole.MAINNET_ROOT_PUBLIC_KEY, CONTRACT, { protocol: ACCOUNT, name: "lending-pool-v1" }) });
 });

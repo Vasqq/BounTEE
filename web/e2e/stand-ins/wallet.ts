@@ -61,18 +61,23 @@ export const addressOf = (walletKey: Uint8Array) => privateKeyToAccount(`0x${Buf
  * The wallets the stand-in can present as, each by the injected provider flags the real one sets
  * (D34): Rabby, Brave Wallet, Zerion and Trust set MetaMask's flag too, as the real ones do;
  * Zerion also injects `window.zerionWallet`, and Phantom `window.phantom.ethereum`. `rdns` is
- * the real wallet's EIP-6963 identifier, under which the stand-in can announce itself.
+ * the real wallet's EIP-6963 identifier, under which the stand-in can announce itself. `label`
+ * is the wallet's entry in RainbowKit's picker, for the wallets the picker lists.
  */
-type Presentation = { flags: readonly string[]; rdns: string; namespace?: string };
+type Presentation = { flags: readonly string[]; rdns: string; namespace?: string; label?: string };
 export const PERSONAS = {
-  MetaMask: { flags: ["isMetaMask"], rdns: "io.metamask" },
-  Rabby: { flags: ["isRabby", "isMetaMask"], rdns: "io.rabby" },
-  "Brave Wallet": { flags: ["isBraveWallet", "isMetaMask"], rdns: "com.brave.wallet" },
-  Zerion: { flags: ["isZerion", "isMetaMask"], rdns: "io.zerion.wallet", namespace: "zerionWallet" },
+  MetaMask: { flags: ["isMetaMask"], rdns: "io.metamask", label: "MetaMask" },
+  Rabby: { flags: ["isRabby", "isMetaMask"], rdns: "io.rabby", label: "Rabby Wallet" },
+  "Brave Wallet": { flags: ["isBraveWallet", "isMetaMask"], rdns: "com.brave.wallet", label: "Brave Wallet" },
+  Zerion: { flags: ["isZerion", "isMetaMask"], rdns: "io.zerion.wallet", namespace: "zerionWallet", label: "Zerion" },
   Phantom: { flags: ["isPhantom"], rdns: "app.phantom", namespace: "phantom.ethereum" },
   Trust: { flags: ["isTrust", "isMetaMask"], rdns: "com.trustwallet.app" },
 } as const satisfies Record<string, Presentation>;
 export type Persona = keyof typeof PERSONAS;
+/** The personas whose wallet the picker lists (D34), each picked by its `label`. */
+export type Listed = { [K in Persona]: (typeof PERSONAS)[K] extends { label: string } ? K : never }[Persona];
+/** A journey run once per listed wallet: the persona the stand-in presents as, and the test's title. */
+export type WalletRun = { as: Listed; title: string };
 
 type WalletOptions = { unstable?: boolean; rejectFirstSign?: boolean; network?: Network };
 
@@ -182,11 +187,11 @@ export async function wallet(page: Page, walletKey: Uint8Array, o: WalletOptions
 }
 
 /**
- * Picks `wallet` in RainbowKit's wallet picker, which a page's connect button has just opened
- * (D34): the page goes on once the wallet connects.
+ * Picks `as`'s entry, by its whole label, in RainbowKit's wallet picker, which a page's connect
+ * button has just opened (D34): the page goes on once the wallet connects.
  */
-export async function pickWallet(page: Page, wallet = "MetaMask") {
-  await page.getByRole("dialog").getByRole("button", { name: new RegExp(`^${wallet}`) }).click();
+export async function pickWallet(page: Page, as: Listed = "MetaMask") {
+  await page.getByRole("dialog").getByRole("button", { name: new RegExp(`^${PERSONAS[as].label}\\b`) }).click();
 }
 
 /** Each chain the page asked the stand-in wallet to switch to or add, in order, with what it said of the chain. */

@@ -266,7 +266,7 @@ test("D13: /post reloaded after a browser wallet connected restores it with no p
   await wallet(page, PROTOCOL_KEY, { as: "Rabby" });
   await posting.open(page);
   await posting.connect(page).click();
-  await pickWallet(page, "Rabby Wallet");
+  await pickWallet(page, "Rabby");
   await expect(funding(page)).toContainText(ACCOUNT);
   await page.reload();
   await expect(funding(page)).toContainText(ACCOUNT);
