@@ -3,7 +3,7 @@
 import type { Page } from "@playwright/test";
 
 /** Spec #89's pinned brand list, matched case-sensitively. */
-export const BRANDS = ["MetaMask", "Rabby", "Zerion", "Brave Wallet", "WalletConnect", "Reown", "Coinbase", "Phantom", "Rainbow", "Trust Wallet", "OKX", "Ledger Live"];
+const BRANDS = ["MetaMask", "Rabby", "Zerion", "Brave Wallet", "WalletConnect", "Reown", "Coinbase", "Phantom", "Rainbow", "Trust Wallet", "OKX", "Ledger Live"];
 
 /**
  * Every wallet brand the page names, with the text that names it: in its text, shown or not

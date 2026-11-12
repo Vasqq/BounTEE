@@ -25,13 +25,13 @@ const SIGNING_PAGES = ["/post", `${bounty}/exploit`];
 const ident = "[A-Za-z_$][\\w$]*";
 /** One entry of RainbowKit's chain metadata table, as Turbopack minifies it: a chain ID, maybe a name, an icon. */
 const chainEntry =
-  `${ident}:\\{chainId:[\\w.]+(?:,name:"[^"\\\\]*")?` +
+  `${ident}:\\{chainId:(?:0x[\\da-f]+|\\d+(?:e\\d+)?)(?:,name:"[^"\\\\]*")?` +
   `(?:,\\.\\.\\.${ident}|,iconBackground:"[^"\\\\]*",iconUrl:async\\(\\)=>\\(await ${ident}\\.A\\(\\d+\\)\\)\\.default)\\}`;
 /** RainbowKit's chain metadata table: an object literal made of those entries alone. */
 const CHAIN_METADATA = new RegExp(`\\{${chainEntry}(?:,${chainEntry})*\\}`, "g");
 
 /** `text` with RainbowKit's chain metadata table emptied, every other character kept. */
-export const withoutRainbowKitChainMetadata = (text: string) => text.replace(CHAIN_METADATA, "{}");
+const withoutRainbowKitChainMetadata = (text: string) => text.replace(CHAIN_METADATA, "{}");
 
 /** Every file under `dir`, at any depth. */
 export const filesUnder = (dir: string): string[] => readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? filesUnder(join(dir, f)) : [join(dir, f)]));
