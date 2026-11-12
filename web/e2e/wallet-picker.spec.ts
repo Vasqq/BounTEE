@@ -1,8 +1,9 @@
-// Seam W, ticket #92: the wallet picker offers exactly ADR-0022's wallets (D34), the signing
-// pages contact WalletConnect only once a wallet that needs it is picked (D36), and they prompt
-// no wallet before a click (D13). The stand-in wallet presents as each real wallet by its
-// provider flags, and can announce itself over EIP-6963; WalletConnect's hosts are blocked and
-// every request and WebSocket to them recorded.
+// Seam W, tickets #92 and #93: the wallet picker offers exactly ADR-0022's wallets and says
+// beneath its list why only those are shown (D34), the signing pages contact WalletConnect
+// only once a wallet that needs it is picked (D36), and they prompt no wallet before a click
+// (D13). The stand-in wallet presents as each real wallet by its provider flags, and can
+// announce itself over EIP-6963; WalletConnect's hosts are blocked and every request and
+// WebSocket to them recorded.
 //
 // What this seam misses: real extensions (two side by side, a real Rabby's dialogs) and a real
 // MetaMask Mobile QR connection, which needs WalletConnect's relay: the recorded testnet run.
