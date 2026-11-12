@@ -105,6 +105,8 @@ Beyond "Try it" above, the full run needs [cargo-near](https://github.com/near/c
 
 The command-line tool reads three environment variables, all optional: `BOUNTEE_CONTRACT` (the bounty contract, in place of `--contract`), `BOUNTEE_CREDENTIALS_DIR` (where account keys are, in place of `~/.near-credentials/<network>`) and `BOUNTEE_WALLET_KEY_FILE` (the Protocol's EVM key file, for `open-exploit`).
 
+To build or run the web app yourself (`pnpm --filter @bountee/web build`, or `dev`), it needs `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`: a WalletConnect project ID from [Reown's dashboard](https://dashboard.reown.com), kept in `web/.env.local`, which git ignores. A build fails without it, and the wallet picker needs it in `dev` too. The tests set their own.
+
 ## Check the mainnet demo: no keys, no funds
 
 These need the network.

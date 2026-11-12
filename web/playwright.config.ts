@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { APPS, nearEndpoints, PORTS, SITES } from "./e2e/stand-ins/sites.ts";
+import { APPS, DUMMY_PROJECT_ID, nearEndpoints, PORTS, SITES } from "./e2e/stand-ins/sites.ts";
 
 const standIn = Number(process.env.STAND_IN_PORT ?? 3199);
 const chains = `http://localhost:${standIn}`;
@@ -24,6 +24,8 @@ function appServer(on: number, distDir: string, chain: { covered: number[]; near
     timeout: 180_000,
     env: {
       NEXT_DIST_DIR: distDir,
+      // Set explicitly: see DUMMY_PROJECT_ID.
+      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: DUMMY_PROJECT_ID,
       ...nearEndpoints(chains),
       DEMO_BOUNTY: "0x9f2c3e1a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e/mainnet-demo",
       // Each spec puts the chains in a new state, so the landing page's server read isn't reused.

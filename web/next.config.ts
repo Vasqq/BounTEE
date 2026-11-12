@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
 
 // The build's network (D30, ADR-0021): `mainnet` or `testnet`, mainnet when unset. Anything
 // else fails the build, so a mistyped setting can never put a visitor on the wrong network.
@@ -24,4 +25,16 @@ const config: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
 };
 
-export default config;
+// The WalletConnect project ID (D36, ADR-0022): the wallet picker needs it for MetaMask Mobile's
+// QR code and throws without it, server rendering included, so a build without it fails here,
+// naming it, rather than ship a picker that crashes. Only a production build checks: `next start`
+// serves what was already built with it, and `next dev` doesn't check (the README says it needs
+// the variable too).
+export default function nextConfig(phase: string): NextConfig {
+  if (phase === PHASE_PRODUCTION_BUILD && !process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID) {
+    throw new Error(
+      "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not set: every build needs a WalletConnect project ID (Reown's dashboard), e.g. in web/.env.local.",
+    );
+  }
+  return config;
+}
