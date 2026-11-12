@@ -19,9 +19,14 @@ const LISTED = ["MetaMask", "Rabby Wallet", "Zerion"];
 /** What a wallet asks its user to approve: none may come before a click (D13). */
 const PROMPTS = /^(eth_requestAccounts|wallet_requestPermissions|personal_sign|eth_sign.*|eth_sendTransaction|wallet_switchEthereumChain|wallet_addEthereumChain)$/;
 
-/** The two signing pages, each opened at its connect button. */
+/**
+ * The two signing pages, each opened at its connect button, and what each may ask of a wallet
+ * before a click (D13): /post reconnects a browser wallet with requests that prompt nothing,
+ * and the open-exploit page asks nothing at all.
+ */
 const PAGES = {
   posting: {
+    beforeClick: "nothing that prompts",
     async open(page: Page) {
       await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
       await page.goto("/post#3");
@@ -29,6 +34,7 @@ const PAGES = {
     connect: (page: Page) => page.getByRole("region", { name: /^3\. / }).getByRole("button", { name: "Connect MetaMask" }),
   },
   "open-exploit": {
+    beforeClick: "nothing",
     async open(page: Page) {
       await setWorld(page, paidAndReleased());
       await page.goto(`/bounties/${ID.protocol}/${ID.name}/exploit`);
@@ -64,6 +70,16 @@ async function blockWalletConnect(page: Page): Promise<string[]> {
     return ws.close();
   });
   return tried;
+}
+
+/**
+ * Waits until anything the page would do on its own has had time to happen: the network goes
+ * quiet, then a further second for anything started late (a timer, a retry), before a check
+ * that something did NOT happen.
+ */
+async function settled(page: Page) {
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1_000);
 }
 
 /** The wallet entries in the open picker: its buttons with a wallet icon. */
@@ -111,7 +127,7 @@ test("D34: with a Zerion injected, picking Zerion connects its account", async (
 
 // Each of these sets MetaMask's flag beside its own, so MetaMask's entry must not take it: the
 // entry offers MetaMask Mobile instead, and picking it reaches for WalletConnect, not this wallet.
-for (const as of ["Zerion", "Rabby", "Trust"] as const satisfies Persona[]) {
+for (const as of ["Zerion", "Rabby", "Brave Wallet", "Trust"] as const satisfies Persona[]) {
   test(`D34: with a ${as} injected, picking MetaMask sends ${as} no request`, async ({ page }) => {
     const tried = await blockWalletConnect(page);
     await wallet(page, PROTOCOL_KEY, { as });
@@ -129,8 +145,10 @@ for (const as of ["Zerion", "Rabby", "Trust"] as const satisfies Persona[]) {
 
 /**
  * What a past WalletConnect connection leaves in local storage: wagmi's store naming the
- * WalletConnect connector as the current connection, RainbowKit's recent wallet, and
- * WalletConnect's own session keys (RainbowKit gives its client the `clientTwo` prefix).
+ * WalletConnect connector (wagmi's id for it, which RainbowKit's MetaMask Mobile entry keeps)
+ * as the current connection, RainbowKit's recent wallet, and WalletConnect's own session keys
+ * (RainbowKit gives its client the `clientTwo` prefix; WalletConnect moves them into IndexedDB
+ * when it starts).
  */
 async function seedPastWalletConnectConnection(page: Page) {
   const uid = "f1e2d3c4b5a6";
@@ -143,11 +161,23 @@ async function seedPastWalletConnectConnection(page: Page) {
     version: 2,
   };
   const topic = "a".repeat(64);
-  const session = { topic, pairingTopic: "b".repeat(64), expiry: 4_102_444_800, acknowledged: true, namespaces: { eip155: { accounts: [`eip155:8453:${addressOf(PROTOCOL_KEY)}`], methods: ["personal_sign", "eth_sendTransaction"], events: ["accountsChanged", "chainChanged"] } } };
+  const namespaces = { eip155: { chains: ["eip155:8453"], accounts: [`eip155:8453:${addressOf(PROTOCOL_KEY)}`], methods: ["personal_sign", "eth_sendTransaction"], events: ["accountsChanged", "chainChanged"] } };
+  const session = {
+    topic,
+    pairingTopic: "b".repeat(64),
+    relay: { protocol: "irn" },
+    expiry: 4_102_444_800,
+    acknowledged: true,
+    controller: "e".repeat(64),
+    namespaces,
+    requiredNamespaces: {},
+    optionalNamespaces: { eip155: { chains: ["eip155:8453"], methods: namespaces.eip155.methods, events: namespaces.eip155.events } },
+    self: { publicKey: "f".repeat(64), metadata: { name: "BounTEE", description: "", url: "http://localhost", icons: [] } },
+    peer: { publicKey: "e".repeat(64), metadata: { name: "MetaMask Wallet", description: "", url: "https://metamask.io", icons: [] } },
+  };
   const seed: Record<string, unknown> = {
     "wagmi.store": store,
     "wagmi.recentConnectorId": "walletConnect",
-    "wagmi.walletConnect.connected": true,
     "rk-recent": ["metaMask"],
   };
   for (const prefix of ["", ":clientTwo"]) {
@@ -155,7 +185,7 @@ async function seedPastWalletConnectConnection(page: Page) {
     seed[`wc@2:core:0.3${prefix}//keychain`] = { [topic]: "c".repeat(64) };
     seed[`wc@2:core:0.3${prefix}//subscription`] = [{ id: "d".repeat(64), topic, relay: { protocol: "irn" } }];
     seed[`wc@2:core:0.3${prefix}//pairing`] = [{ topic: "b".repeat(64), expiry: 4_102_444_800, relay: { protocol: "irn" }, active: true }];
-    seed[`wc@2:universal_provider:${prefix.slice(1)}/namespaces`] = session.namespaces;
+    seed[`wc@2:universal_provider:${prefix.slice(1)}/namespaces`] = namespaces;
     seed[`wc@2:ethereum_provider:${prefix.slice(1)}/chainId`] = 8453;
   }
   await page.addInitScript((entries: Record<string, unknown>) => {
@@ -171,7 +201,7 @@ for (const [name, at] of Object.entries(PAGES)) {
       await at.open(page);
       await at.connect(page).click();
       await expect(entries(page)).toHaveText(LISTED);
-      await page.waitForLoadState("networkidle");
+      await settled(page);
       expect(tried).toEqual([]);
     });
   }
@@ -182,10 +212,10 @@ test("D36: /post loaded after a past WalletConnect connection reaches WalletConn
   await seedPastWalletConnectConnection(page);
   await posting.open(page);
   await expect(posting.connect(page)).toBeVisible();
-  await page.waitForLoadState("networkidle");
+  await settled(page);
   await posting.connect(page).click();
   await expect(entries(page).first()).toBeVisible();
-  await page.waitForLoadState("networkidle");
+  await settled(page);
   expect(tried).toEqual([]);
   // With no wallet injected, MetaMask's entry is MetaMask Mobile: picking it reaches for the relay.
   await pickWallet(page, "MetaMask");
@@ -204,15 +234,13 @@ for (const [name, at] of Object.entries(PAGES)) {
 
 for (const [name, at] of Object.entries(PAGES)) {
   for (const as of ["MetaMask", "Rabby", "Zerion", "Brave Wallet"] as const satisfies Persona[]) {
-    test(`D13: the ${name} page prompts a ${as} for nothing before a click`, async ({ page }) => {
+    test(`D13: the ${name} page asks a ${as} for ${at.beforeClick} before a click`, async ({ page }) => {
       await wallet(page, PROTOCOL_KEY, { as });
       await at.open(page);
       await expect(at.connect(page)).toBeEnabled();
-      await page.waitForLoadState("networkidle");
+      await settled(page);
       const calls = await walletCalls(page);
-      expect(calls.filter((m) => PROMPTS.test(m))).toEqual([]);
-      // The open-exploit page asks nothing at all of a wallet before a click.
-      if (name === "open-exploit") expect(calls).toEqual([]);
+      expect(at.beforeClick === "nothing" ? calls : calls.filter((m) => PROMPTS.test(m))).toEqual([]);
     });
   }
 }
