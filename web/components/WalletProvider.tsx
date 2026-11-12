@@ -33,16 +33,19 @@ export function WalletProvider({ children, reconnect }: { children: ReactNode; r
 }
 
 /** RainbowKit's dark theme on DESIGN.md's tokens: `surface` ground, `ink` text and accent, `line` borders, the body font, `rounded.sm`. */
-const base = darkTheme({ accentColor: "var(--ink)", accentColorForeground: "var(--ground)", borderRadius: "small" });
-const PICKER_THEME: typeof base = {
-  ...base,
+const darkBase = darkTheme({ accentColor: "var(--ink)", accentColorForeground: "var(--ground)", borderRadius: "small" });
+const PICKER_THEME: typeof darkBase = {
+  ...darkBase,
   colors: {
-    ...base.colors,
+    ...darkBase.colors,
     actionButtonBorder: "var(--line)",
     actionButtonBorderMobile: "var(--line)",
     actionButtonSecondaryBackground: "var(--ground-2)",
     closeButton: "var(--ink-2)",
     closeButtonBackground: "var(--ground-2)",
+    // The "get a wallet" screens' cards, flat rather than RainbowKit's gradients (DESIGN.md, Do's and Don'ts).
+    downloadBottomCardBackground: "var(--ground-2)",
+    downloadTopCardBackground: "var(--ground-2)",
     generalBorder: "var(--line)",
     generalBorderDim: "var(--line)",
     menuItemBackground: "var(--ground-2)",

@@ -1,12 +1,9 @@
-// Seam W, ticket #93: the wallet picker says why only some wallets are listed (D34), and the
-// two signing pages, the posting flow and the open-exploit page, name no wallet brand outside
-// the open picker (D37): they say "your wallet". The public pages' side of D37 is in
-// wallet-brands.spec.ts.
+// Seam W, ticket #93: the two signing pages, the posting flow and the open-exploit page, name
+// no wallet brand outside the open picker (D37): they say "your wallet". The public pages' side
+// of D37 is in wallet-brands.spec.ts; the picker's disclaimer (D34) in wallet-picker.spec.ts.
 //
 // What this seam misses: how the picker looks (its theme on DESIGN.md's tokens), which the
 // front-end check-in's screenshots show, and real wallets' own windows, which name themselves.
-// The phone project may show RainbowKit's mobile list, so the picker test runs in the desktop
-// project only.
 import { expect, test, type Page } from "@playwright/test";
 import { emptyWorld, fundNear, post, postingWorld, setWorld, VAULT_ARB, VAULT_BASE, win, type BountyId, type World } from "./stand-ins/world.ts";
 import { addressOf, exploitPublicKey, metamask, OTHER_KEY, pickWallet, PROTOCOL_KEY, release } from "./stand-ins/wallet.ts";
@@ -14,7 +11,7 @@ import { addressOf, exploitPublicKey, metamask, OTHER_KEY, pickWallet, PROTOCOL_
 const ACCOUNT = addressOf(PROTOCOL_KEY).toLowerCase();
 const ID: BountyId = { protocol: "0x9f2c3e1a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e", name: "vault-v2" };
 const NEAR = 10n ** 24n;
-const DISCLAIMER = "Only wallets that can sign on NEAR are shown.";
+const EXPLOIT_PAGE = `/bounties/${ID.protocol}/${ID.name}/exploit`;
 
 /** Spec #89's pinned brand list, matched case-sensitively. Its twins are in wallet-brands.spec.ts and wallet-brands.testnet.spec.ts: keep them in step. */
 const BRANDS = ["MetaMask", "Rabby", "Zerion", "Brave Wallet", "WalletConnect", "Reown", "Coinbase", "Phantom", "Rainbow", "Trust Wallet", "OKX", "Ledger Live"];
@@ -52,8 +49,6 @@ const item = (page: Page, title: RegExp) => page.getByRole("listitem").filter({ 
 const state = (page: Page, title: RegExp) => item(page, title).getByRole("heading").locator(".item-state");
 const task = (page: Page, chain: RegExp, row: RegExp) => item(page, chain).locator(".task").filter({ has: page.locator(".task-label", { hasText: row }) });
 const taskState = (page: Page, chain: RegExp, row: RegExp) => task(page, chain, row).locator(".item-state");
-/** The wallet entries in the open picker: its buttons with a wallet icon, not the compact modal's Info button. */
-const entries = (page: Page) => page.getByRole("dialog").getByRole("button").filter({ has: page.getByRole("img") }).filter({ hasNot: page.getByRole("img", { name: "Info", exact: true }) });
 
 /** Step 1's rules, as posting.spec.ts fills them, then on to step 2. */
 async function fillRules(page: Page) {
@@ -83,40 +78,7 @@ function paidAndReleased(): World {
   return w;
 }
 
-/** The two signing pages, each opened at the button that opens the picker. */
-const PAGES = {
-  posting: {
-    async open(page: Page) {
-      await setWorld(page, postingWorld(ACCOUNT, { onboarded: true }));
-      await page.goto("/post#3");
-    },
-    connect: (page: Page) => step(page, 3).getByRole("button", { name: "Connect wallet" }),
-  },
-  "open-exploit": {
-    async open(page: Page) {
-      await setWorld(page, paidAndReleased());
-      await page.goto(`/bounties/${ID.protocol}/${ID.name}/exploit`);
-    },
-    connect: (page: Page) => page.getByRole("button", { name: "Open with your wallet" }),
-  },
-} as const;
-
-for (const [name, at] of Object.entries(PAGES)) {
-  test(`D34: on the ${name} page, the open picker says beneath its list that only wallets that can sign on NEAR are shown`, async ({ page }) => {
-    await at.open(page);
-    await at.connect(page).click();
-    const picker = page.getByRole("dialog");
-    await expect(entries(page)).toHaveText(["MetaMask", "Rabby Wallet", "Zerion"]);
-    await expect(picker.getByText(DISCLAIMER, { exact: true })).toBeVisible();
-    // Measured once the picker's opening animation has finished, so both boxes are where they stay.
-    await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
-    const last = (await entries(page).last().boundingBox())!;
-    const line = (await picker.getByText(DISCLAIMER, { exact: true }).boundingBox())!;
-    expect(line.y).toBeGreaterThanOrEqual(last.y + last.height);
-  });
-}
-
-test("D37: the posting flow names no wallet brand outside the picker, through every step and a rejected signature",async ({ page }) => {
+test("D37: the posting flow names no wallet brand outside the picker, through every step and a rejected signature", async ({ page }) => {
   test.setTimeout(120_000);
   await metamask(page, PROTOCOL_KEY, { rejectFirstSign: true });
   await setWorld(page, postingWorld(ACCOUNT, { near: "0", usdc: "10000000" }));
@@ -182,7 +144,7 @@ test("D37, D20: the posting flow's key-file fallback names no wallet brand", asy
 });
 
 test("D37: the open-exploit page names no wallet brand, before the payout, before the release, and through opening it", async ({ page }) => {
-  const open = () => page.goto(`/bounties/${ID.protocol}/${ID.name}/exploit`);
+  const open = () => page.goto(EXPLOIT_PAGE);
   const posted = emptyWorld();
   post(posted, ID);
   await setWorld(page, posted);
@@ -217,7 +179,7 @@ test("D37: the open-exploit page names no wallet brand, before the payout, befor
 test("D37, D20: the open-exploit page's wrong-key and key-file messages name no wallet brand", async ({ page }) => {
   await metamask(page, OTHER_KEY, { unstable: true });
   await setWorld(page, paidAndReleased());
-  await page.goto(`/bounties/${ID.protocol}/${ID.name}/exploit`);
+  await page.goto(EXPLOIT_PAGE);
   await page.getByRole("button", { name: "Open with your wallet" }).click();
   await pickWallet(page);
   await expect(page.getByLabel("Exploit key file")).toBeVisible();

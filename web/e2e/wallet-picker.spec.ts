@@ -110,6 +110,19 @@ for (const [name, at] of Object.entries(PAGES)) {
     await expect(entries(page)).toHaveText(LISTED);
     await expect(page.getByRole("dialog")).not.toContainText("Phantom");
   });
+
+  test(`D34: on the ${name} page, the open picker says beneath its list that only wallets that can sign on NEAR are shown`, async ({ page }) => {
+    await blockWalletConnect(page);
+    await at.open(page);
+    await at.connect(page).click();
+    const line = page.getByRole("dialog").getByText("Only wallets that can sign on NEAR are shown.", { exact: true });
+    await expect(entries(page)).toHaveText(LISTED);
+    await expect(line).toBeVisible();
+    // Measured once the picker's opening animation has finished, so both boxes are where they stay.
+    await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+    const last = (await entries(page).last().boundingBox())!;
+    expect((await line.boundingBox())!.y).toBeGreaterThanOrEqual(last.y + last.height);
+  });
 }
 
 const posting = PAGES.posting;
