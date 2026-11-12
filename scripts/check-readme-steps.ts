@@ -28,6 +28,23 @@
 //   Endpoints, each overridable: NEAR_RPC, NEAR_ARCHIVAL_RPC, TX_API, EVM_RPC_8453 (Base),
 //   EVM_RPC_42161 (Arbitrum One).
 //
+// Parity with the landing page (D34). The README's Mainnet proof section (a `## Mainnet proof`
+// heading, to the next heading of its level or above) holds a step table: the first table there
+// whose first column is headed "Step". Each row is one step: its first cell the step's name, its
+// links that step's transactions.
+//   - names: the rows' names, in order, must be exactly the landing page's eight (`STEPS` in
+//     web/components/landing/Landing.tsx, read from the source as text); a step with no row, an
+//     extra row, a renamed or reordered step fails. Checked offline too.
+//   - transactions: each row's links (compared without query or fragment) must be exactly the
+//     transactions the landing page's demo reader (`readDemo` in web/lib/demo.ts, imported here)
+//     returns for that step of the mainnet demo bounty. A row holding a placeholder isn't
+//     compared and leaves the check pending. Online only; the reader takes its endpoints and demo
+//     bounty from the same environment as the web app's server (web/lib/config.ts: NEAR_RPC,
+//     NEAR_ARCHIVAL_RPC, TX_API, OUTLAYER_API, EVM_RPC_<chain>, DEMO_BOUNTY, BOUNTY_CONTRACT),
+//     always as the mainnet build: NEXT_PUBLIC_NETWORK is unset.
+//   A README with no step table is reported pending, and under --strict fails: the final README
+//   must hold one.
+//
 // Exit status: 0 when every step run and every link checked passed (and, under --strict, nothing
 // is pending), 1 otherwise, 2 for bad arguments.
 import { spawnSync } from "node:child_process";
@@ -182,12 +199,93 @@ async function checkLink(target: string, base: string): Promise<Link> {
   return existsSync(resolve(base, path.replace(/^\/+/, ""))) ? { target, status: "ok" } : { target, status: "FAIL", reason: "no such file in the repo" };
 }
 
+type Parity = { names: Status; transactions: Status; problems: string[] };
+const NO_TABLE = "no step table in the Mainnet proof section";
+
+/** The Mainnet proof section's step table, one entry per row; null when there's none. */
+function stepTable(markdown: string): { name: string; links: string[]; pending: boolean }[] | null {
+  const lines = markdown.split("\n");
+  const start = lines.findIndex((l) => /^#{1,6}\s+Mainnet proof\b/i.test(l));
+  if (start < 0) return null;
+  const level = lines[start]!.match(/^#+/)![0].length;
+  const end = lines.findIndex((l, i) => i > start && new RegExp(`^#{1,${level}}\\s`).test(l));
+  const section = lines.slice(start + 1, end < 0 ? undefined : end);
+  const isRow = (l: string | undefined) => !!l?.trim().startsWith("|");
+  const cells = (row: string) => row.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+  const plain = (c: string) => c.replace(/[*_`]/g, "").trim();
+  for (let i = 0; i + 1 < section.length; i++) {
+    if (!isRow(section[i]) || isRow(section[i - 1])) continue; // a table's header row only
+    if (plain(cells(section[i]!)[0] ?? "") !== "Step" || !/^\s*\|?\s*:?-+/.test(section[i + 1]!)) continue;
+    const rows = [];
+    for (let j = i + 2; isRow(section[j]); j++) {
+      const [first = "", ...rest] = cells(section[j]!);
+      const links = [...rest.join("|").matchAll(/\]\(\s*<?([^)\s>]+)/g)].map((m) => m[1]!.replace(/[?#].*$/, ""));
+      rows.push({ name: plain(first), links, pending: hasPlaceholder(section[j]!) });
+    }
+    return rows;
+  }
+  return null;
+}
+
+/** The landing page's eight step names, read from its source. */
+function landingSteps(): string[] {
+  const source = readFileSync(`${repo}web/components/landing/Landing.tsx`, "utf8");
+  const list = source.match(/const STEPS\s*=\s*(\[[^\]]*\])/)?.[1];
+  if (!list) throw new Error("no `const STEPS = [...]` in web/components/landing/Landing.tsx");
+  return JSON.parse(list) as string[];
+}
+
+/** The README's step table against the landing page's names and its demo reader's transactions (D34). */
+async function parity(markdown: string): Promise<Parity> {
+  const table = stepTable(markdown);
+  if (!table) {
+    const status: Status = flag("--strict") ? "FAIL" : "pending";
+    return { names: status, transactions: status, problems: [NO_TABLE] };
+  }
+  const steps = landingSteps();
+  const problems: string[] = [];
+  for (let i = 0; i < Math.max(steps.length, table.length); i++) {
+    const [mine, page] = [table[i]?.name, steps[i]];
+    if (mine === page) continue;
+    if (mine === undefined) problems.push(`no row for step ${i + 1}, "${page}"`);
+    else if (page === undefined) problems.push(`row ${i + 1}, "${mine}", is not one of the landing page's ${steps.length} steps`);
+    else problems.push(`row ${i + 1} is "${mine}" where the landing page has "${page}"`);
+  }
+  const names: Status = problems.length ? "FAIL" : "ok";
+  if (flag("--offline")) return { names, transactions: "skipped", problems };
+
+  delete process.env.NEXT_PUBLIC_NETWORK; // the README's proof is mainnet's: read it as the mainnet build does
+  const { readDemo } = (await import(`${repo}web/lib/demo.ts`)) as typeof import("../web/lib/demo.ts");
+  const demo = await readDemo();
+  if (!demo) return { names, transactions: "FAIL", problems: [...problems, "the landing page's demo reader found no demo bounty"] };
+  let failed = false;
+  let pending = false;
+  for (const row of table) {
+    const i = steps.indexOf(row.name);
+    if (i < 0) continue; // already a names failure
+    if (row.pending) {
+      pending = true;
+      continue;
+    }
+    const theirs = (demo.story.steps[i] ?? []).filter((t) => t.hash).map((t) => t.href.replace(/[?#].*$/, ""));
+    for (const link of row.links.filter((l) => !theirs.includes(l))) {
+      failed = true;
+      problems.push(`${row.name} cites ${link}, which the landing page's demo reader doesn't return for that step`);
+    }
+    for (const link of theirs.filter((l) => !row.links.includes(l))) {
+      failed = true;
+      problems.push(`${row.name} doesn't cite ${link}, which the landing page's demo reader returns for that step`);
+    }
+  }
+  return { names, transactions: failed ? "FAIL" : pending ? "pending" : "ok", problems };
+}
+
 const squash = (s: string) => s.replace(/[ \t]+/g, " ");
 const bountee = `bountee() { node ${JSON.stringify(`${repo}cli/src/main.ts`)} "$@"; }`;
 
 const markdown = readFileSync(readme, "utf8");
 const waiting = placeholders(markdown);
-const linkResults = await Promise.all(links(markdown).map((t) => checkLink(t, dirname(resolve(readme)))));
+const [linkResults, parityResult] = await Promise.all([Promise.all(links(markdown).map((t) => checkLink(t, dirname(resolve(readme))))), parity(markdown)]);
 
 const results: { command: string; status: Status; missing?: string[]; output?: string }[] = [];
 for (const step of steps(markdown)) {
@@ -209,6 +307,9 @@ for (const step of steps(markdown)) {
 const failed =
   results.some((r) => r.status === "FAIL" || (r.status === "pending" && flag("--strict"))) ||
   linkResults.some((l) => l.status === "FAIL") ||
+  parityResult.names === "FAIL" ||
+  parityResult.transactions === "FAIL" ||
+  ([parityResult.names, parityResult.transactions].includes("pending") && flag("--strict")) ||
   (waiting.length > 0 && flag("--strict"));
 if (flag("--json")) {
   console.log(
@@ -216,6 +317,7 @@ if (flag("--json")) {
       steps: results.map(({ command, status, missing }) => (missing ? { command, status, missing } : { command, status })),
       links: linkResults.map((l) => (l.status === "skipped" ? { target: l.target, status: l.status } : l)),
       placeholders: waiting,
+      parity: parityResult,
     }),
   );
 } else {
@@ -228,6 +330,13 @@ if (flag("--json")) {
   }
   for (const l of linkResults) console.log(`${l.status.padEnd(8)} link ${l.target}${l.status === "FAIL" ? `: ${l.reason}` : ""}`);
   for (const p of waiting) console.log(`pending  placeholder line ${p.line}: ${p.what}`);
+  if (parityResult.problems[0] === NO_TABLE) {
+    console.log(`${parityResult.names.padEnd(8)} parity: ${NO_TABLE}`);
+  } else {
+    console.log(`${parityResult.names.padEnd(8)} parity names`);
+    console.log(`${parityResult.transactions.padEnd(8)} parity transactions${flag("--offline") ? " (--offline)" : ""}`);
+    for (const p of parityResult.problems) console.log(`         ${p}`);
+  }
   const count = (s: Status) => results.filter((r) => r.status === s).length;
   const linkCount = (s: Status) => linkResults.filter((l) => l.status === s).length;
   console.log(`\nsteps: ${count("ok")} ok, ${count("FAIL")} failed, ${count("pending")} pending, ${count("skipped")} skipped (online)`);
