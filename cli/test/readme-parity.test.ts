@@ -14,13 +14,12 @@
 //       reader doesn't return for that step (another step's, or none at all), passing; a step
 //       row missing one of the reader's transactions, passing; the right table failing.
 //       Misses: whether the real mainnet chains still answer in the shapes the stand-in copies
-//       (the online run against mainnet is the check for that); whether the page's browser
-//       script (components/landing/runtime.js) names the same steps as its component, since the
-//       names are read from the component only (drafted as a finding on #82).
+//       (the online run against mainnet is the check for that).
 //
 //   T (sandboxed) — the same checker inside the network-denying sandbox (cli/test/offline.ts).
 //       Catches: a README with no step table in its Mainnet proof section reported pending, and
-//       failed under --strict, rather than passing silently; the names checked with no network.
+//       failed under --strict, rather than passing silently; the names checked with no network;
+//       the page's two copies of its step names (its component and its browser script) disagreeing.
 //       Misses: the transactions, which need the chains (above).
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -89,6 +88,23 @@ describe("offline (network denied)", () => {
     expect(renamed.code).toBe(1);
     expect(renamed.stdout).toMatch(/FAIL\s+parity names/);
   });
+});
+
+test("D34: the landing page's two step lists disagreeing fails, whatever the README says", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bountee-steps-"));
+  const list = (names: string[], q: string) => `const STEPS = [${names.map((n) => q + n + q).join(", ")}];\n`;
+  writeFileSync(join(dir, "Landing.tsx"), list(NAMES, '"'));
+  writeFileSync(join(dir, "runtime.js"), list(NAMES, "'"));
+  writeFileSync(join(dir, "renamed.js"), list(NAMES.map((n) => (n === "Paid" ? "Paid out" : n)), "'"));
+  const run = (second: string) =>
+    spawnSync(process.execPath, [CHECKER, "--offline", "--readme", readmeWith(proof(NAMES.map((n) => [n, []])))], {
+      encoding: "utf8",
+      env: { ...process.env, LANDING_STEP_SOURCES: `${join(dir, "Landing.tsx")}:${join(dir, second)}` },
+    });
+  expect(run("runtime.js").status, run("runtime.js").stdout).toBe(0);
+  const bad = run("renamed.js");
+  expect(bad.status).not.toBe(0);
+  expect(bad.stdout + bad.stderr).toMatch(/step names differ/);
 });
 
 describe("online, against the stand-in chains", () => {

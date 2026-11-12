@@ -227,12 +227,22 @@ function stepTable(markdown: string): { name: string; links: string[]; pending: 
   return null;
 }
 
-/** The landing page's eight step names, read from its source. */
+/**
+ * The landing page's eight step names, read from its source. The page keeps them twice: the
+ * component's list (the "All eight steps' transactions" list) and its browser script's (the
+ * panel headings and the dock). Both are read, and they must agree, so a rename in either one
+ * alone can't pass. LANDING_STEP_SOURCES (colon-separated paths) replaces the two for tests.
+ */
 function landingSteps(): string[] {
-  const source = readFileSync(`${repo}web/components/landing/Landing.tsx`, "utf8");
-  const list = source.match(/const STEPS\s*=\s*(\[[^\]]*\])/)?.[1];
-  if (!list) throw new Error("no `const STEPS = [...]` in web/components/landing/Landing.tsx");
-  return JSON.parse(list) as string[];
+  const sources = process.env.LANDING_STEP_SOURCES?.split(":") ?? [`${repo}web/components/landing/Landing.tsx`, `${repo}web/components/landing/runtime.js`];
+  const lists = sources.map((path) => {
+    const list = readFileSync(path, "utf8").match(/const STEPS\s*=\s*(\[[^\]]*\])/)?.[1];
+    if (!list) throw new Error(`no \`const STEPS = [...]\` in ${path}`);
+    return JSON.parse(list.replace(/'/g, '"')) as string[];
+  });
+  const differs = lists.findIndex((l) => l.join("\n") !== lists[0]!.join("\n"));
+  if (differs > 0) throw new Error(`the landing page's step names differ: ${sources[0]} has ${lists[0]!.join(", ")}; ${sources[differs]} has ${lists[differs]!.join(", ")}`);
+  return lists[0]!;
 }
 
 /** The README's step table against the landing page's names and its demo reader's transactions (D34). */
