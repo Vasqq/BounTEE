@@ -18,6 +18,12 @@ export const utcMinute = (ns: string) => `${new Date(Number(BigInt(ns) / 1_000_0
 /** The first 6 characters, an ellipsis, the last 4 (DESIGN.md, Chips). */
 export const shortHash = (hash: string) => (hash.length > 12 ? `${hash.slice(0, 6)}…${hash.slice(-4)}` : hash);
 
+/**
+ * A NEAR account as a chip shows it: an implicit account is 64 hex characters, a hash in all
+ * but name, so it is shortened like one; a named account reads as itself.
+ */
+export const shortAccount = (account: string) => (/^[0-9a-f]{64}$/.test(account) ? shortHash(account) : account);
+
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** A list as the copy writes it: "NEAR, Base and Arbitrum One". */

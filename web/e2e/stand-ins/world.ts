@@ -294,9 +294,10 @@ export function win(
   w: World,
   id: BountyId,
   claimId: number,
-  o: { landed?: number[]; verified?: number[] } = {},
+  o: { landed?: number[]; verified?: number[]; whitehat?: string } = {},
 ) {
-  judge(w, id, claimId, "PAYS");
+  const whitehat = o.whitehat ?? "whitehat.near";
+  judge(w, id, claimId, "PAYS", whitehat);
   const b = w.bounties.find((x) => x.id.name === id.name && x.id.protocol === id.protocol)!;
   const signing = ++signings;
   b.signed_pauses = b.rules.covered_contracts.map((c: any) => {
@@ -314,7 +315,7 @@ export function win(
       {
         executor: w.config.usdc,
         predecessor: w.contract,
-        logs: [`EVENT_JSON:${JSON.stringify({ standard: "nep141", version: "1.0.0", event: "ft_transfer", data: [{ old_owner_id: w.contract, new_owner_id: "whitehat.near", amount: b.rules.bounty_amount }] })}`],
+        logs: [`EVENT_JSON:${JSON.stringify({ standard: "nep141", version: "1.0.0", event: "ft_transfer", data: [{ old_owner_id: w.contract, new_owner_id: whitehat, amount: b.rules.bounty_amount }] })}`],
         ok: true,
       },
     ],

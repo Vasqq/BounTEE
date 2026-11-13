@@ -143,6 +143,22 @@ test("D28: a paid bounty names the chain and block its winning claim was proven 
   await expect(won.getByRole("link", { name: /…/ }).first()).toHaveAttribute("href", /nearblocks\.io\/txns\//);
 });
 
+test("D28: a winner paid to an implicit account is shown shortened, like any hash, inside its column", async ({ page }) => {
+  const implicit = "d394d052bf52d60330c55853bd508fe7d6159243969668f9fdfbf101f6aea6b8";
+  const w = emptyWorld();
+  post(w, ID);
+  win(w, ID, 0, { landed: [BASE, ARBITRUM], verified: [BASE, ARBITRUM], whitehat: implicit });
+  await setWorld(page, w);
+  await open(page);
+  const won = page.getByRole("region", { name: "Winning claim" });
+  const to = won.getByRole("link", { name: "d394d0…a6b8" });
+  await expect(to).toHaveAttribute("title", implicit);
+  await expect(to).toHaveAttribute("href", new RegExp(`/address/${implicit}$`));
+  // The account stays inside its own column: it doesn't run under the proof chain beside it.
+  const fits = await to.locator("xpath=ancestor::dd[1]").evaluate((dd) => dd.scrollWidth <= dd.clientWidth);
+  expect(fits).toBe(true);
+});
+
 test("R7.7, R15.6: each block shows only where it applies, read from the chain", async ({ page }) => {
   const w = emptyWorld();
   post(w, ID);
