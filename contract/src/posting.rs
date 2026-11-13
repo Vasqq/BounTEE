@@ -131,7 +131,7 @@ impl Contract {
             None,
             &sender_id,
             fees::JOB_DEPOSIT,
-            || Self::gas_left(gas::ON_POSTING_CHECKED.saturating_add(gas::TAIL)),
+            gas::REQUEST_JOB,
         );
         job.then(
             Self::ext(env::current_account_id())

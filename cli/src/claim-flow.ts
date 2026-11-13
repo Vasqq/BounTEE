@@ -12,7 +12,7 @@
 //   as is a payout left waiting (`retry_payout`) or a claim with no verdict (`retry_claim`):
 //   each as the command the Whitehat runs.
 import { readFileSync } from "node:fs";
-import { parseReplay, RECENCY_LIMIT_SECS, type BlockRef, type Replay, type Verdict } from "@bountee/formats";
+import { parseReplay, RECENCY_LIMIT_SECS, type BlockRef, type BountyId, type Replay, type Verdict } from "@bountee/formats";
 import { broadcastCommand, type BroadcastResult } from "./broadcast.ts";
 import { rpc } from "./proofs.ts";
 import { chainLabel, proofRpcs } from "./chains.ts";
@@ -87,9 +87,55 @@ export async function prepareClaim(o: { job?: SavedJob; test?: TestOptions; rpc?
   return { replay, local: result.verdict, saved: result.saved, block_age_secs: age, reran: o.job !== undefined, test: result };
 }
 
-/** The size of a claim's job input (contract `claims.rs` `judge_input`): its proofs, header and block, with room for the rules and the rest. */
-export function claimInputBytes(proofsJsonBytes: number, headerBytes: number, blockJsonBytes: number): number {
-  return proofsJsonBytes + headerBytes + blockJsonBytes + 4096;
+/**
+ * The size of a claim's job input, built as the contract builds it (contract `claims.rs`
+ * `judge_input`): the bounty's rules, the claim's bounty, Whitehat, block and header, and its
+ * proofs embedded as a JSON string, so every quote in them is escaped. The job's deposit and the
+ * gas the claim attaches follow it (R11.2), so it is measured, not estimated; 64 bytes of margin
+ * cover number formats. `rules` and `block` are as the contract's views return them.
+ */
+export function claimInputBytes(o: { rules: unknown; bounty: BountyId; whitehat: string; block: unknown; header: string; proofsJson: string }): number {
+  const input = {
+    judge_claim: {
+      rules: o.rules,
+      bounty: o.bounty,
+      whitehat: o.whitehat,
+      block: o.block,
+      header: o.header,
+      proofs_json: o.proofsJson,
+      submitted_at_ns: "0".repeat(19),
+    },
+  };
+  return Buffer.byteLength(JSON.stringify(input)) + 64;
+}
+
+/**
+ * An upper bound on a claim's job input before its proofs exist (a run's budget): the proofs'
+ * size with a tenth more for their escaped quotes, the header and block, and 8 KiB for the rules
+ * and the rest.
+ */
+export function claimInputBound(proofsJsonBytes: number, headerBytes: number, blockJsonBytes: number): number {
+  return Math.ceil(proofsJsonBytes * 1.1) + headerBytes + blockJsonBytes + 8192;
+}
+
+/** The most gas one NEAR transaction may attach (protocol 88, mainnet and testnet). */
+export const MAX_TX_GAS = 1_000_000_000_000_000n;
+
+/**
+ * The gas a claim (or a retry) attaches: what the contract's `fees()` names for a job input of
+ * `inputBytes` (an upper bound, `claimInputBytes`) on a bounty covering `covered` contracts, so
+ * its job is requested and a PAYS signs every pause in the same transaction (R11.2). Refused,
+ * before any fee, when no transaction can carry that much.
+ */
+export function claimGas(fees: any, inputBytes: number, covered: number): bigint {
+  const gas =
+    BigInt(fees.claim_gas_base) +
+    BigInt(covered) * BigInt(fees.claim_gas_per_covered_contract) +
+    BigInt(inputBytes) * BigInt(fees.claim_gas_per_input_byte);
+  if (gas > MAX_TX_GAS) {
+    throw new Error(`this claim's proofs are too large to file: it needs ${gas / 1_000_000_000_000n} Tgas, more than a transaction's ${MAX_TX_GAS / 1_000_000_000_000n}`);
+  }
+  return gas;
 }
 
 /** What `submit_claim` will draw from the claim balance (contract `claims.rs`), with slack. */

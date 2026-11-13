@@ -175,7 +175,7 @@ const VIEWS: Record<string, (args: any) => unknown> = {
   bounty: ({ id }) =>
     id.protocol === BOUNTY.protocol && id.name === BOUNTY.name ? { id: BOUNTY, rules: world.rules, state: "live", winning_claim: null, signed_pauses: [] } : null,
   config: () => ({ outlayer: "outlayer.testnet", usdc: "usdc.testnet", judge_build_hash: `0x${"5a".repeat(32)}` }),
-  fees: () => ({ job_deposit: String(20n * 10n ** 21n), storage_price_per_byte: String(10n ** 19n), job_input_free_bytes: 32768, secret_row_overhead_bytes: 1024 }),
+  fees: () => ({ job_deposit: String(20n * 10n ** 21n), storage_price_per_byte: String(10n ** 19n), job_input_free_bytes: 32768, secret_row_overhead_bytes: 1024 , claim_gas_base: "220000000000000", claim_gas_per_covered_contract: "20000000000000", claim_gas_per_input_byte: "600000000"}),
   claim_balance: () => String(3n * YOCTO),
 };
 

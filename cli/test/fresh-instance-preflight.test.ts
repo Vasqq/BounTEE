@@ -52,6 +52,7 @@ const POSTING_FEE = YOCTO / 2n;
 const FEES = {
   posting_fee: POSTING_FEE.toString(), job_deposit: (YOCTO / 50n).toString(), job_input_free_bytes: 32 * 1024,
   storage_price_per_byte: (10n ** 19n).toString(), secret_row_overhead_bytes: 1024,
+  claim_gas_base: "220000000000000", claim_gas_per_covered_contract: "20000000000000", claim_gas_per_input_byte: "600000000",
 };
 // Uniswap V2 on Base, as HonestUser.s.sol buys through it, and Circle's USDC behind its proxy.
 const ROUTER = "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24";
@@ -80,6 +81,7 @@ const world = {
   nearStorage: new Map<string, number>(),
   /** The posting fee each Protocol has already prepaid on the contract. */
   prepaid: new Map<string, bigint>(),
+  claimBalance: new Map<string, bigint>(),
   nearUsdc: new Map<string, bigint>(),
   eth: new Map<number, bigint>(),
   evmUsdc: new Map<string, bigint>(),
@@ -112,6 +114,7 @@ beforeAll(async () => {
         if (p.account_id === CONTRACT && p.method_name === "config") {
           return nearView({ seed: { native: "1000000000000000000", tokens: [] }, judge_build_hash: `0x${"5b".repeat(32)}` });
         }
+        if (p.account_id === CONTRACT && p.method_name === "claim_balance") return nearView((world.claimBalance.get(args.account_id) ?? 0n).toString());
         if (p.account_id === CONTRACT && p.method_name === "posting_fee_balance") return nearView((world.prepaid.get(args.account_id) ?? 0n).toString());
         if (p.account_id === NEAR_USDC && p.method_name === "ft_balance_of") return nearView((world.nearUsdc.get(args.account_id) ?? 0n).toString());
       }
@@ -271,7 +274,7 @@ test("D21, R1.4: by default the mainnet preflight plans ADR-0018's run: 2 claims
 const near = (text: string) => BigInt(Math.round(Number(text.replace(/ NEAR$/, "") ) * 1e5)) * 10n ** 19n;
 
 /** D21: each claim is budgeted from the proofs it will carry on the proof chain, held by OutLayer above the free bytes. */
-test("D21: the Whitehat's budget follows each claim's input on the proof chain: the largest draw plus what the rest keep", async () => {
+test("D21: the Whitehat's budget follows each claim's input on the proof chain: every claim's whole draw in the claim balance", async () => {
   world.near.clear();
   world.node = 500;
   const r = await preflight();
@@ -299,13 +302,17 @@ test("D21: the Whitehat's budget follows each claim's input on the proof chain: 
   expect(cheat.input_bytes).toBeGreaterThan(win.input_bytes);
   // OutLayer holds the storage price for every input byte above the free 32 KiB (fees()).
   for (const c of [cheat, win]) expect(near(c.refunded)).toBe(BigInt(c.input_bytes - 32 * 1024) * 10n ** 19n);
-  // The claims run one at a time and each hold comes back: the cheat's whole draw, and the win's
-  // draw less its hold, plus one claim's gas in hand: `submit_claim` attaches 300 Tgas, which NEAR
-  // takes up front at its 1e9 yoctoNEAR minimum price, 0.3 NEAR, before refunding what's unused.
+  // OutLayer gives each hold back to the Whitehat's account, not the claim balance, which a
+  // claim key can't top up: the claim balance holds both claims' whole draws, plus one claim's
+  // gas in hand: `submit_claim` attaches the gas the contract
+  // names for its size on the two covered chains (`claimGas`), the cheat's the largest, which NEAR
+  // takes up front at its 1e9 yoctoNEAR minimum price before refunding what's unused.
   const whitehat = r.out.balances.find((b: any) => b.who === WHITEHAT);
-  const gasInHand = near(whitehat.need) - (near(cheat.draw) + near(win.draw) - near(win.refunded));
-  expect(gasInHand).toBeGreaterThanOrEqual(3n * YOCTO / 10n);
-  expect(gasInHand).toBeLessThan(31n * YOCTO / 100n);
+  expect(near(r.out.run.claim_balance_need)).toBe(near(cheat.draw) + near(win.draw));
+  const gasInHand = near(whitehat.need) - (near(cheat.draw) + near(win.draw));
+  const cheatGas = 220n * 10n ** 12n + 2n * 20n * 10n ** 12n + BigInt(cheat.input_bytes) * 600_000_000n;
+  expect(gasInHand).toBeGreaterThanOrEqual(cheatGas * 10n ** 9n);
+  expect(gasInHand).toBeLessThan(cheatGas * 10n ** 9n + YOCTO / 100n);
   // A deeper trie on the proof chain makes bigger proofs, and the budget grows with them.
   world.node = 1000;
   const deeper = await preflight();
