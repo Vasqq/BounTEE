@@ -1,8 +1,9 @@
-// Test stand-ins for the Protocol's side of opening a winning exploit: a MetaMask that signs
-// with a known Ethereum key, and a release encrypted to that key's exploit key exactly as the
-// judge's release job writes it (formats/src/job.rs, BounTEE release v1). The signing and key
-// derivation are the command-line tool's own (cli/src/open-exploit.ts), so the page has to
-// derive the same key the terminal does.
+// Test stand-ins for the Protocol's side of opening a winning exploit: a browser wallet
+// (MetaMask, or another wallet by its provider flags) that signs with a known Ethereum key, and
+// a release encrypted to that key's exploit key exactly as the judge's release job writes it
+// (formats/src/job.rs, BounTEE release v1). The signing and key derivation are the
+// command-line tool's own (cli/src/open-exploit.ts), so the page has to derive the same key the
+// terminal does.
 import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from "node:crypto";
 import { deflateRawSync } from "node:zlib";
 import type { Page } from "@playwright/test";
@@ -57,17 +58,52 @@ function base58Decode(s: string): Uint8Array {
 export const addressOf = (walletKey: Uint8Array) => privateKeyToAccount(`0x${Buffer.from(walletKey).toString("hex")}`).address;
 
 /**
- * A MetaMask in the page, holding `walletKey`. It answers what wagmi asks of an injected
- * wallet: accounts, the current chain and switching it, `personal_sign` (or, with `unstable`, a
- * different signature each time, as a wallet that randomises its signatures would), and
+ * The wallets the stand-in can present as, each by the injected provider flags the real one sets
+ * (D34): Rabby, Brave Wallet, Zerion and Trust set MetaMask's flag too, as the real ones do;
+ * Zerion also injects `window.zerionWallet`, and Phantom `window.phantom.ethereum`. `rdns` is
+ * the real wallet's EIP-6963 identifier, under which the stand-in can announce itself. `label`
+ * is the wallet's entry in RainbowKit's picker, for the wallets the picker lists.
+ */
+type Presentation = { flags: readonly string[]; rdns: string; namespace?: string; label?: string };
+export const PERSONAS = {
+  MetaMask: { flags: ["isMetaMask"], rdns: "io.metamask", label: "MetaMask" },
+  Rabby: { flags: ["isRabby", "isMetaMask"], rdns: "io.rabby", label: "Rabby Wallet" },
+  "Brave Wallet": { flags: ["isBraveWallet", "isMetaMask"], rdns: "com.brave.wallet", label: "Brave Wallet" },
+  Zerion: { flags: ["isZerion", "isMetaMask"], rdns: "io.zerion.wallet", namespace: "zerionWallet", label: "Zerion" },
+  Phantom: { flags: ["isPhantom"], rdns: "app.phantom", namespace: "phantom.ethereum" },
+  Trust: { flags: ["isTrust", "isMetaMask"], rdns: "com.trustwallet.app" },
+} as const satisfies Record<string, Presentation>;
+export type Persona = keyof typeof PERSONAS;
+/** The personas whose wallet the picker lists (D34), each picked by its `label`. */
+export type Listed = { [K in Persona]: (typeof PERSONAS)[K] extends { label: string } ? K : never }[Persona];
+/** A journey run once per listed wallet: the persona the stand-in presents as, and the test's title. */
+export type WalletRun = { as: Listed; title: string };
+
+type WalletOptions = { unstable?: boolean; rejectFirstSign?: boolean; network?: Network };
+
+/** A MetaMask in the page, holding `walletKey`: the stand-in wallet presenting as MetaMask. */
+export const metamask = (page: Page, walletKey: Uint8Array, o: WalletOptions = {}) => wallet(page, walletKey, { ...o, as: "MetaMask" });
+
+/**
+ * A browser wallet in the page, holding `walletKey`, presenting as `as` (PERSONAS) on
+ * `window.ethereum` and, with `announce`, over EIP-6963 as well. It answers what wagmi asks of
+ * an injected wallet: accounts, the current chain and switching it, `personal_sign` (or, with `unstable`, a
+ * different signature each time, as a wallet that randomises its signatures would; with
+ * `rejectFirstSign`, the Protocol rejecting the first signature asked for), and
  * `eth_sendTransaction`, which the chain stand-in applies as the chain would. Every request's
  * method is recorded, and so is each chain it is asked to switch to or add. It starts on the
  * network's Base-family chain.
  */
-export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?: boolean; network?: Network } = {}) {
+export async function wallet(page: Page, walletKey: Uint8Array, o: WalletOptions & { as: Persona; announce?: boolean }) {
+  const persona: Presentation = PERSONAS[o.as];
   let n = 0;
+  let rejectNextSign = !!o.rejectFirstSign;
   const address = addressOf(walletKey);
   await page.exposeFunction("__personalSign", (hexMessage: string) => {
+    if (rejectNextSign) {
+      rejectNextSign = false;
+      return null;
+    }
     const message = Buffer.from(hexMessage.replace(/^0x/, ""), "hex").toString("utf8");
     const sig = Buffer.from(personalSign(walletKey, o.unstable ? `${message}${n++}` : message));
     return `0x${sig.toString("hex")}`;
@@ -76,15 +112,16 @@ export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?
     const r = await page.request.post(`${STAND_IN}/apply`, { data: { chainId, from: address, to: tx.to, data: tx.data, value: tx.value } });
     return (await r.json()).hash as string;
   });
-  await page.addInitScript(({ account, start }: { account: string; start: string }) => {
+  type Init = Presentation & { account: string; start: string; name: string; announce: boolean };
+  await page.addInitScript(({ account, start, name, flags, rdns, namespace, announce }: Init) => {
     const w = window as any;
     w.__walletCalls = [];
     w.__chainsAsked = [];
     let chainId = start;
     const known = new Set([start]);
     const listeners: Record<string, ((x: unknown) => void)[]> = {};
-    w.ethereum = {
-      isMetaMask: true,
+    const provider: Record<string, unknown> = {
+      ...Object.fromEntries(flags.map((flag) => [flag, true])),
       request: async ({ method, params }: { method: string; params?: any[] }) => {
         w.__walletCalls.push(method);
         switch (method) {
@@ -111,12 +148,16 @@ export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?
             chainId = params![0].chainId;
             (listeners.chainChanged ?? []).forEach((f) => f(chainId));
             return null;
-          case "personal_sign":
-            return w.__personalSign(params![0]);
+          case "personal_sign": {
+            const sig = await w.__personalSign(params![0]);
+            // EIP-1193's 4001: the Protocol rejected the request in the wallet.
+            if (sig === null) throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+            return sig;
+          }
           case "eth_sendTransaction":
             return w.__sendTransaction(parseInt(chainId, 16), params![0]);
           default:
-            throw Object.assign(new Error(`stand-in MetaMask: ${method} isn't supported`), { code: 4200 });
+            throw Object.assign(new Error(`stand-in ${name}: ${method} isn't supported`), { code: 4200 });
         }
       },
       on(event: string, f: (x: unknown) => void) {
@@ -126,20 +167,54 @@ export async function metamask(page: Page, walletKey: Uint8Array, o: { unstable?
         listeners[event] = (listeners[event] ?? []).filter((g) => g !== f);
       },
     };
-  }, { account: address, start: `0x${NETWORKS[o.network ?? "mainnet"].base.toString(16)}` });
+    w.ethereum = provider;
+    // The wallet's own namespace too, where the real one injects it.
+    if (namespace) {
+      const path = namespace.split(".");
+      let at = w;
+      for (const key of path.slice(0, -1)) at = at[key] ??= {};
+      at[path.at(-1)!] = provider;
+    }
+    // EIP-6963: announced once loaded, and again whenever the page asks.
+    if (announce) {
+      const info = Object.freeze({ uuid: crypto.randomUUID(), name, icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", rdns });
+      const detail = Object.freeze({ info, provider });
+      const announceProvider = () => window.dispatchEvent(new CustomEvent("eip6963:announceProvider", { detail }));
+      window.addEventListener("eip6963:requestProvider", announceProvider);
+      announceProvider();
+    }
+  }, { ...persona, account: address, start: `0x${NETWORKS[o.network ?? "mainnet"].base.toString(16)}`, name: o.as, announce: !!o.announce });
 }
 
-/** Each chain the page asked MetaMask to switch to or add, in order, with what it said of the chain. */
+/**
+ * Picks `as`'s entry, by its whole label, in RainbowKit's wallet picker, which a page's connect
+ * button has just opened (D34): the page goes on once the wallet connects.
+ */
+export async function pickWallet(page: Page, as: Listed = "MetaMask") {
+  await page.getByRole("dialog").getByRole("button", { name: new RegExp(`^${PERSONAS[as].label}\\b`) }).click();
+}
+
+/** Each chain the page asked the stand-in wallet to switch to or add, in order, with what it said of the chain. */
 export async function chainsAsked(page: Page): Promise<{ method: string; chainId: string; chainName?: string; rpcUrls?: string[] }[]> {
   return page.evaluate(() => (window as any).__chainsAsked);
 }
 
-/** Whether the page has asked the stand-in MetaMask to connect (eth_requestAccounts). */
+/** Every method the page has asked the stand-in wallet for since the page loaded (or resetWalletCalls), in order. */
+export async function walletCalls(page: Page): Promise<string[]> {
+  return page.evaluate(() => (window as any).__walletCalls);
+}
+
+/** Empties the stand-in wallet's call log, so walletCalls then returns only what follows. */
+export async function resetWalletCalls(page: Page) {
+  await page.evaluate(() => ((window as any).__walletCalls = []));
+}
+
+/** Whether the page has asked the stand-in wallet to connect (eth_requestAccounts). */
 export async function walletConnected(page: Page): Promise<boolean> {
   return page.evaluate(() => sessionStorage.getItem("__authorized") === "1");
 }
 
-/** Every transaction the stand-in MetaMask sent, by chain ID. */
+/** Every transaction the stand-in wallet sent, by chain ID. */
 export async function walletSent(page: Page): Promise<Record<number, { to?: string; data?: string; value?: string; hash: string }[]>> {
   return (await page.request.get(`${STAND_IN}/wallet-sent`)).json();
 }

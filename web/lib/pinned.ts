@@ -1,4 +1,4 @@
-// What MetaMask is asked to sign must not depend on the app's server alone (D13): the bounty
+// What the wallet is asked to sign must not depend on the app's server alone (D13): the bounty
 // contract, NEAR's USDC and each covered chain's USDC are fixed when the app is built, from
 // the network table (D30), and a bounty's pause-role address is derived here, in the browser,
 // the way the contract and the judge derive it (D25). A server answer that disagrees with

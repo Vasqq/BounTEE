@@ -12,8 +12,8 @@ const WEB = join(import.meta.dirname, "..");
 const TABLE = "lib/network.ts";
 /** The landing page's prototype script: it tells the one mainnet demo bounty and stays mainnet-only (ADR-0021). */
 const EXCEPTIONS = ["components/landing/runtime.js"];
-/** Hosts that carry no network value: fonts, and the source repository. */
-const NEUTRAL_HOSTS = ["api.fontshare.com", "fonts.googleapis.com", "fonts.gstatic.com", "github.com"];
+/** Hosts that carry no network value: fonts, the source repository, and MetaMask Mobile's app link (lib/wallets.ts). */
+const NEUTRAL_HOSTS = ["api.fontshare.com", "fonts.googleapis.com", "fonts.gstatic.com", "github.com", "metamask.app.link"];
 
 const NETWORK_VALUES: [string, RegExp][] = [
   // Mainnet's and testnet's covered chains, NEAR's Ethereum-compatible chains, Ethereum's.

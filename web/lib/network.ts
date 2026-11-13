@@ -37,7 +37,7 @@ export interface EvmChain {
   gasToken: string;
   /** The server's RPC for this chain, unless `EVM_RPC_<id>` is set. */
   rpc: string;
-  /** The browser wallet's RPC override (`NEXT_PUBLIC_EVM_RPC_<id>`); MetaMask's own when unset. */
+  /** The browser wallet's RPC override (`NEXT_PUBLIC_EVM_RPC_<id>`); the wallet's own when unset. */
   browserRpc: string | undefined;
   explorer: string;
   explorerTx: string;
@@ -62,7 +62,7 @@ interface Row {
   mpcRootPublicKey: string;
   /** The chains a bounty can cover: those NEAR's MPC network can sign and verify a pause on. */
   chains: readonly [EvmChain, ...EvmChain[]];
-  /** NEAR's Ethereum-compatible chain (NEP-518), through which MetaMask signs as a 0x… NEAR account. */
+  /** NEAR's Ethereum-compatible chain (NEP-518), through which the Protocol's Ethereum wallet signs as a 0x… NEAR account. */
   nearEvm: { id: number; name: string; rpc: string; browserRpc: string | undefined; explorer: string };
   /** NEAR's faucet, linked beside the NEAR the posting flow asks for (D17): testnet's, or `NEXT_PUBLIC_NEAR_FAUCET`. */
   nearFaucet: string | undefined;

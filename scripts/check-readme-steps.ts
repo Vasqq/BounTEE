@@ -28,7 +28,7 @@
 //   Endpoints, each overridable: NEAR_RPC, NEAR_ARCHIVAL_RPC, TX_API, EVM_RPC_8453 (Base),
 //   EVM_RPC_42161 (Arbitrum One).
 //
-// Parity with the landing page (D34). The README's Mainnet proof section (a `## Mainnet proof`
+// Parity with the landing page (D38). The README's Mainnet proof section (a `## Mainnet proof`
 // heading, to the next heading of its level or above) holds a step table: the first table there
 // whose first column is headed "Step". Each row is one step: its first cell the step's name, its
 // links that step's transactions.
@@ -265,7 +265,7 @@ function landingSteps(): string[] {
   return lists[0]!;
 }
 
-/** The README's step table against the landing page's names and its demo reader's transactions (D34). */
+/** The README's step table against the landing page's names and its demo reader's transactions (D38). */
 async function parity(markdown: string): Promise<Parity> {
   const table = stepTable(markdown);
   if (!table) {

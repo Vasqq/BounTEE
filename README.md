@@ -263,13 +263,13 @@ Before it starts, follow [For the Whitehat: before you hand over](docs/agent-ins
 
 ### As a Protocol
 
-You need MetaMask with testnet ETH on each chain you cover, and a pausable contract you control on Base Sepolia or Arbitrum Sepolia. Testnet NEAR and USDC come from faucets the app links in step 4.
+You need an Ethereum wallet that can sign on NEAR (MetaMask, Rabby, Zerion, or Brave Wallet in Brave) with testnet ETH on each chain you cover, and a pausable contract you control on Base Sepolia or Arbitrum Sepolia. Testnet NEAR and USDC come from faucets the app links in step 4.
 
 1. Open the testnet site and press **Post a bounty**.
 2. **Set rules.** Name what the bounty protects, add each contract and its chain, and set the **Bounty amount**, the **Smallest theft that counts** and how long to **Keep the exploit private for**. The **What you're risking** panel beside the form says what you're committing to.
-3. **Set up pause.** Press **Connect MetaMask**. For each chain, press **Grant** to give the pause role to the bounty's pause-role address (or **Copy for multisig** if a multisig owns the contract), then send that address its pause gas. Each task ticks off once it lands.
-4. **Add funds.** Your NEAR account is your MetaMask address. Send it the bounty's USDC and NEAR for the posting fee and gas. Each ticks off once it arrives.
-5. **Post bounty.** **Sign with MetaMask** to make your exploit key, so only you can open the winning exploit. Then **Enable NEAR signing**, **Prepay the posting fee** (0.5 NEAR, not refunded), and **Post the bounty**. The bounty goes Live once the posting check passes.
+3. **Set up pause.** Press **Connect wallet**. For each chain, press **Grant** to give the pause role to the bounty's pause-role address (or **Copy for multisig** if a multisig owns the contract), then send that address its pause gas. Each task ticks off once it lands.
+4. **Add funds.** Your NEAR account is your wallet's address. Send it the bounty's USDC and NEAR for the posting fee and gas. Each ticks off once it arrives.
+5. **Post bounty.** **Sign with your wallet** to make your exploit key, so only you can open the winning exploit. Then **Enable NEAR signing**, **Prepay the posting fee** (0.5 NEAR, not refunded), and **Post the bounty**. The bounty goes Live once the posting check passes.
 
 <img src="docs/images/posting-risk-testnet.png" alt="The posting flow's Set rules step beside the What you're risking panel, on the testnet site" width="900">
 
@@ -442,7 +442,7 @@ Built for the NEAR hackathon (October to November 2026), for two tracks:
 | The bounty contract | near-sdk |
 | The judge's EVM | revm, alloy-trie, alloy-rlp |
 | NEAR calls | near-api-js |
-| The web app | Next.js, React, wagmi, viem, TanStack Query |
+| The web app | Next.js, React, wagmi, viem, TanStack Query, RainbowKit |
 | Cryptography | @noble/curves, @noble/hashes, @noble/ciphers, @scure/base; x25519-dalek, chacha20poly1305, hkdf, k256, sha2, sha3 (Rust) |
 | Demo contracts | OpenZeppelin Contracts, Foundry |
 | Tests | Vitest, Playwright |

@@ -1,5 +1,5 @@
 // Seam T, ticket #84: the README tells the landing page's story, in its words and with its
-// transactions (D34, R15.4).
+// transactions (D38, R15.4).
 //
 // Seams this ticket uses (written before the first test, per the /tdd agreement):
 //
@@ -65,7 +65,7 @@ const proof = (rows: [string, string[]][]) =>
   ].join("\n");
 
 describe("offline (network denied)", () => {
-  test("D34: a README with no step table is reported pending, and --strict fails on it", () => {
+  test("D38: a README with no step table is reported pending, and --strict fails on it", () => {
     const readme = readmeWith("# BounTEE\n\n## Mainnet proof\n\nNothing here yet.\n");
     const lax = offline(process.execPath, [CHECKER, "--offline", "--readme", readme, "--json"]);
     expect(lax.code, lax.stdout + lax.stderr).toBe(0);
@@ -79,7 +79,7 @@ describe("offline (network denied)", () => {
     expect(strict.stdout).toMatch(/FAIL\s+parity: no step table/);
   });
 
-  test("D34: with no network, the names are still checked and the transactions skipped", () => {
+  test("D38: with no network, the names are still checked and the transactions skipped", () => {
     const ok = offline(process.execPath, [CHECKER, "--offline", "--readme", readmeWith(proof(NAMES.map((n) => [n, []]))), "--json"]);
     expect(ok.code, ok.stdout + ok.stderr).toBe(0);
     expect((JSON.parse(ok.stdout) as Report).parity).toMatchObject({ names: "ok", transactions: "skipped" });
@@ -90,7 +90,7 @@ describe("offline (network denied)", () => {
   });
 });
 
-test("D34: the landing page's two step lists disagreeing fails, whatever the README says", () => {
+test("D38: the landing page's two step lists disagreeing fails, whatever the README says", () => {
   const dir = mkdtempSync(join(tmpdir(), "bountee-steps-"));
   const list = (names: string[], q: string) => `const STEPS = [${names.map((n) => q + n + q).join(", ")}];\n`;
   writeFileSync(join(dir, "Landing.tsx"), list(NAMES, '"'));
@@ -160,14 +160,14 @@ describe("online, against the stand-in chains", { timeout: 60_000 }, () => {
     server?.kill();
   });
 
-  test("D34: the landing page's eight names in order, each citing the reader's transactions, pass", () => {
+  test("D38: the landing page's eight names in order, each citing the reader's transactions, pass", () => {
     const res = check(proof(RIGHT));
     expect(res.code, res.out).toBe(0);
     expect(res.report.parity).toStrictEqual({ names: "ok", transactions: "ok", problems: [] });
     expect(res.report.links.every((l) => l.status === "ok"), res.out).toBe(true);
   });
 
-  test("D34: one step renamed, two swapped, one missing or one extra fails the names", () => {
+  test("D38: one step renamed, two swapped, one missing or one extra fails the names", () => {
     const renamed = RIGHT.map(([n, l]): [string, string[]] => [n === "Landed" ? "Pauses landed" : n, l]);
     const swapped = [RIGHT[0]!, RIGHT[2]!, RIGHT[1]!, ...RIGHT.slice(3)];
     const missing = RIGHT.filter(([n]) => n !== "Published");
@@ -179,7 +179,7 @@ describe("online, against the stand-in chains", { timeout: 60_000 }, () => {
     }
   });
 
-  test("D34: a step citing a hash the reader doesn't return for it fails; the right hash passes", () => {
+  test("D38: a step citing a hash the reader doesn't return for it fails; the right hash passes", () => {
     // The Sealed row cites the cheat claim's verdict, which the reader returns for Checked, not Sealed.
     const wrong = RIGHT.map(([n, l]): [string, string[]] => [n, n === "Sealed" ? [nearTx("judged0")] : l]);
     const res = check(proof(wrong));
@@ -196,7 +196,7 @@ describe("online, against the stand-in chains", { timeout: 60_000 }, () => {
     expect(res2.report.parity.problems.join("\n")).toContain(pause(ARBITRUM));
   });
 
-  test("D34: a placeholder in a step row holds that row's transactions pending, not failed", () => {
+  test("D38: a placeholder in a step row holds that row's transactions pending, not failed", () => {
     const table = proof(RIGHT).replace(`[tx 1](${nearTx("published1")})`, "<!-- PENDING: publish tx -->");
     const res = check(table);
     expect(res.code, res.out).toBe(0);
