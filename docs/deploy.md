@@ -2,12 +2,14 @@
 
 The web app (`web/`) is hosted on Vercel as two projects built from the same repo. The network is fixed when the site is built (ADR-0021), so each network needs its own build.
 
-| Project | Site | Network |
-|---|---|---|
-| `bountee` | the landing page and the mainnet app | mainnet (`NEXT_PUBLIC_NETWORK` unset) |
-| `bountee-testnet` | the testnet app; `/` redirects to `/bounties` | testnet |
+| Project | Address | Site | Network |
+|---|---|---|---|
+| `bountee` | https://bountee.dev | the landing page and the mainnet app (`/bounties`, `/post`) | mainnet (`NEXT_PUBLIC_NETWORK` unset) |
+| `bountee-testnet` | https://testnet.bountee.dev | the testnet app; `/` redirects to `/bounties` | testnet |
 
-Both projects belong to the Vercel team `bountee` (Hobby plan) and are connected to GitHub `Vasqq/bountee`.
+The landing page's "Open the app" and "Post a bounty" open the testnet site, which has bounties to try (D31). The mainnet app stays reachable at https://bountee.dev/bounties, and the testnet badge links back to the mainnet site.
+
+Both projects belong to the Vercel team `bountee` (Hobby plan) and are connected to GitHub `Vasqq/bountee`. Each also keeps its `*.vercel.app` address (`bountee-six.vercel.app`, `bountee-testnet.vercel.app`).
 
 ## Redeploying
 
@@ -42,11 +44,12 @@ None of them are secrets. All are plain values that end up in the browser bundle
 | Variable | `bountee` | `bountee-testnet` | What it does |
 |---|---|---|---|
 | `NEXT_PUBLIC_NETWORK` | unset | `testnet` (all environments) | Picks the network row in `web/lib/network.ts`. |
-| `NEXT_PUBLIC_SITE_URL` | the mainnet site's URL | the testnet site's URL | Base for absolute social-card image links (production only). |
-| `NEXT_PUBLIC_TESTNET_SITE` | the testnet site's URL | unset | Mainnet's "Try it on testnet" links. |
-| `NEXT_PUBLIC_MAINNET_SITE` | unset | the mainnet site's URL | Testnet badge and the nav's Verify link. |
+| `NEXT_PUBLIC_SITE_URL` | `https://bountee.dev` (production) | `https://testnet.bountee.dev` (production) | Base for absolute social-card image links. |
+| `NEXT_PUBLIC_TESTNET_SITE` | `https://testnet.bountee.dev` | unset | Mainnet's "Try it on testnet" links and the landing page's app buttons. |
+| `NEXT_PUBLIC_MAINNET_SITE` | unset | `https://bountee.dev` | Testnet badge and the nav's Verify link. |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | the WalletConnect project ID | the same | The wallet connector's public project ID; the build fails without it (D36). |
 
-When a custom domain replaces the `*.vercel.app` addresses, update the last three variables on both projects and redeploy both.
+If the domain changes, update the three site addresses on both projects and redeploy both.
 
 Optional overrides, if a public RPC rate-limits (`web/.env.testnet.example` lists them all):
 
@@ -55,8 +58,6 @@ Optional overrides, if a public RPC rate-limits (`web/.env.testnet.example` list
 
 An RPC URL that carries an API key is a secret. Set it only as a server variable, never as `NEXT_PUBLIC_`.
 
-## Custom domain
+## Domain
 
-The apex domain goes on `bountee` and `testnet.<domain>` on `bountee-testnet`. Add each under the project's Settings → Domains, and add `www.<domain>` as a redirect to the apex.
-
-If the domain was bought outside Vercel, create the A record (apex) and CNAME records (`testnet`, `www`) that the Domains page shows. Vercel issues the certificates automatically.
+`bountee.dev` was bought through Vercel (renews Nov 13 2027), so Vercel runs its DNS and certificates. `bountee.dev` is on `bountee`, `www.bountee.dev` redirects to it (308), and `testnet.bountee.dev` is on `bountee-testnet`; each is under the project's Settings → Domains.
