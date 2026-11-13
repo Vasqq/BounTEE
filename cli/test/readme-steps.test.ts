@@ -13,7 +13,8 @@
 //       Misses: the steps that need the network (`console online` blocks, run by the checker
 //       without --offline) and those still waiting for mainnet data (reported pending, and
 //       refused under --strict); whether the README's prose, threat model and evidence links
-//       are true (R13.1, R15.5, R15.7, R4.12 and ADR-0017 are inspections, not tests).
+//       are true (R13.1, R15.5, R15.7, R4.12 and ADR-0017 are inspections, not tests). Links and
+//       placeholders are #83's (readme-links.test.ts).
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -102,11 +103,11 @@ test("D21: no README step files a claim, posts a bounty or signs anything", () =
 test("R15.4 ADR-0017: --strict fails while a step waits for mainnet data", () => {
   const dir = mkdtempSync(join(tmpdir(), "bountee-readme-"));
   const pending = join(dir, "README.md");
-  writeFileSync(pending, "```console online\n$ bountee verify <MAINNET: demo bounty id> --network mainnet\npass contract_code\n```\n");
+  writeFileSync(pending, "```console online\n$ bountee verify <!-- PENDING: demo bounty id --> --network mainnet\npass contract_code\n```\n");
   const lax = offline(process.execPath, [CHECKER, "--readme", pending, "--json"]);
   expect(lax.code, lax.stderr).toBe(0);
   expect(JSON.parse(lax.stdout).steps).toStrictEqual([
-    { command: "bountee verify <MAINNET: demo bounty id> --network mainnet", status: "pending" },
+    { command: "bountee verify <!-- PENDING: demo bounty id --> --network mainnet", status: "pending" },
   ]);
   const strict = offline(process.execPath, [CHECKER, "--readme", pending, "--strict"]);
   expect(strict.code).toBe(1);

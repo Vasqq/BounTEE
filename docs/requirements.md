@@ -308,6 +308,7 @@ This document uses SHALL and SHALL NOT for every requirement. A SHOULD or MAY ca
 | D35 | No step of the web app's posting flow or open-exploit page SHALL depend on which D34 wallet connected. Verified by a test with Rabby, and by a recorded run on the testnet site with a real Rabby, MetaMask installed beside it (a testnet run is evidence here, as for D33: the two builds differ only in the network table's values, so a wallet behaves the same on both, ADR-0022; Liam, Nov 12). | ADR-0022 | W | T, A |
 | D36 | Every build of the web app SHALL be given a WalletConnect project ID when it is built, and SHALL fail to build without one. Where the MetaMask extension is absent, the wallet picker SHALL still offer MetaMask, for MetaMask Mobile by QR code, and the web app SHALL contact WalletConnect only once the Protocol picks, on that page, a wallet that needs it. The QR connection itself is verified by a recorded run on the testnet site (a testnet run is evidence here, as for D33: the two builds differ only in the network table's values, so a wallet behaves the same on both, ADR-0022; Liam, Nov 12). | ADR-0022 | W | T, A |
 | D37 | Outside the wallet picker, the web app's pages SHALL name no wallet brand, saying "your wallet" instead. | ADR-0022 | W | T |
+| D38 | The README SHALL name the landing page's eight demo steps in the same words and order, and cite for them the transactions the landing page reads (D4); a script SHALL check both. | Spec | T | T |
 
 *Amended Nov 8 (ADR-0020):* any covered chain can be a claim's proof chain. D1 is rewritten, R1.1, R1.4, R2.8 and R3.8 follow it, R15.7 states the replay's per-chain limits, and D26–D29 are new.
 
@@ -318,3 +319,4 @@ This document uses SHALL and SHALL NOT for every requirement. A SHOULD or MAY ca
 *Amended again Nov 10 (Liam):* the public state of a bounty whose posting check failed reads "Not posted", not "Check failed" (DESIGN.md, Bounty list); D33 follows.
 
 *Amended Nov 12 (ADR-0022):* the Protocol signs with any wallet that can sign everything, not only MetaMask. D13 is rewritten, D20 and D30 follow it, and D34–D37 are new.
+*Amended Nov 12 (spec #82, the final README):* the README tells the landing page's story in its words and with its transactions; D38 is new, and R15.4's script checks it alongside the README's steps, links and placeholders.
