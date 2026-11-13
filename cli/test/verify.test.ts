@@ -24,16 +24,16 @@
 // (live test).
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { base58 } from "@scure/base";
 import { afterAll, beforeAll, expect, test } from "vitest";
+import { judgeWasm } from "../src/test.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
-const repo = fileURLToPath(new URL("../../", import.meta.url));
 const judgeFixtures = new URL("../../judge/tests/fixtures/", import.meta.url);
 const fixture = (name: string) => JSON.parse(readFileSync(new URL(`fixtures/verify/${name}`, import.meta.url), "utf8"));
 const dir = mkdtempSync(join(tmpdir(), "bountee-verify-"));
@@ -75,16 +75,6 @@ const state = JSON.parse(readFileSync(new URL("state.json", judgeFixtures), "utf
 const proofsText = JSON.stringify(state.proofs);
 const PAYS = { outcome: "PAYS", reason: "minimum_theft_reached" };
 
-function judgeWasm(): string {
-  const target = readFileSync(join(repo, "judge/wasm-target"), "utf8").trim();
-  const wasm = join(repo, `target/${target}/release/bountee-judge.wasm`);
-  const env = { ...process.env };
-  delete env.BOUNTEE_BOUNTY_CONTRACT;
-  const b = spawnSync("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], { cwd: repo, stdio: "inherit", env });
-  expect(b.status).toBe(0);
-  expect(existsSync(wasm)).toBe(true);
-  return wasm;
-}
 
 /** The judge's publication of the drain exploit, as OutLayer runs it for the bounty contract. */
 function publish(wasm: string, name: string): string {

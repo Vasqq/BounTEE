@@ -15,19 +15,21 @@
 // passed over, none found is named, and a verdict that differs is named as such;
 // before publication it is "not yet published"), D7 at the tool (`publish` is refused
 // before the delay, and with proofs other than the claim's, before any transaction), and
-// R14.5 (JSON). Misses: the real contract (seam C proves the gate and what is kept) and
-// OutLayer; no live run, since a disclosure delay is at least a day.
+// R14.5 (JSON), and (#80) that rerun names the judge build it ran and whether it is the
+// bounty's pinned build, the program the enclave ran, pointing to `bountee verify` when it
+// isn't. Misses: the real contract (seam C proves the gate and what is kept) and OutLayer; no
+// live run, since a disclosure delay is at least a day.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, test } from "vitest";
+import { judgeWasm } from "../src/test.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
-const repo = fileURLToPath(new URL("../../", import.meta.url));
 const fixtures = new URL("../../judge/tests/fixtures/", import.meta.url);
 /** The bounty contract a default build of the judge is pinned to (judge/src/sealed.rs). */
 const CONTRACT = "bounty.bountee.testnet";
@@ -44,19 +46,11 @@ const proofsText = JSON.stringify(state.proofs);
 const sha256 = (text: string) => `0x${createHash("sha256").update(text).digest("hex")}`;
 /** What the enclave gave for the drain exploit on this fixture (seam J's `drain` test). */
 const PAYS = { outcome: "PAYS", reason: "minimum_theft_reached" };
+/** The sha256 of the checkout's default judge build, as the tool reports it. */
+let builtSha: string | undefined;
+const localSha = () => (builtSha ??= createHash("sha256").update(readFileSync(judgeWasm())).digest("hex"));
 
 // ---- The judge's publication, as OutLayer runs it for the bounty contract ------------------
-
-function judgeWasm(): string {
-  const target = readFileSync(join(repo, "judge/wasm-target"), "utf8").trim();
-  const wasm = join(repo, `target/${target}/release/bountee-judge.wasm`);
-  const env = { ...process.env };
-  delete env.BOUNTEE_BOUNTY_CONTRACT;
-  const b = spawnSync("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], { cwd: repo, stdio: "inherit", env });
-  expect(b.status).toBe(0);
-  expect(existsSync(wasm)).toBe(true);
-  return wasm;
-}
 
 function publish(name: string, claimId: number): string {
   const secret = readFileSync(new URL("sealed/alice-drain.txt", fixtures), "utf8").trim();
@@ -189,12 +183,17 @@ beforeAll(async () => {
     published_exploit: publication({ state: "delayed", from: now + DAY_NS }),
   };
   views["vault-live"] = { bounty: bountyView("vault-live", "live"), published_exploit: null };
+  // Published, on a bounty whose rules pin the checkout's own judge build.
+  views["vault-pinned"] = {
+    bounty: { ...bountyView("vault-pinned", "paid"), rules: { ...rules, judge_build_hash: `0x${localSha()}` } },
+    published_exploit: publication({ state: "published", published: publish("vault-pinned", 3) }),
+  };
 }, 600_000);
 afterAll(() => server.close());
 
-function bountee(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+function bountee(args: string[], o: { json?: boolean } = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [entry, ...args, "--contract", CONTRACT, "--near-rpc", rpc, "--json"]);
+    const child = spawn(process.execPath, [entry, ...args, "--contract", CONTRACT, "--near-rpc", rpc, ...(o.json === false ? [] : ["--json"])]);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
@@ -217,6 +216,7 @@ test("D7.1, R14.5: a published exploit re-runs from its own header and its claim
     verdict: PAYS,
     enclave_verdict: PAYS,
     same_verdict: true,
+    judge: { sha256: localSha(), bounty_build: rules.judge_build_hash, same_as_bounty: false },
   });
   // The saved job is a plain replay anyone can run again with `bountee test --job`.
   const job = JSON.parse(readFileSync(out, "utf8"));
@@ -225,6 +225,27 @@ test("D7.1, R14.5: a published exploit re-runs from its own header and its claim
   expect(job.replay.exploit).toEqual(readFixture("exploits/drain.json"));
   const again = await bountee(["test", "--job", out]);
   expect(JSON.parse(again.stdout).verdict).toEqual(PAYS);
+}, 300_000);
+
+test("D7.1: rerun under a build other than the bounty's pinned one says so, names the pinned build, and points to bountee verify", async () => {
+  const r = await bountee(["rerun", `${PROTOCOL}/vault`], { json: false });
+  expect(r.stderr).toBe("");
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain(`sha256 ${localSha()}`);
+  expect(r.stdout).toContain(`not the bounty's pinned build ${rules.judge_build_hash}`);
+  expect(r.stdout).toContain("bountee verify");
+  expect(r.stdout).toContain("--judge");
+  expect(r.stdout).not.toMatch(/differs only/);
+}, 300_000);
+
+test("D7.1, R14.5: rerun under the bounty's pinned build says it ran the program the enclave runs", async () => {
+  const json = await bountee(["rerun", `${PROTOCOL}/vault-pinned`]);
+  expect(json.code).toBe(0);
+  expect(JSON.parse(json.stdout).judge).toMatchObject({ sha256: localSha(), bounty_build: `0x${localSha()}`, same_as_bounty: true });
+  const text = await bountee(["rerun", `${PROTOCOL}/vault-pinned`], { json: false });
+  expect(text.code).toBe(0);
+  expect(text.stdout).toContain("the bounty's pinned build: the program the enclave runs");
+  expect(text.stdout).not.toContain("not the bounty's pinned build");
 }, 300_000);
 
 test("D7.1: a claim filed through a cross-contract call re-runs too: its proofs are found in its receipt", async () => {

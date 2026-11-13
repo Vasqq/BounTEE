@@ -15,7 +15,7 @@
 // offline.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +54,7 @@ export interface TestResult {
   transactions: number;
   proofs: number;
   saved: string;
+  judge: JudgeUsed;
   diagnostics: string[];
 }
 
@@ -80,8 +81,11 @@ async function loadRules(o: TestOptions): Promise<Rules> {
 
 // ---- Local processes ---------------------------------------------------------------------------------
 
-function run(cmd: string, args: string[], cwd: string, env: Record<string, string> = {}) {
-  const res = spawnSync(cmd, args, { cwd, encoding: "utf8", env: { ...process.env, ...env }, maxBuffer: 64 << 20 });
+/** Run `cmd`; `env` adds variables, and an `undefined` one is removed from the environment. */
+function run(cmd: string, args: string[], cwd: string, env: Record<string, string | undefined> = {}) {
+  const merged: Record<string, string | undefined> = { ...process.env, ...env };
+  for (const k of Object.keys(merged)) if (merged[k] === undefined) delete merged[k];
+  const res = spawnSync(cmd, args, { cwd, encoding: "utf8", env: merged, maxBuffer: 64 << 20 });
   if (res.error) throw new Error(`${cmd}: ${res.error.message}`);
   if (res.status !== 0) throw new Error(`${cmd} ${args[0]} failed:\n${res.stdout}\n${res.stderr}`.trim());
   return res.stdout;
@@ -98,12 +102,71 @@ function freePort(): Promise<number> {
   });
 }
 
-export function judgeWasm(o: { judge?: string }): string {
+/**
+ * The judge a local replay runs: `--judge`, else the checkout's default build. That build is
+ * rebuilt on every use (a no-op when nothing changed), so it never lags the sources, and it is
+ * pinned to the default contract whatever the caller exported, since the judge reads
+ * BOUNTEE_BOUNTY_CONTRACT at build time. It is never a bounty's pinned build: only `bountee build`
+ * reproduces that one (#80).
+ */
+export function judgeWasm(o: { judge?: string } = {}): string {
   if (o.judge) return resolve(o.judge);
   const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
-  const wasm = `${repo}target/${target}/release/bountee-judge.wasm`;
-  if (!existsSync(wasm)) run("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], repo);
+  run("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], repo, { BOUNTEE_BOUNTY_CONTRACT: undefined });
+  // Cargo replaces its output by unlinking and linking it again on every build, even one that
+  // changed nothing, so a build running alongside (another test, another command) can leave it
+  // missing for an instant. The tool therefore runs a copy named by its sha256, written whole
+  // and renamed into place, which no build touches; the bytes read are always whole.
+  const bytes = readWhole(`${repo}target/${target}/release/bountee-judge.wasm`);
+  const dir = `${repo}target/judges`;
+  const wasm = `${dir}/${createHash("sha256").update(bytes).digest("hex")}.wasm`;
+  if (!existsSync(wasm)) {
+    mkdirSync(dir, { recursive: true });
+    const part = `${wasm}.${randomBytes(8).toString("hex")}.part`;
+    writeFileSync(part, bytes);
+    renameSync(part, wasm);
+  }
   return wasm;
+}
+
+/** A file cargo may be relinking: absent for an instant, never partial. */
+function readWhole(path: string): Buffer {
+  for (let tries = 0; ; tries++) {
+    try {
+      return readFileSync(path);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT" || tries >= 200) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+}
+
+/** The compiled judge a replay ran, and whether it is the very build the bounty pins (the one the enclave runs). */
+export interface JudgeUsed {
+  wasm: string;
+  sha256: string;
+  bounty_build: string;
+  same_as_bounty: boolean;
+}
+
+export function judgeUsed(wasm: string, bountyBuild: string): JudgeUsed {
+  const sha256 = createHash("sha256").update(readFileSync(wasm)).digest("hex");
+  return { wasm, sha256, bounty_build: bountyBuild, same_as_bounty: `0x${sha256}` === bountyBuild };
+}
+
+/** The judge lines `test` and `rerun` print: which build ran, and whether a verdict from it speaks for the enclave. */
+export function formatJudge(j: JudgeUsed): string[] {
+  return [
+    `judge:   ${j.wasm} (sha256 ${j.sha256})`,
+    ...(j.same_as_bounty
+      ? ["         the bounty's pinned build: the program the enclave runs"]
+      : [
+          `         not the bounty's pinned build ${j.bounty_build}, so this verdict doesn't speak for the enclave's`,
+          "         program (a checkout's default build never is one: it answers to the default contract and records",
+          "         where it was built); bountee verify rebuilds the pinned build and re-runs under it, or build it with",
+          "         bountee build --contract <contract> --rev <the commit its metadata names> and pass it with --judge",
+        ]),
+  ];
 }
 
 /** The Foundry project holding the script: the nearest directory with a foundry.toml. */
@@ -219,6 +282,7 @@ export async function testCommand(o: TestOptions): Promise<TestResult> {
         transactions: exploit.transactions.length,
         proofs: replay.proofs.length,
         saved,
+        judge: judgeUsed(wasm, rules.judge_build_hash),
         diagnostics,
       };
     } catch (e) {
@@ -235,8 +299,7 @@ export interface ReplayResult {
   verdict: Verdict;
   block: BlockRef;
   job: string;
-  /** The compiled judge that gave the verdict, and whether it is the very build the bounty pins (the one the enclave runs). */
-  judge: { wasm: string; sha256: string; bounty_build: string; same_as_bounty: boolean };
+  judge: JudgeUsed;
   transactions: number;
   proofs: number;
   diagnostics: string[];
@@ -246,16 +309,14 @@ export interface ReplayResult {
 export function replayJob(o: { job: string; judge?: string }): ReplayResult {
   const replay = parseReplay(JSON.parse(readFileSync(o.job, "utf8")).replay);
   const wasm = judgeWasm(o);
-  const sha256 = createHash("sha256").update(readFileSync(wasm)).digest("hex");
   const { verdict, stderr } = runJudge(wasm, replay);
   const diagnostics = stderr.split("\n").map((l) => l.trim()).filter(Boolean);
   if (!verdict) throw new Error(`the judge gave no verdict:\n${diagnostics.join("\n")}`);
-  const bounty_build = replay.rules.judge_build_hash;
   return {
     verdict,
     block: replay.block,
     job: resolve(o.job),
-    judge: { wasm, sha256, bounty_build, same_as_bounty: `0x${sha256}` === bounty_build },
+    judge: judgeUsed(wasm, replay.rules.judge_build_hash),
     transactions: replay.exploit.transactions.length,
     proofs: replay.proofs.length,
     diagnostics,
@@ -267,10 +328,7 @@ export function formatReplayResult(r: ReplayResult): string {
     `verdict: ${r.verdict.outcome} (${r.verdict.reason})`,
     `block:   ${r.block.number} ${r.block.hash} (recorded header and proofs, no RPC)`,
     `exploit: ${r.transactions} transaction(s), ${r.proofs} proven account(s), from ${r.job}`,
-    `judge:   ${r.judge.wasm} (sha256 ${r.judge.sha256})`,
-    r.judge.same_as_bounty
-      ? "         the bounty's pinned build: the program the enclave runs"
-      : `         not the bounty's pinned build ${r.judge.bounty_build} (that build differs only in the contract it answers to; pass it with --judge to run the enclave's exact program)`,
+    ...formatJudge(r.judge),
     ...r.diagnostics.map((d) => `judge:   ${d}`),
   ].join("\n");
 }
@@ -282,6 +340,7 @@ export function formatTestResult(r: TestResult): string {
     `exploit: ${r.transactions} transaction(s) from fresh account ${r.attacker}`,
     `proofs:  ${r.proofs} account(s), from ${r.rpc}`,
     `saved:   ${r.saved}`,
+    ...formatJudge(r.judge),
     ...r.diagnostics.map((d) => `judge:   ${d}`),
   ].join("\n");
 }

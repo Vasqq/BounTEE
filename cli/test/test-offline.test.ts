@@ -14,11 +14,13 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
+import { judgeWasm } from "../src/test.ts";
 import { bounteeOffline, offline } from "./offline.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
-const localJudge = `${repo}target/${target}/release/bountee-judge.wasm`;
+/** The checkout's default judge build, as the tool runs it (set before networking is cut). */
+let localJudge: string;
 const EXPLOIT = `${repo}demo/fixtures/exploit.json`;
 const CHEAT = `${repo}demo/fixtures/cheat.json`;
 
@@ -26,11 +28,7 @@ const sha256 = (file: string) => createHash("sha256").update(readFileSync(file))
 
 beforeAll(() => {
   // The judge is built before networking is cut, as a Verifier's checkout would have it.
-  const res = spawnSync("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], {
-    cwd: repo,
-    encoding: "utf8",
-  });
-  if (res.status !== 0) throw new Error(res.stderr);
+  localJudge = judgeWasm();
 }, 600_000);
 
 // The control: the sandbox really denies networking, so the tests below can't pass by reaching an RPC.
@@ -79,7 +77,21 @@ test("D2: test names the compiled judge it ran by its sha256, and whether it is 
   // default build is pinned to another contract, so it is never that exact build.
   expect(out.judge.bounty_build).toBe("0xc4222111c3523dae3bd7b3002fb63ddf254231bd9f437c497acf4d5962a1df45");
   expect(out.judge.same_as_bounty).toBe(false);
+  // #80: the text says so, names the pinned build and how to run it, and claims no more.
+  const text = bounteeOffline(["test", "--job", EXPLOIT]).stdout;
+  expect(text).toContain("not the bounty's pinned build 0xc4222111c3523dae3bd7b3002fb63ddf254231bd9f437c497acf4d5962a1df45");
+  expect(text).toContain("bountee verify");
+  expect(text).not.toMatch(/differs only/);
 });
+
+// D2 (#80): the default judge is the checkout's own build, pinned to the default contract,
+// whatever the caller's environment: an exported BOUNTEE_BOUNTY_CONTRACT doesn't rebuild it
+// for another contract behind the tool's back.
+test("D2: the default judge stays the checkout's default build when BOUNTEE_BOUNTY_CONTRACT is exported", () => {
+  const res = bounteeOffline(["test", "--job", EXPLOIT, "--json"], { ...process.env, BOUNTEE_BOUNTY_CONTRACT: "elsewhere.bountee.testnet" });
+  expect(res.code, res.stderr).toBe(0);
+  expect(JSON.parse(res.stdout).judge).toMatchObject({ wasm: localJudge, sha256: sha256(localJudge) });
+}, 600_000);
 
 // D2, R3.9 (ticket #9 criterion 3): the enclave's build (pinned to the demo bounty's contract, built the
 // way deploy.ts builds it) passed with --judge gives the same verdicts as the local build.

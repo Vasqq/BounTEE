@@ -5,17 +5,19 @@
 // and the tests check what it printed and saved against the chain, read back with `cast`,
 // and against the compiled judge run by hand on the saved inputs.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
 import { proofRpcs } from "../src/chains.ts";
+import { judgeWasm, type JudgeUsed } from "../src/test.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const fixture = fileURLToPath(new URL("./fixtures/usdc-zero/", import.meta.url));
-const repo = fileURLToPath(new URL("../../", import.meta.url));
-const wasm = `${repo}target/${readFileSync(`${repo}judge/wasm-target`, "utf8").trim()}/release/bountee-judge.wasm`;
+/** The checkout's default judge build, as the tool runs it. */
+let wasm: string;
 const PUBLIC_RPCS = proofRpcs(84532);
 const PUBLIC_RPC = PUBLIC_RPCS[0]!;
 const USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
@@ -38,12 +40,14 @@ let out: {
   attacker: string;
   rpc: string;
   saved: string;
+  judge: JudgeUsed;
 };
 let latestBefore: number;
 let code: number | null;
 let stderr: string;
 
 beforeAll(() => {
+  wasm = judgeWasm();
   latestBefore = Number(cast(["block-number"]));
   const dir = mkdtempSync(join(tmpdir(), "bountee-test-"));
   const res = bountee([
@@ -65,6 +69,14 @@ beforeAll(() => {
 test("D3 D2 R14.5: a harmless Foundry script on live Base Sepolia prints ZERO as JSON", () => {
   expect(code, stderr).toBe(0);
   expect(out.verdict).toStrictEqual({ outcome: "ZERO", reason: "below_minimum_theft" });
+});
+
+// D2, R14.5 (#80): live test names the compiled judge it ran by its sha256, and whether that is
+// the bounty's pinned build, as `test --job` and `rerun` do.
+test("D2 R14.5: live test names the judge build it ran and whether it is the bounty's pinned build", () => {
+  const rules = JSON.parse(readFileSync(`${fixture}rules.json`, "utf8"));
+  const sha = createHash("sha256").update(readFileSync(wasm)).digest("hex");
+  expect(out.judge).toStrictEqual({ wasm, sha256: sha, bounty_build: rules.judge_build_hash, same_as_bounty: `0x${sha}` === rules.judge_build_hash });
 });
 
 // R2.9, ADR-0014: the claim's block is a recent one of the real chain, named by its real hash.
