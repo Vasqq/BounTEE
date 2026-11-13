@@ -7,7 +7,7 @@
 import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { BountyId, BountyPage, ChainPause, PostingFailure, PublicState } from "@/lib/bounties.ts";
-import { plural, shortHash } from "@/lib/format.ts";
+import { plural, shortAccount, shortHash } from "@/lib/format.ts";
 import { bountyKey, useBounty } from "@/lib/live.ts";
 import { net } from "@/lib/network.ts";
 import { BOUNTY_CONTRACT } from "@/lib/pinned.ts";
@@ -214,7 +214,7 @@ function WinningClaim({ b }: { b: BountyPage }) {
           <div className="tk-field">
             <dt>To</dt>
             <dd>
-              <LinkChip href={w.whitehatHref} label={w.whitehat} title={w.whitehat} />
+              <LinkChip href={w.whitehatHref} label={shortAccount(w.whitehat)} title={w.whitehat} />
             </dd>
           </div>
           <div className="tk-field">
