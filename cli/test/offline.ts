@@ -37,12 +37,13 @@ export function sandbox(): string[] {
 }
 
 /** `cmd args` with networking denied. */
-export function offline(cmd: string, args: string[]) {
+export function offline(cmd: string, args: string[], env: NodeJS.ProcessEnv = process.env) {
   const [bin, ...pre] = sandbox();
-  const res = spawnSync(bin!, [...pre, cmd, ...args], { encoding: "utf8", timeout: 300_000 });
+  const res = spawnSync(bin!, [...pre, cmd, ...args], { encoding: "utf8", timeout: 300_000, env });
   if (res.error) throw new Error(`can't deny networking here: ${res.error.message}`);
   return { code: res.status, stdout: res.stdout, stderr: res.stderr };
 }
 
 /** The `bountee` command line with networking denied. */
-export const bounteeOffline = (args: string[]) => offline(process.execPath, [fileURLToPath(new URL("../src/main.ts", import.meta.url)), ...args]);
+export const bounteeOffline = (args: string[], env?: NodeJS.ProcessEnv) =>
+  offline(process.execPath, [fileURLToPath(new URL("../src/main.ts", import.meta.url)), ...args], env);

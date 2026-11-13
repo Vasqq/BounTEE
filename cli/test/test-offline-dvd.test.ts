@@ -9,22 +9,17 @@
 //
 // Catches: each DVD bounty's exploit PAYS and its cheat scores ZERO, offline, from committed
 // files. Misses: a live posted DVD bounty (the jobs come from anvil, chain 31337, not Base).
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
+import { judgeWasm } from "../src/test.ts";
 import { bounteeOffline } from "./offline.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
-const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
 const job = (name: string) => `${repo}demo/fixtures/dvd/${name}.json`;
 
 beforeAll(() => {
-  const res = spawnSync("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], {
-    cwd: repo,
-    encoding: "utf8",
-  });
-  if (res.status !== 0) throw new Error(res.stderr);
+  judgeWasm();
 }, 600_000);
 
 const levels = [
