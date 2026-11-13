@@ -137,7 +137,7 @@ Sealed, Checked, Signed and Paid share one NEAR transaction: the claim was filed
 
 ### The Whitehat's AI agent
 
-In this demo, the Whitehat's AI agent filed the winning claim, the Sealed-to-Paid transaction above. The agent went in blind: no memory, no web, and only claim-only access to the Whitehat's account. It found the bug in the demo vault, proved it with `bountee test` and claimed the bounty all on its own. For further evidence, its launch script, instructions, exploit and full transcript are in [`docs/demo-agent-run/`](docs/demo-agent-run/README.md). Its claim-only access was [granted](https://nearblocks.io/txns/4YqsBZMxzhrEdvN38tRR6tQsQtXc3gsFiAoMNwmjeGRM) before the run and [revoked](https://nearblocks.io/txns/7MRzr5uabDfqE3rjFKAQwpQzwjk8845E6s643gT3q9nm) after it.
+In this demo, the Whitehat's AI agent filed the winning claim, the Sealed-to-Paid transaction above. The agent went in blind: no memory, no web, and only claim-only access to the Whitehat's account. It found the bug in the demo vault, proved it with `bountee test` and claimed the bounty all on its own. For further evidence, its launch script, instructions and full transcript are in [`docs/demo-agent-run/`](docs/demo-agent-run/README.md); its exploit is the one in the Published step above. Its claim-only access was [granted](https://nearblocks.io/txns/4YqsBZMxzhrEdvN38tRR6tQsQtXc3gsFiAoMNwmjeGRM) before the run and [revoked](https://nearblocks.io/txns/7MRzr5uabDfqE3rjFKAQwpQzwjk8845E6s643gT3q9nm) after it.
 
 A Whitehat can also claim themselves; both paths are under [As a Whitehat](#as-a-whitehat).
 
