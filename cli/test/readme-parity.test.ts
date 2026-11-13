@@ -107,7 +107,9 @@ test("D34: the landing page's two step lists disagreeing fails, whatever the REA
   expect(bad.stdout + bad.stderr).toMatch(/step names differ/);
 });
 
-describe("online, against the stand-in chains", () => {
+// Each test runs the checker as its own process, several times, against the stand-in server;
+// vitest's 5-second default is too tight for that on a loaded machine.
+describe("online, against the stand-in chains", { timeout: 60_000 }, () => {
   const port = 43_000 + Math.floor(Math.random() * 2_000);
   const chains = `http://127.0.0.1:${port}`;
   let server: ChildProcess;

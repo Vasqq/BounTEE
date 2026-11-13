@@ -127,7 +127,9 @@ describe("offline (network denied)", () => {
   });
 });
 
-describe("online, against the stand-in chains", () => {
+// Each test runs the checker as its own process, several times, against the stand-in server;
+// vitest's 5-second default is too tight for that on a loaded machine.
+describe("online, against the stand-in chains", { timeout: 60_000 }, () => {
   const port = 41_000 + Math.floor(Math.random() * 2_000);
   const chains = `http://127.0.0.1:${port}`;
   let server: ChildProcess;

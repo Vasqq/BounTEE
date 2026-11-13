@@ -33,8 +33,9 @@
 // whose first column is headed "Step". Each row is one step: its first cell the step's name, its
 // links that step's transactions.
 //   - names: the rows' names, in order, must be exactly the landing page's eight (`STEPS` in
-//     web/components/landing/Landing.tsx, read from the source as text); a step with no row, an
-//     extra row, a renamed or reordered step fails. Checked offline too.
+//     web/components/landing/Landing.tsx and again in its browser script runtime.js, read from
+//     the source as text, and the two must agree); a step with no row, an extra row, a renamed
+//     or reordered step fails. Checked offline too.
 //   - transactions: each row's links (compared without query or fragment) must be exactly the
 //     transactions the landing page's demo reader (`readDemo` in web/lib/demo.ts, imported here)
 //     returns for that step of the mainnet demo bounty. A row holding a placeholder isn't
@@ -128,8 +129,27 @@ function links(markdown: string): string[] {
     .filter((t) => t && !t.startsWith("#") && !/^mailto:/i.test(t));
 }
 
+/** A link compared without its query or fragment. */
+const QUERY = /[?#].*$/;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * A fetch that waits and tries again when the server says it's busy (429 or 5xx), up to four
+ * times. Public RPCs rate-limit a burst of requests, and a busy answer says nothing about the link.
+ */
+async function patientFetch(url: string | URL, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { ...init, signal: AbortSignal.timeout(30_000) });
+    if ((res.status !== 429 && res.status < 500) || attempt === 4) return res;
+    await res.body?.cancel();
+    const after = Number(res.headers.get("retry-after"));
+    await sleep(after > 0 ? Math.min(after, 10) * 1000 : 1000 * 2 ** attempt);
+  }
+}
+
 async function post(url: string, body: unknown): Promise<any> {
-  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+  const res = await patientFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
   return res.json();
 }
@@ -179,7 +199,7 @@ async function checkUrl(url: URL): Promise<string | undefined> {
     if (kind === "tx") return evmTx(chain, id);
     if (kind === "address") return evmAddress(chain, id);
   }
-  const res = await fetch(url, { redirect: "follow", headers: { "user-agent": "bountee-readme-checker" }, signal: AbortSignal.timeout(30_000) });
+  const res = await patientFetch(url, { redirect: "follow", headers: { "user-agent": "bountee-readme-checker" } });
   await res.body?.cancel();
   return res.ok ? undefined : `HTTP ${res.status}`;
 }
@@ -195,7 +215,7 @@ async function checkLink(target: string, base: string): Promise<Link> {
       return { target, status: "FAIL", reason: (e as Error).message };
     }
   }
-  const path = decodeURIComponent(target.replace(/[?#].*$/, ""));
+  const path = decodeURIComponent(target.replace(QUERY, ""));
   return existsSync(resolve(base, path.replace(/^\/+/, ""))) ? { target, status: "ok" } : { target, status: "FAIL", reason: "no such file in the repo" };
 }
 
@@ -219,7 +239,7 @@ function stepTable(markdown: string): { name: string; links: string[]; pending: 
     const rows = [];
     for (let j = i + 2; isRow(section[j]); j++) {
       const [first = "", ...rest] = cells(section[j]!);
-      const links = [...rest.join("|").matchAll(/\]\(\s*<?([^)\s>]+)/g)].map((m) => m[1]!.replace(/[?#].*$/, ""));
+      const links = [...rest.join("|").matchAll(/\]\(\s*<?([^)\s>]+)/g)].map((m) => m[1]!.replace(QUERY, ""));
       rows.push({ name: plain(first), links, pending: hasPlaceholder(section[j]!) });
     }
     return rows;
@@ -266,7 +286,17 @@ async function parity(markdown: string): Promise<Parity> {
 
   delete process.env.NEXT_PUBLIC_NETWORK; // the README's proof is mainnet's: read it as the mainnet build does
   const { readDemo } = (await import(`${repo}web/lib/demo.ts`)) as typeof import("../web/lib/demo.ts");
-  const demo = await readDemo();
+  let demo: Awaited<ReturnType<typeof readDemo>> = null;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      demo = await readDemo();
+      break;
+    } catch (e) {
+      // The reader is the landing page's own and doesn't retry a rate-limited RPC; give it room.
+      if (attempt === 3) return { names, transactions: "FAIL", problems: [...problems, `the landing page's demo reader failed: ${(e as Error).message}`] };
+      await sleep(2000 * 2 ** attempt);
+    }
+  }
   if (!demo) return { names, transactions: "FAIL", problems: [...problems, "the landing page's demo reader found no demo bounty"] };
   let failed = false;
   let pending = false;
@@ -277,7 +307,7 @@ async function parity(markdown: string): Promise<Parity> {
       pending = true;
       continue;
     }
-    const theirs = (demo.story.steps[i] ?? []).filter((t) => t.hash).map((t) => t.href.replace(/[?#].*$/, ""));
+    const theirs = (demo.story.steps[i] ?? []).filter((t) => t.hash).map((t) => t.href.replace(QUERY, ""));
     for (const link of row.links.filter((l) => !theirs.includes(l))) {
       failed = true;
       problems.push(`${row.name} cites ${link}, which the landing page's demo reader doesn't return for that step`);
@@ -295,7 +325,24 @@ const bountee = `bountee() { node ${JSON.stringify(`${repo}cli/src/main.ts`)} "$
 
 const markdown = readFileSync(readme, "utf8");
 const waiting = placeholders(markdown);
-const [linkResults, parityResult] = await Promise.all([Promise.all(links(markdown).map((t) => checkLink(t, dirname(resolve(readme))))), parity(markdown)]);
+/** Each link once, a few at a time, so public RPCs aren't hit with a burst. */
+async function checkLinks(targets: string[], base: string): Promise<Link[]> {
+  const unique = [...new Set(targets)];
+  const checked = new Map<string, Link>();
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: 4 }, async () => {
+      while (next < unique.length) {
+        const target = unique[next++]!;
+        checked.set(target, await checkLink(target, base));
+      }
+    }),
+  );
+  return targets.map((t) => checked.get(t)!);
+}
+// Links first, then the landing page's reader, which makes its own burst of RPC calls.
+const linkResults = await checkLinks(links(markdown), dirname(resolve(readme)));
+const parityResult = await parity(markdown);
 
 const results: { command: string; status: Status; missing?: string[]; output?: string }[] = [];
 for (const step of steps(markdown)) {

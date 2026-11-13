@@ -1,0 +1,24 @@
+Your Whitehat's handover (mainnet)
+
+Network:            NEAR mainnet (pass --network mainnet to bountee commands)
+Bounty contract:    bounty3.bountee.near
+Bounty:             demo.bountee.near/demo
+Whitehat account:   d394d052bf52d60330c55853bd508fe7d6159243969668f9fdfbf101f6aea6b8 (claim as --as d394d052bf52d60330c55853bd508fe7d6159243969668f9fdfbf101f6aea6b8)
+Credentials folder: <kit>/claim-key  (the claim key only; pass it as BOUNTEE_CREDENTIALS_DIR)
+Covered contract source: <kit>/vault-source/  (as the Protocol publishes it; the USDC is Circle's)
+Instructions:       <kit>/docs/agent-instructions.md
+
+Tools on this machine:
+- bountee: <kit>/bin/bountee (put <kit>/bin on your PATH: export PATH="<kit>/bin:$PATH")
+- Foundry (forge, cast, anvil) and wasmtime are on PATH.
+- This machine has no GitHub access, so `forge init` can't download forge-std. Use
+  `forge init --offline --no-git <dir>` and map forge-std to the copy here: put
+  forge-std/=<kit>/forge-std/src/ in <dir>/remappings.txt.
+- Base RPC: https://mainnet.base.org
+- Arbitrum One RPC: https://arb1.arbitrum.io/rpc
+- Free public RPCs rate-limit (HTTP 429, "rate limit"). If a command fails that way, wait a
+  minute and run it again. `bountee test` also takes `--rpc <url>`: for Base, https://base.drpc.org
+  or https://8453.rpc.thirdweb.com; for Arbitrum One, https://arb1.arbitrum.io/rpc or
+  https://42161.rpc.thirdweb.com.
+
+Work only inside <kit>.
