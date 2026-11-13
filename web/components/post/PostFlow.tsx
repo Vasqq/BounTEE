@@ -1,13 +1,14 @@
 "use client";
-// The posting flow (#31): a Protocol posts a bounty with the MetaMask it already uses (D13).
+// The posting flow (#31): a Protocol posts a bounty with the Ethereum wallet it already uses (D13).
 // Four steps, moved between with the floating dock (DESIGN.md, Posting flow). Everything
-// checked is read live (lib/posting.ts) and ticked off only once it is on chain; MetaMask signs
+// checked is read live (lib/posting.ts) and ticked off only once it is on chain; the wallet signs
 // the EVM grants and top-ups directly, and NEAR transactions as the Protocol's 0x… account.
-// The rules need no wallet: MetaMask connects at the first step that needs its address.
+// The rules need no wallet: the wallet connects at the first step that needs its address.
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { encodeFunctionData, formatUnits, hexToBytes, keccak256, parseAbi, toHex, type Address } from "viem";
-import { useAccount, useConnect, useSignMessage } from "wagmi";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { useAccount, useSignMessage } from "wagmi";
 import { sendTransaction, switchChain, waitForTransactionReceipt } from "wagmi/actions";
 import { draftProblems, emptyDraft, nextLabel, rulesOf, slug, usdcUnits, type Draft } from "@/lib/draft.ts";
 import { exploitKeyMessage, keyFromFile, keyFromSignature, publicKeyText } from "@/lib/exploit-key.ts";
@@ -17,7 +18,7 @@ import { coveredChain, net } from "@/lib/network.ts";
 import type { EvmCall, PostingBasics, PostingStatus } from "@/lib/posting.ts";
 import { BOUNTY_CONTRACT, NEAR_USDC, pauseRoleOf } from "@/lib/pinned.ts";
 import { rulesInPlainEnglish } from "@/lib/rules.ts";
-import { wagmiConfig } from "@/lib/wagmi.ts";
+import { useWalletConnecting, wagmiConfig } from "@/lib/wagmi.ts";
 import { CommandBlock } from "../CommandBlock.tsx";
 import { ChainSelect } from "./ChainSelect.tsx";
 import { EndDate } from "./EndDate.tsx";
@@ -36,7 +37,7 @@ const eth = (wei: string | bigint) => units(wei, 18);
 /** A wallet error as one sentence: a rejection says so; anything else, what the wallet or chain said. */
 function walletError(e: unknown): string {
   const err = e as { shortMessage?: string; message?: string; code?: number; cause?: { code?: number } };
-  if (err.code === 4001 || err.cause?.code === 4001 || /reject|denied/i.test(err.message ?? "")) return "MetaMask didn't send it.";
+  if (err.code === 4001 || err.cause?.code === 4001 || /reject|denied/i.test(err.message ?? "")) return "Your wallet didn't send it.";
   return err.shortMessage ?? err.message ?? "Something went wrong.";
 }
 
@@ -78,7 +79,7 @@ const PAUSER_ROLE = keccak256(toHex("PAUSER_ROLE"));
 
 /**
  * The server's answer, checked against what this build pins before any of it reaches
- * MetaMask: the bounty contract, NEAR's USDC, and the pause-role address derived here. Each
+ * the wallet: the bounty contract, NEAR's USDC, and the pause-role address derived here. Each
  * grant's calldata is rebuilt here too, so the server only says which contracts use
  * AccessControl, never what to sign.
  */
@@ -96,7 +97,7 @@ function trusted(s: PostingStatus, protocol: string, name: string): PostingStatu
   };
 }
 
-/** Send one EVM transaction from MetaMask on its chain and wait for it to land. */
+/** Send one EVM transaction from the wallet on its chain and wait for it to land. */
 async function sendOn(call: EvmCall) {
   // Widened to number: wagmi types a send by the wallet setup's chains, which are built from the table untyped by ID.
   const chainId: number | undefined = coveredChain(call.chainId)?.id;
@@ -159,7 +160,7 @@ export function PostFlow() {
     <>
       <p className="step-lead">You've posted a bounty named {draft.name} before, and a name is never reused.</p>
       <div className="send">
-        <button type="button" className="btn btn-ink" onClick={() => setDraft({ ...draft, label: renamed, name: slug(renamed) })}>
+        <button type="button" className="btn btn-ink" onClick={() => setDraft((x) => ({ ...x, label: renamed, name: slug(renamed) }))}>
           Use {slug(renamed)}
         </button>
       </div>
@@ -171,7 +172,7 @@ export function PostFlow() {
   return (
     <>
       <h1 className="page-title">Post a bounty</h1>
-      <p className="lead">Everything signs with MetaMask. No NEAR wallet needed.</p>
+      <p className="lead">Everything signs with your wallet. No NEAR wallet needed.</p>
       <div className="post-grid">
         <div>
           {[basicsQuery, q].map((x, i) =>
@@ -242,29 +243,22 @@ function Problem({ m }: { m: { isError: boolean; error: unknown } }) {
 }
 
 /**
- * MetaMask connects only when a step first needs it: the wallet's address is the Protocol's
+ * The wallet connects only when a step first needs it: the wallet's address is the Protocol's
  * NEAR account and part of the bounty's ID, which the pause-role address comes from (D13, D25).
+ * The button opens the wallet picker (D34); the step goes on once wagmi reports an account.
  */
 function WithWallet({ account, why, children }: { account?: string; why: string; children: ReactNode }) {
-  const { connectors, connectAsync } = useConnect();
-  const connect = useMutation({
-    mutationFn: async () => {
-      const mm = connectors.find((c) => c.id === "io.metamask") ?? connectors.find((c) => c.id === "metaMask");
-      if (!mm || !(await mm.getProvider().catch(() => null))) throw new Error("MetaMask isn't installed in this browser.");
-      await connectAsync({ connector: mm });
-    },
-  });
+  const connecting = useWalletConnecting();
+  // RainbowKit offers the picker only while no wallet is connected or connecting.
+  const { openConnectModal } = useConnectModal();
   if (account) return <>{children}</>;
   return (
-    <>
-      <div className="send">
-        <button type="button" className="btn btn-ink" onClick={() => connect.mutate()} disabled={connect.isPending}>
-          {connect.isPending ? "Connecting" : "Connect MetaMask"}
-        </button>
-        <p>{why}</p>
-      </div>
-      <Problem m={connect} />
-    </>
+    <div className="send">
+      <button type="button" className="btn btn-ink" onClick={() => openConnectModal?.()} disabled={connecting}>
+        {connecting ? "Connecting" : "Connect wallet"}
+      </button>
+      <p>{why}</p>
+    </div>
   );
 }
 
@@ -282,13 +276,17 @@ function Field({ label, error, help, children }: { label: string; error?: string
   );
 }
 
-function RulesStep(p: { basics?: PostingBasics; taken: boolean; account?: string; draft: Draft; setDraft: (d: Draft) => void; problems: Record<string, string>; ok: boolean; next: () => void }) {
+function RulesStep(p: { basics?: PostingBasics; taken: boolean; account?: string; draft: Draft; setDraft: Dispatch<SetStateAction<Draft>>; problems: Record<string, string>; ok: boolean; next: () => void }) {
   const { draft: d, setDraft } = p;
-  const set = (patch: Partial<Draft>) => setDraft({ ...d, ...patch });
+  // Each change applies to the latest draft, not the one this render saw: the end date's default
+  // lands in an effect after hydration, and a field typed in before the next render would otherwise
+  // write the draft back without it. So writes never read `d`, which is only for showing.
+  const set = (patch: Partial<Draft>) => setDraft((x) => ({ ...x, ...patch }));
   // The chains offered are this build's (the network table), never the server's: a bounty here
   // can't cover a contract on another network's chain (D30).
   const chains = net.chains;
-  const setCovered = (i: number, patch: Partial<Draft["covered"][number]>) => set({ covered: d.covered.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
+  const editCovered = (f: (covered: Draft["covered"]) => Draft["covered"]) => setDraft((x) => ({ ...x, covered: f(x.covered) }));
+  const setCovered = (i: number, patch: Partial<Draft["covered"][number]>) => editCovered((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   // A typo shows once its field has been left.
   const [seen, setSeen] = useState<Record<string, boolean>>({});
   const err = (k: string) => (seen[k] ? p.problems[k] : undefined);
@@ -327,14 +325,14 @@ function RulesStep(p: { basics?: PostingBasics; taken: boolean; account?: string
                 <input className="datum" value={c.address} onChange={(e) => setCovered(i, { address: e.target.value.trim() })} onBlur={touch(`covered.${i}`)} placeholder="0x…" spellCheck={false} />
               </Field>
               {d.covered.length > 1 && (
-                <button type="button" className="btn btn-line" onClick={() => set({ covered: d.covered.filter((_, j) => j !== i) })}>
+                <button type="button" className="btn btn-line" onClick={() => editCovered((cs) => cs.filter((_, j) => j !== i))}>
                   Remove
                 </button>
               )}
             </div>
           ))}
           {d.covered.length < 8 && (
-            <button type="button" className="btn btn-line" onClick={() => set({ covered: [...d.covered, { chainId: d.covered.at(-1)!.chainId, address: "" }] })}>
+            <button type="button" className="btn btn-line" onClick={() => editCovered((cs) => [...cs, { chainId: cs.at(-1)!.chainId, address: "" }])}>
               Add a contract
             </button>
           )}
@@ -352,7 +350,7 @@ function RulesStep(p: { basics?: PostingBasics; taken: boolean; account?: string
               <span>USDC</span>
             </span>
           </Field>
-          <EndDate value={d.endDate} onChange={(endDate) => setDraft({ ...d, endDate })} onBlur={touch("endDate")} error={err("endDate")} />
+          <EndDate value={d.endDate} onChange={(endDate) => set({ endDate })} onBlur={touch("endDate")} error={err("endDate")} />
           <Field label="Keep the exploit private for" error={err("delay")} help={<>Your time to fix the bug before it <Hint tip="You get the exploit the moment the bounty pays, with your contracts already paused. After this, anyone can publish it so others can check the verdict.">goes public</Hint>.</>}>
             <span className="suffixed">
               <input inputMode="numeric" value={d.delay} onChange={(e) => set({ delay: e.target.value.trim() })} onBlur={touch("delay")} />
@@ -561,15 +559,15 @@ function FundStep({ s, account, draft, done, next }: { s?: PostingStatus; accoun
   return (
     <Step n={3} title={STEPS[2]}>
       <p className="step-lead">Send both to your NEAR account, from an exchange or another wallet. Each ticks off once it arrives.</p>
-      <WithWallet account={account} why="Your NEAR account is your MetaMask address.">
+      <WithWallet account={account} why="Your NEAR account is your wallet's address.">
         {account && (
           <div className="form">
             <div className="field">
               <span>Your NEAR account</span>
               <CommandBlock text={account} />
               <small>
-                Your MetaMask address, on NEAR.{" "}
-                <Hint tip="NEAR accepts Ethereum addresses as accounts, and MetaMask signs for this one. No NEAR wallet needed.">Why this address?</Hint>
+                Your wallet's address, on NEAR.{" "}
+                <Hint tip="NEAR accepts Ethereum addresses as accounts, and your wallet signs for this one. No NEAR wallet needed.">Why this address?</Hint>
               </small>
             </div>
           </div>
@@ -765,14 +763,14 @@ function PostStep(p: {
                 <>
                   <p>
                     The winning exploit opens only with this key.{" "}
-                    <Hint tip="It comes from one MetaMask signature of a message naming this bounty. Sign the same message again later to open the exploit: there's no file to keep.">
+                    <Hint tip="It comes from your wallet's signature of a message naming this bounty. Sign the same message again later to open the exploit: there's no file to keep.">
                       No file to keep
                     </Hint>
                     .
                   </p>
                   <div className="send">
                     <button type="button" className={ink(ready && !keyed)} onClick={() => sign.mutate()} disabled={!s || !draft.name || sign.isPending}>
-                      {sign.isPending ? "Signing" : "Sign with MetaMask"}
+                      {sign.isPending ? "Signing" : "Sign with your wallet"}
                     </button>
                   </div>
                   <Problem m={sign} />
@@ -783,7 +781,7 @@ function PostStep(p: {
           <Item n={2} title="Enable NEAR signing" done={onboarded}>
             {!onboarded && s && (
               <>
-                <p>Lets MetaMask sign for your NEAR account. Free, and needed once.</p>
+                <p>Lets your wallet sign for your NEAR account. Free, and needed once.</p>
                 <div className="send">
                   <button type="button" className={ink(ready && keyed && !onboarded)} onClick={() => enable.mutate()} disabled={!ready || enable.isPending || enable.isSuccess}>
                     {enable.isPending ? "Enabling" : enable.isSuccess ? "Confirming" : "Enable NEAR signing"}

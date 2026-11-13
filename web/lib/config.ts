@@ -48,7 +48,7 @@ export function config() {
      */
     demoCacheSecs: cacheSecs(env("DEMO_CACHE_SECS", "60")),
     chains: chains(),
-    /** NEAR's Ethereum-compatible RPC (NEP-518), through which MetaMask signs as a 0x… NEAR account. */
+    /** NEAR's Ethereum-compatible RPC (NEP-518), through which the Protocol's Ethereum wallet signs as a 0x… NEAR account. */
     nearEth: { chainId: net.nearEvm.id, rpc: env("NEAR_ETH_RPC", net.nearEvm.rpc) },
     /** The bounty contract's page on the NEAR explorer, where anyone can check what the site shows. */
     contractHref: `${NEAR_EXPLORER[net.network]}address/${contract}`,

@@ -105,6 +105,8 @@ Beyond "Try it" above, the full run needs [cargo-near](https://github.com/near/c
 
 The command-line tool reads three environment variables, all optional: `BOUNTEE_CONTRACT` (the bounty contract, in place of `--contract`), `BOUNTEE_CREDENTIALS_DIR` (where account keys are, in place of `~/.near-credentials/<network>`) and `BOUNTEE_WALLET_KEY_FILE` (the Protocol's EVM key file, for `open-exploit`).
 
+To build or run the web app yourself (`pnpm --filter @bountee/web build`, or `dev`), it needs `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`: a WalletConnect project ID from [Reown's dashboard](https://dashboard.reown.com), kept in `web/.env.local`, which git ignores. A build fails without it, and the wallet picker needs it in `dev` too. The tests set their own.
+
 ## Check the mainnet demo: no keys, no funds
 
 These need the network.
@@ -135,7 +137,7 @@ There is no live bounty for you to win. A win closes its bounty and pauses its v
 
 The same web app also runs as a testnet site, on NEAR testnet, Base Sepolia and Arbitrum Sepolia, with no real money. Its address isn't set yet: it isn't hosted, and this section will name it once it is. Its bounty contract is `bounty3.bountee.testnet`, which takes Circle's testnet USDC and holds no keys. Its bounty list holds bounties from made-up Protocols in each state that lasts: Live, Live with claims judged, Paid, Ended unclaimed, Withdrawn and Not posted, whose posting check failed (seeded by `cli/test/testnet/site-seed.ts`).
 
-To post a bounty there, you need MetaMask, testnet NEAR (`bountee init` creates a testnet account funded by NEAR's faucet), test USDC ([Circle's faucet](https://faucet.circle.com)) and a pausable contract you control on Base Sepolia or Arbitrum Sepolia. To claim from the command line, run `bountee init` for a testnet account, then `bountee test` and `bountee claim` against a Live bounty with `--contract bounty3.bountee.testnet --network testnet`.
+To post a bounty there, you need an Ethereum wallet that can sign on NEAR (MetaMask, Rabby, Zerion, or Brave Wallet in Brave; [ADR-0022](docs/adr/0022-only-wallets-that-can-sign-everything.md) says why only these), testnet NEAR (`bountee init` creates a testnet account funded by NEAR's faucet), test USDC ([Circle's faucet](https://faucet.circle.com)) and a pausable contract you control on Base Sepolia or Arbitrum Sepolia. To claim from the command line, run `bountee init` for a testnet account, then `bountee test` and `bountee claim` against a Live bounty with `--contract bounty3.bountee.testnet --network testnet`.
 
 Nothing on the testnet site is evidence for anything in this README. Every proof cited here is a mainnet transaction.
 

@@ -277,7 +277,14 @@ export const hashOfRaw = (raw: string) => `0x${bytesToHex(keccak_256(hexToBytes(
  * hash, its own; a chain never gives one hash two outcomes, and the app keeps a landed receipt on that promise).
  */
 export const rawPause = (chain: number, n = 0) => `0x02f8${chain.toString(16).padStart(6, "0")}${n.toString(16).padStart(8, "0")}deadbeef${"00".repeat(36)}`;
-let signings = 0;
+/**
+ * The signings made so far, counted in this worker's own range. The app's server keeps a landed
+ * receipt for its whole life, but this module starts afresh in each Playwright worker, and a new
+ * worker starts after any failed test: counted from 0, its pauses would repeat an earlier
+ * worker's hashes, and the server would show them as already landed. Each worker process has its
+ * own index, a restarted one too, so each counts from its index times 2^20.
+ */
+let signings = Number(process.env.TEST_WORKER_INDEX ?? 0) * 2 ** 20;
 
 /**
  * Win the bounty with claim `claimId`: pauses signed for each covered contract, the payout,
