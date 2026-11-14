@@ -384,13 +384,19 @@ Before you start, do the [Setup](#setup). Then, before the agent starts, follow 
 
 ### As a Protocol
 
-You need an Ethereum wallet that can sign on NEAR (MetaMask, Rabby, Zerion, or Brave Wallet in Brave) with testnet ETH on each chain you cover, and a pausable contract you control on Base Sepolia or Arbitrum Sepolia. Testnet NEAR and USDC come from faucets the app links in step 4.
+**Before you start, you need:**
 
-1. Open the testnet site and press **Post a bounty**.
-2. **Set rules.** Name what the bounty protects, add each contract and its chain, and set the **Bounty amount**, the **Smallest theft that counts** and how long to **Keep the exploit private for**. The **What you're risking** panel beside the form says what you're committing to.
-3. **Set up pause.** Press **Connect wallet**. For each chain, press **Grant** to give the pause role to the bounty's pause-role address (or **Copy for multisig** if a multisig owns the contract), then send that address its pause gas. Each task ticks off once it lands.
-4. **Add funds.** Your NEAR account is your wallet's address. Send it the bounty's USDC and NEAR for the posting fee and gas. Each ticks off once it arrives.
-5. **Post bounty.** **Sign with your wallet** to make your exploit key, so only you can open the winning exploit. Then **Enable NEAR signing**, **Prepay the posting fee** (0.5 NEAR, not refunded), and **Post the bounty**. The bounty goes Live once the posting check passes.
+- A browser wallet: MetaMask, Rabby or Zerion (or Brave Wallet in Brave).
+- Testnet ETH on each chain you cover, from [Base Sepolia's](https://docs.base.org/base-chain/tools/network-faucets) or [Arbitrum Sepolia's](https://docs.arbitrum.io/for-devs/dev-tools-and-resources/chain-info) faucets.
+- A contract on Base Sepolia or Arbitrum Sepolia with OpenZeppelin's AccessControl and a `PAUSER_ROLE` that can call `pause()`, where your wallet holds the admin role. The [OpenZeppelin Wizard](https://wizard.openzeppelin.com) makes one.
+
+**1. Set rules.** Open the [testnet site](https://testnet.bountee.dev), press **Post a bounty**, fill in the form and press **Continue**. The **What you're risking** panel beside it says what you're committing to.
+
+**2. Set up pause.** Press **Connect wallet** and pick your wallet. For each chain, press **Grant** (or **Copy for multisig** if a multisig owns the contract), then **Send** for its pause gas. You should see **granted** and **funded**.
+
+**3. Add funds.** Send your NEAR account, shown on the page, the bounty's USDC and the NEAR the page asks for. The page links the faucets. You should see **received** for both.
+
+**4. Post bounty.** Press **Sign with your wallet**, **Enable NEAR signing**, **Prepay the posting fee** (0.5 NEAR, not refunded), then **Post the bounty**. Within a few minutes you should see **Your bounty is live.**
 
 <img src="docs/images/posting-risk-testnet.png" alt="The posting flow's Set rules step beside the What you're risking panel, on the testnet site" width="900">
 
