@@ -597,5 +597,5 @@ MIT licensed. See [LICENSE](LICENSE).
 <br>
 <img src="brand/bountee-mark.svg" alt="" width="48">
 <br>
-<sub>BounTEE · proven on NEAR mainnet</sub>
+<sub>BounTEE</sub>
 </div>
