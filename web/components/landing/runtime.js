@@ -422,8 +422,7 @@ function buildStory(svg, bounty, opts = {}) {
     E('rect', { x: -6, y: -1.5, width: 12, height: 2.4, fill: 'rgb(24, 24, 25)' }, G);
     const t1 = E('text', { y: -27, 'font-size': 13, 'font-weight': 700, fill: '#eceeef' }, G); t1.textContent = titles[k];
     const t2 = E('text', { y: -11, 'font-size': 11, fill: '#919395', class: 'mono' }, G);
-    const dot = E('circle', { cy: -31, r: 3, fill: '#424345' }, G);
-    T[k] = { G, rect, t1, t2, dot, last: '' };
+    T[k] = { G, rect, t1, t2, last: '' };
   });
   function setTag(k, text, ok, hot) {
     const o = T[k];
@@ -436,10 +435,8 @@ function buildStory(svg, bounty, opts = {}) {
       const w = Math.max(w1 + 22, w2) + 24;
       o.rect.setAttribute('x', r2(-w / 2)); o.rect.setAttribute('width', r2(w));
       o.t1.setAttribute('x', r2(-w / 2 + 12)); o.t2.setAttribute('x', r2(-w / 2 + 12));
-      o.dot.setAttribute('cx', r2(w / 2 - 14));
       o.t2.setAttribute('fill', ok ? '#00ec97' : hot ? '#b9bbbc' : '#919395');
       o.rect.setAttribute('stroke', ok ? 'rgba(0, 236, 151, .55)' : hot ? '#727375' : '#424345');
-      o.dot.setAttribute('fill', ok ? '#00ec97' : hot ? '#b9bbbc' : '#424345');
     }
   }
   // packets and their labels
