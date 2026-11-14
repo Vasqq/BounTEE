@@ -160,7 +160,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
           <div className="wrap">
             <div className="verify-head">
               <h2 id="verifyH" className="rise">Don't take our word. Run the checks.</h2>
-              <p className="lead rise" style={delay("80ms")}>The command-line tool reads the demo bounty from the chains and rebuilds the code from source. It needs no keys and no funds. This is what it reports.</p>
+              <p className="lead rise" style={delay("80ms")}>The command-line tool reads the demo bounty from the chains and rebuilds the code from source. It needs no keys and no funds: <a href="https://github.com/Vasqq/bountee#check-every-claim-yourself" target="_blank" rel="noopener">set it up from the README</a>, then run the command. Below, the checks your browser can run, read live from the chains.</p>
             </div>
             <div className="term" id="term">
               <div className="term-bar">
