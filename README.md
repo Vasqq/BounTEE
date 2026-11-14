@@ -145,12 +145,18 @@ A Whitehat can also claim themselves; both paths are under [As a Whitehat](#as-a
 
 No keys or funds needed: every claim above can be checked from a clean checkout.
 
-You need Node 22.18 or later, pnpm, the Rust toolchain in `rust-toolchain.toml` with the `wasm32-wasip2` target, and [wasmtime](https://wasmtime.dev). The last step also needs Docker. From the repo root:
+You need:
+
+- [Node](https://nodejs.org) 22.18 or later, and [pnpm](https://pnpm.io/installation)
+- [Rust](https://rustup.rs), installed with rustup. The first build fetches the exact version this repo pins.
+- [wasmtime](https://wasmtime.dev)
+- For step 6 only: [Docker](https://docs.docker.com/get-docker/), running
 
 ```sh
+git clone https://github.com/Vasqq/bountee && cd bountee
 pnpm install
 cargo build --release -p bountee-judge --target wasm32-wasip2   # the judge the TEE runs
-alias bountee='node cli/src/main.ts'                           # in a script, use `pnpm bountee`
+alias bountee='node cli/src/main.ts'                           # run again in each new terminal
 ```
 
 Then one command runs every step below and checks its output: `node scripts/check-readme-steps.ts`. Steps 1 to 3 need no network.
@@ -205,10 +211,9 @@ enclave: PAYS (minimum_theft_reached)
 same verdict as the enclave
 ```
 
-**6. Rebuild the contract and judge, and check the whole demo bounty.** `verify` rebuilds the contract and the judge from the commit the deployment names, in Docker, and compares their hashes with what ran. It checks the TEE's attestation against Intel's certificates, the payout, each pause's landing and its verified record on NEAR, and re-runs the published exploit under the rebuilt judge. The rebuild takes about 10 minutes.
+**6. Rebuild the contract and judge, and check the whole demo bounty.** `verify` rebuilds the contract and the judge from the commit the deployment names, in Docker, and compares their hashes with what ran. It checks the TEE's attestation against Intel's certificates, the payout, each pause's landing and its verified record on NEAR, and re-runs the published exploit under the rebuilt judge. The rebuild takes up to 10 minutes.
 
-<!-- PENDING: tag mainnet-bounty3 pushed to GitHub, then drop `pending` from the block below -->
-```console online pending
+```console online
 $ bountee verify demo.bountee.near/demo --contract bounty3.bountee.near --network mainnet
 pass contract_code
 pass judge_build
