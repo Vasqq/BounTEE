@@ -18,7 +18,7 @@ Bug bounties that pay themselves. A Whitehat, or their AI agent, seals an exploi
 [![TypeScript](https://img.shields.io/badge/TypeScript-CLI%20%26%20web-3178C6?logo=typescript&logoColor=white)](cli/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-[Demo video](<!-- PENDING: demo video URL -->) · [Live site](<!-- PENDING: mainnet site URL -->) · [Try it on testnet](<!-- PENDING: testnet site URL -->) · [How it works](#how-it-works) · [Mainnet proof](#mainnet-proof) · [Hackathon tracks](#hackathon-tracks) · [Check every claim](#check-every-claim-yourself) · [Architecture](#architecture) · [Roadmap](#roadmap)
+[Demo video](<!-- PENDING: demo video URL -->) · [Live site](https://bountee.dev) · [Try it on testnet](https://testnet.bountee.dev) · [How it works](#how-it-works) · [Mainnet proof](#mainnet-proof) · [Hackathon tracks](#hackathon-tracks) · [Check every claim](#check-every-claim-yourself) · [Architecture](#architecture) · [Roadmap](#roadmap)
 
 <br>
 
@@ -237,7 +237,7 @@ no check failed
 > [!IMPORTANT]
 > The testnet site is for trying BounTEE with no real money: NEAR testnet, Base Sepolia and Arbitrum Sepolia. Nothing on it is evidence; the proof above is all mainnet.
 
-The testnet site <!-- PENDING: testnet site URL --> runs the same web app against `bounty3.bountee.testnet`, which takes Circle's testnet USDC and holds no keys.
+The [testnet site](https://testnet.bountee.dev) runs the same web app against `bounty3.bountee.testnet`, which takes Circle's testnet USDC and holds no keys.
 
 <img src="docs/images/bounties-testnet.png" alt="The testnet site's bounty list" width="900">
 
