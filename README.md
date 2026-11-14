@@ -12,13 +12,9 @@ Bug bounties that pay themselves. A Whitehat, or their AI agent, seals an exploi
 [![NEAR mainnet](https://img.shields.io/badge/NEAR-mainnet-00EC97)](https://nearblocks.io/address/bounty3.bountee.near)
 [![Chain Signatures](https://img.shields.io/badge/Chain%20Signatures-pauses%20signed-00EC97)](https://nearblocks.io/txns/6xbAxbuABt1i2f37YQobnCpot1iuSfUfKKRSih5nV5DL)
 [![OutLayer TDX](https://img.shields.io/badge/OutLayer-TDX%20attested-5B5BD6)](https://api.outlayer.ai/attestations/by-tx/6xbAxbuABt1i2f37YQobnCpot1iuSfUfKKRSih5nV5DL)
-[![Base](https://img.shields.io/badge/Base-paused-0052FF)](https://basescan.org/tx/0xdb51859768a260f5b151540cdec806e45cf8e0367c4c9cea9fa2bd910a184eb3)
-[![Arbitrum One](https://img.shields.io/badge/Arbitrum%20One-paused-28A0F0)](https://arbiscan.io/tx/0x74c9e4b697a61ca0512a3bee5a016adc45cc1190c081ed669ab6e1db37158573)
-[![Rust](https://img.shields.io/badge/Rust-contract%20%26%20judge-B7410E?logo=rust&logoColor=white)](contract/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-CLI%20%26%20web-3178C6?logo=typescript&logoColor=white)](cli/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+[![Paused on Base and Arbitrum One](https://img.shields.io/badge/Paused-Base%20%C2%B7%20Arbitrum%20One-0052FF)](#mainnet-proof)
 
-[Demo video](<!-- PENDING: demo video URL -->) · [Live site](https://bountee.dev) · [Try it on testnet](https://testnet.bountee.dev) · [How it works](#how-it-works) · [Mainnet proof](#mainnet-proof) · [Hackathon tracks](#hackathon-tracks) · [Check every claim](#check-every-claim-yourself) · [Architecture](#architecture) · [Roadmap](#roadmap)
+[Demo video](<!-- PENDING: demo video URL -->) · [Live site](https://bountee.dev) · [Try it on testnet](https://testnet.bountee.dev) · [Mainnet proof](#mainnet-proof) · [Setup](#setup) · [Check every claim](#check-every-claim-yourself)
 
 <br>
 
@@ -55,7 +51,7 @@ BounTEE depends on NEAR for five things, and each one ran on mainnet.
 
 ## How it works
 
-Every bounty goes through eight steps. The diagram below walks through a typical journey, from the Protocol's setup, through a claim that isn't a real bug and pays nothing, to the real exploit paid.
+A paid bounty goes through eight steps. The diagram below walks through a typical journey, from the Protocol's setup, through a claim that isn't a real bug and pays nothing, to the real exploit paid.
 
 ```mermaid
 sequenceDiagram
@@ -107,7 +103,7 @@ Everything here is on mainnet: NEAR, Base and Arbitrum One.
 
 | Account | Address |
 |---|---|
-| Bounty contract (keyless) | [`bounty3.bountee.near`](https://nearblocks.io/address/bounty3.bountee.near) |
+| Bounty contract | [`bounty3.bountee.near`](https://nearblocks.io/address/bounty3.bountee.near) |
 | Protocol | [`demo.bountee.near`](https://nearblocks.io/address/demo.bountee.near) |
 | Whitehat | [`d394d052…f6aea6b8`](https://nearblocks.io/address/d394d052bf52d60330c55853bd508fe7d6159243969668f9fdfbf101f6aea6b8) |
 | Pause-role address, the same on both chains | [`0x1a36e8fd…215316c8` on Base](https://basescan.org/address/0x1a36e8fd8a9a1861647c05e4fc44294c215316c8) · [on Arbitrum One](https://arbiscan.io/address/0x1a36e8fd8a9a1861647c05e4fc44294c215316c8) |
@@ -141,75 +137,161 @@ In this demo, the Whitehat's AI agent filed the winning claim, the Sealed-to-Pai
 
 A Whitehat can also claim themselves; both paths are under [As a Whitehat](#as-a-whitehat).
 
-## Check every claim yourself
+## Setup
 
-No keys or funds needed: every claim above can be checked from a clean checkout.
+Do this once. Every command-line section below starts from here.
 
-You need Node 22.18 or later, pnpm, the Rust toolchain in `rust-toolchain.toml` with the `wasm32-wasip2` target, and [wasmtime](https://wasmtime.dev). The last step also needs Docker. From the repo root:
+**1. Install these tools.**
+
+- [Node](https://nodejs.org) 22.18 or later
+- [pnpm](https://pnpm.io/installation)
+- [Rust](https://rustup.rs)
+- [wasmtime](https://wasmtime.dev)
+- [Docker](https://docs.docker.com/get-docker/) and [cargo-near](https://github.com/near/cargo-near#installation), only for step 6 of [Check every claim yourself](#check-every-claim-yourself). Open Docker so it's running.
+
+**2. Get the code.** Copy each box, paste it into your terminal and press Enter.
+
+```sh
+git clone https://github.com/Vasqq/bountee && cd bountee
+```
+
+**3. Install the packages.**
 
 ```sh
 pnpm install
-cargo build --release -p bountee-judge --target wasm32-wasip2   # the judge the TEE runs
-alias bountee='node cli/src/main.ts'                           # in a script, use `pnpm bountee`
 ```
 
-Then one command runs every step below and checks its output: `node scripts/check-readme-steps.ts`. Steps 1 to 3 need no network.
+**4. Build the judge.** The first time takes a few minutes.
 
-**1. A real exploit pays, and a cheat pays nothing.** These replay recorded claims through the judge you just built, against an earlier demo vault, [`demo/src/DemoVault.sol`](demo/src/DemoVault.sol). In the cheat, a depositor withdraws its own money: funds leave the vault, but nothing is stolen.
+```sh
+cargo build --release -p bountee-judge --target wasm32-wasip2
+```
 
-```console
-$ bountee test --job demo/fixtures/exploit.json
+**5. Make the `bountee` command.**
+
+```sh
+alias bountee='node cli/src/main.ts'
+```
+
+If your shell doesn't keep aliases between commands (an AI agent's often doesn't), run `node cli/src/main.ts` from the `bountee` folder wherever this README says `bountee`.
+
+**6. Check it works.** You should see `bountee 0.1.0`.
+
+```sh
+bountee --version
+```
+
+**Opened a new terminal window?** Run `cd bountee` and step 5 again.
+
+**Now pick what to do:**
+
+- [Check every claim yourself](#check-every-claim-yourself): re-run the proofs.
+- [As a Whitehat](#as-a-whitehat): find the bug in a testnet bounty and claim it.
+- [With your AI agent](#with-your-ai-agent): let your agent claim for you.
+- [As a Protocol](#as-a-protocol) needs no Setup: it runs in your browser, with a wallet.
+
+## Check every claim yourself
+
+**Before you start:** do the [Setup](#setup).
+
+**To run every step at once**, with each output checked for you:
+
+```sh
+node scripts/check-readme-steps.ts
+```
+
+It runs step 6's rebuild too, so allow up to 15 minutes. At the end you should see:
+
+```text
+steps: 12 ok, 0 failed, 0 pending, 0 skipped (online)
+```
+
+and `0 failed` on the `links:` line below it. Any line starting `FAIL` names what broke. Or run the steps one by one, in order. Steps 1 to 3 work offline.
+
+**1. A real exploit pays, and a cheat pays nothing.** These replay recorded claims through the judge you built in Setup, against an earlier demo vault, [`demo/src/DemoVault.sol`](demo/src/DemoVault.sol). In the cheat, a depositor withdraws its own money: funds leave the vault, but nothing is stolen.
+
+```sh check
+bountee test --job demo/fixtures/exploit.json
+bountee test --job demo/fixtures/cheat.json
+```
+
+You should see:
+
+```text
 verdict: PAYS (minimum_theft_reached)
-$ bountee test --job demo/fixtures/cheat.json
 verdict: ZERO (below_minimum_theft)
 ```
 
 **2. The judge isn't tuned to my demo.** Three [Damn Vulnerable DeFi](https://www.damnvulnerabledefi.xyz) v4 levels, each with an exploit that pays and a cheat that doesn't.
 
-```console
-$ bountee test --job demo/fixtures/dvd/truster-exploit.json
+```sh check
+bountee test --job demo/fixtures/dvd/truster-exploit.json
+bountee test --job demo/fixtures/dvd/truster-cheat.json
+bountee test --job demo/fixtures/dvd/side-entrance-exploit.json
+bountee test --job demo/fixtures/dvd/side-entrance-cheat.json
+bountee test --job demo/fixtures/dvd/puppet-exploit.json
+bountee test --job demo/fixtures/dvd/puppet-cheat.json
+```
+
+You should see:
+
+```text
 verdict: PAYS (minimum_theft_reached)
-$ bountee test --job demo/fixtures/dvd/truster-cheat.json
 verdict: ZERO (below_minimum_theft)
-$ bountee test --job demo/fixtures/dvd/side-entrance-exploit.json
 verdict: PAYS (minimum_theft_reached)
-$ bountee test --job demo/fixtures/dvd/side-entrance-cheat.json
 verdict: ZERO (below_minimum_theft)
-$ bountee test --job demo/fixtures/dvd/puppet-exploit.json
 verdict: PAYS (minimum_theft_reached)
-$ bountee test --job demo/fixtures/dvd/puppet-cheat.json
 verdict: ZERO (below_minimum_theft)
 ```
 
 **3. A real historical hack pays.** The June 2023 DEPUSDT/LEVUSDC hack, replayed against Ethereum mainnet's real state at the block before it.
 
-```console
-$ bountee test --job cli/test/fixtures/historical/depusdt-levusdc.json
+```sh check
+bountee test --job cli/test/fixtures/historical/depusdt-levusdc.json
+```
+
+You should see:
+
+```text
 verdict: PAYS (minimum_theft_reached)
 block: 17484161
 ```
 
-**4. The bounty contract holds no keys.** This reads mainnet with no account.
+**4. The bounty contract holds no keys.** This reads mainnet.
 
-```console online
-$ curl -s https://free.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"bounty3.bountee.near"}}'
+```sh check online
+curl -s https://free.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"bounty3.bountee.near"}}'
+```
+
+You should see a reply that includes:
+
+```text
 "keys":[]
 ```
 
 **5. The demo's winning exploit, re-run on your machine.** `rerun` fetches the published exploit and the proofs its claim put on NEAR, replays them without contacting Base, and compares with the TEE's verdict (the tool labels it `enclave`).
 
-```console online
-$ bountee rerun demo.bountee.near/demo --contract bounty3.bountee.near --network mainnet
+```sh check online
+bountee rerun demo.bountee.near/demo --contract bounty3.bountee.near --network mainnet
+```
+
+You should see:
+
+```text
 verdict: PAYS (minimum_theft_reached)
 enclave: PAYS (minimum_theft_reached)
 same verdict as the enclave
 ```
 
-**6. Rebuild the contract and judge, and check the whole demo bounty.** `verify` rebuilds the contract and the judge from the commit the deployment names, in Docker, and compares their hashes with what ran. It checks the TEE's attestation against Intel's certificates, the payout, each pause's landing and its verified record on NEAR, and re-runs the published exploit under the rebuilt judge. The rebuild takes about 10 minutes.
+**6. Rebuild the contract and judge, and check the whole demo bounty.** `verify` rebuilds the contract and the judge from the commit the deployment names, in Docker, and compares their hashes with what ran. It checks the TEE's attestation against Intel's certificates, the payout, each pause's landing and its verified record on NEAR, and re-runs the published exploit under the rebuilt judge. The rebuild takes up to 10 minutes.
 
-<!-- PENDING: tag mainnet-bounty3 pushed to GitHub, then drop `pending` from the block below -->
-```console online pending
-$ bountee verify demo.bountee.near/demo --contract bounty3.bountee.near --network mainnet
+```sh check online
+bountee verify demo.bountee.near/demo --contract bounty3.bountee.near --network mainnet
+```
+
+After the build log, you should see a `pass` line for each check (the pauses once per chain), ending with `no check failed`:
+
+```text
 pass contract_code
 pass judge_build
 pass attestation
@@ -220,24 +302,30 @@ pass rerun
 no check failed
 ```
 
+**If a step fails:**
+
+- `sanity check failed`: Docker isn't running. Open it and run it again.
+- `Rate limits exceeded` or `HTTP 429`: the public NEAR endpoint is busy. Wait a minute and run it again.
+- `command not found` for `bountee`: see "Opened a new terminal window?" in [Setup](#setup).
+
 <img src="docs/images/verify-mainnet.png" alt="The demo bounty's Verify section on the mainnet site" width="900">
 
 <sub>The same checks on the demo bounty's mainnet page; the rebuild and re-run happen only with the command above.</sub>
 
 ## Known gaps
 
-- **Not audited by a third party.** My own audit found no critical or high issues, and its five known issues are listed in [docs/audit.md](docs/audit.md). They stay unfixed so the demo runs the build the full rehearsal ran. The audit covered the build first deployed as `bounty.bountee.near`, not the later changes that let `bounty3.bountee.near` take a claim proven on any covered chain.
+- **Not audited by a third party.** My own audit found no critical or high issues; its findings are listed in [docs/audit.md](docs/audit.md). They stay unfixed because the deployed build has to be the one the full testnet rehearsal ran, and any fix changes its code hash. The audit covered the build first deployed as `bounty.bountee.near`, not the later changes that let `bounty3.bountee.near` take a claim proven on any covered chain.
 - **No admin, no upgrades.** If NEAR's MPC network changes its interface so pauses can't be signed, or Circle blocklists the winner, that bounty is stuck and its USDC stays locked.
 - **The contract trusts OutLayer's result.** It doesn't check the TEE's attestation itself; anyone can check it afterwards with `bountee verify`.
 - **One payout per bounty, EVM chains only.** A bounty pays its first proven exploit and closes. Each claim is proven on one covered chain, so an exploit that needs two chains' state at once can't be judged.
-- **The demo bounty is deliberately small:** 10 USDC (see [Mainnet proof](#mainnet-proof)).
+- **The demo bounty is deliberately small** (see [Mainnet proof](#mainnet-proof)).
 
 ## Use it
 
 > [!IMPORTANT]
 > The testnet site is for trying BounTEE with no real money: NEAR testnet, Base Sepolia and Arbitrum Sepolia. Nothing on it is evidence; the proof above is all mainnet.
 
-The [testnet site](https://testnet.bountee.dev) runs the same web app against `bounty3.bountee.testnet`, which takes Circle's testnet USDC and holds no keys.
+The [testnet site](https://testnet.bountee.dev) runs the same web app against `bounty3.bountee.testnet`, which takes Circle's testnet USDC.
 
 <img src="docs/images/bounties-testnet.png" alt="The testnet site's bounty list" width="900">
 
@@ -245,31 +333,82 @@ The [testnet site](https://testnet.bountee.dev) runs the same web app against `b
 
 ### As a Whitehat
 
-The testnet site's Live bounties cover a vault with a real bug. Find it, prove it and claim the bounty's test USDC. Each bounty pays only its first win.
+Find the bug in a Live bounty's vault, prove it, and claim the bounty's test USDC.
 
-You need the setup from [Check every claim yourself](#check-every-claim-yourself) and [Foundry](https://getfoundry.sh).
+**Before you start:** do the [Setup](#setup) and install [Foundry](https://getfoundry.sh). Check it with `forge --version`.
 
-1. `bountee init` creates a testnet account and funds it from NEAR's faucet.
-2. Pick a Live bounty on the testnet site. Its page lists each covered contract and its chain. The vault's source is [`demo/src/PositionVault.sol`](demo/src/PositionVault.sol).
-3. Write your exploit as a Foundry script. Its `run()` broadcasts the attack and sends the stolen tokens to `msg.sender`, from a fresh account with no role on any contract ([details](docs/agent-instructions.md#steps), step 3).
-4. `bountee test <script> --bounty <protocol>/<name> --chain <chain> --contract bounty3.bountee.testnet --network testnet` runs the judge on your machine, so you know the result before you spend anything. `--chain` is needed when a bounty covers more than one chain. The first run can take a few minutes.
-5. When it says PAYS, `bountee claim <script> --bounty <protocol>/<name> --chain <chain> --contract bounty3.bountee.testnet --as <your account> --network testnet` seals the exploit, files it and shows each step live until the pauses are verified, which can take up to half an hour. Each claim costs about 0.3 testnet NEAR, whatever the result. You get a receipt with every transaction.
+**1. Make your testnet account.**
+
+```sh
+bountee init
+```
+
+You should see `Created bountee-….testnet with 10 testnet NEAR from NEAR's faucet`. Note that account name: step 5 needs it.
+
+**2. Pick a Live bounty.** On the [testnet site](https://testnet.bountee.dev), open a bounty marked **Live** whose name, at the top, has the form `<protocol>.testnet/<name>`. Print its details:
+
+```sh
+bountee show <bounty name> --contract bounty3.bountee.testnet --network testnet
+```
+
+You should see `live`, the minimum theft in USDC's smallest unit (1000000 is 1 USDC), and under `covered contracts` each chain with the vault's full address. The vault's source is [`demo/src/PositionVault.sol`](demo/src/PositionVault.sol).
+
+**3. Write your exploit** as a Foundry script, in a project beside the repo:
+
+```sh
+forge init ../my-exploit
+```
+
+Write it as `../my-exploit/script/Exploit.s.sol`. Its `run()` wraps the attack in `vm.startBroadcast()` and `vm.stopBroadcast()`, and sends the stolen tokens to `msg.sender`. Use the vault's address on the chain you'll test it on in step 4, written as `cast to-check-sum-address <address>` prints it. Running `forge build` in `../my-exploit` should show `Compiler run successful!`
+
+**4. Test it on your machine.** It's free and sends nothing. The first run can take a few minutes.
+
+```sh
+bountee test ../my-exploit/script/Exploit.s.sol --bounty <bounty name> --chain base-sepolia --contract bounty3.bountee.testnet --network testnet
+```
+
+`--chain` is a chain the bounty covers: `base-sepolia` or `arbitrum-sepolia`.
+
+You should see `verdict: PAYS (minimum_theft_reached)`. A note that your judge is "not the bounty's pinned build" is expected. `ZERO` means your exploit took less than the bounty's minimum theft (from step 2), or one of its transactions failed: fix the script and test again.
+
+**5. Claim it.** It costs about 0.3 testnet NEAR, whatever the result.
+
+```sh
+bountee claim ../my-exploit/script/Exploit.s.sol --bounty <bounty name> --chain base-sepolia --contract bounty3.bountee.testnet --as <your account> --network testnet
+```
+
+Within about a minute you should see, with one `pause landed` line per covered chain:
+
+```text
+claim <id>: verdict PAYS (minimum_theft_reached)
+claim <id>: paid 2000000 to <your account>
+claim <id>: pause landed on chain 84532 (success, …)
+claim <id>: pause landed on chain 421614 (success, …)
+```
+
+Keep it running. About 10 minutes later you'll see `pause verified on NEAR` for each chain, then a receipt listing every transaction. The bounty page now shows **Paid**.
 
 ### With your AI agent
 
 Your AI agent can find the bug and claim for you with claim-only access: it can call only `submit_claim` and `retry_claim`, can't move your money, and every win is paid to your account.
 
-Before it starts, follow [For the Whitehat: before you hand over](docs/agent-instructions.md#for-the-whitehat-before-you-hand-over): put `bountee` on the agent's PATH, top up your claim balance (the agent can't), and grant claim-only access with `bountee key add`. Then give the agent that folder and [docs/agent-instructions.md](docs/agent-instructions.md). `bountee key revoke` withdraws the access afterwards.
+Before you start, do the [Setup](#setup). Then, before the agent starts, follow [For the Whitehat: before you hand over](docs/agent-instructions.md#for-the-whitehat-before-you-hand-over): put `bountee` on the agent's PATH, top up your claim balance (the agent can't), and grant claim-only access with `bountee key add --out-dir <folder>`. Then give the agent that folder and [docs/agent-instructions.md](docs/agent-instructions.md). `bountee key revoke` withdraws the access afterwards.
 
 ### As a Protocol
 
-You need an Ethereum wallet that can sign on NEAR (MetaMask, Rabby, Zerion, or Brave Wallet in Brave) with testnet ETH on each chain you cover, and a pausable contract you control on Base Sepolia or Arbitrum Sepolia. Testnet NEAR and USDC come from faucets the app links in step 4.
+**Before you start, you need:**
 
-1. Open the testnet site and press **Post a bounty**.
-2. **Set rules.** Name what the bounty protects, add each contract and its chain, and set the **Bounty amount**, the **Smallest theft that counts** and how long to **Keep the exploit private for**. The **What you're risking** panel beside the form says what you're committing to.
-3. **Set up pause.** Press **Connect wallet**. For each chain, press **Grant** to give the pause role to the bounty's pause-role address (or **Copy for multisig** if a multisig owns the contract), then send that address its pause gas. Each task ticks off once it lands.
-4. **Add funds.** Your NEAR account is your wallet's address. Send it the bounty's USDC and NEAR for the posting fee and gas. Each ticks off once it arrives.
-5. **Post bounty.** **Sign with your wallet** to make your exploit key, so only you can open the winning exploit. Then **Enable NEAR signing**, **Prepay the posting fee** (0.5 NEAR, not refunded), and **Post the bounty**. The bounty goes Live once the posting check passes.
+- A browser wallet: MetaMask, Rabby or Zerion (or Brave Wallet in Brave).
+- Testnet ETH on each chain you cover, from [Base Sepolia's](https://docs.base.org/base-chain/tools/network-faucets) or [Arbitrum Sepolia's](https://docs.arbitrum.io/for-devs/dev-tools-and-resources/chain-info) faucets.
+- A contract on Base Sepolia or Arbitrum Sepolia with OpenZeppelin's AccessControl and a `PAUSER_ROLE` that can call `pause()`, where your wallet holds the admin role. The [OpenZeppelin Wizard](https://wizard.openzeppelin.com) makes one.
+
+**1. Set rules.** Open the [testnet site](https://testnet.bountee.dev), press **Post a bounty**, fill in the form and press **Continue**. The **What you're risking** panel beside it says what you're committing to.
+
+**2. Set up pause.** Press **Connect wallet** and pick your wallet. For each chain, press **Grant** (or **Copy for multisig** if a multisig owns the contract), then **Send** for its pause gas. You should see **granted** and **funded**.
+
+**3. Add funds.** Send your NEAR account, shown on the page, the bounty's USDC and the NEAR the page asks for. The page links the faucets. You should see **received** for both.
+
+**4. Post bounty.** Press **Sign with your wallet**, **Enable NEAR signing**, **Prepay the posting fee** (0.5 NEAR, not refunded), then **Post the bounty**. Within a few minutes you should see **Your bounty is live.**
 
 <img src="docs/images/posting-risk-testnet.png" alt="The posting flow's Set rules step beside the What you're risking panel, on the testnet site" width="900">
 
@@ -288,7 +427,7 @@ flowchart LR
         WEB["web app<br/>web/"]
     end
     subgraph NEAR["NEAR"]
-        C["bounty contract<br/>contract/ (keyless)"]
+        C["bounty contract<br/>contract/"]
         MPC["MPC network<br/>Chain Signatures, foreign-tx verification"]
         USDC["Circle USDC"]
     end
@@ -359,7 +498,7 @@ This time comes from the block timestamps of the transactions in the [step table
 <summary><strong>Stated limits</strong></summary>
 
 - **A pause protects only the covered contracts.** Copies of the same code deployed elsewhere stay exposed.
-- **Publishing the exploit exposes those copies further.** Winning exploits are published after the disclosure delay the Protocol chose at posting (1 to 90 days).
+- **Publishing the exploit exposes those copies further.** Winning exploits are published after the disclosure delay the Protocol chose at posting.
 - **Payouts are open to anyone, with no allowlist or KYC (identity checks).** Circle, USDC's issuer, can blocklist an account on NEAR's USDC, which would freeze a sanctioned winner's payout.
 - **Anyone can post a bounty on a copy of someone else's code**, to get a working exploit of it. Granting the pause role proves control of the covered contracts, not authorship of the code in them.
 - **A failed claim reveals its read set, never its exploit.** The claim's proofs go on NEAR, so anyone can see which fresh addresses and storage slots it touched.
@@ -382,7 +521,7 @@ Bounties that pay on a proven exploit aren't new in crypto. Two come closest:
 - **HoneyPause** (a winner at ETHDenver 2024): an on-chain exploit bounty tied to a circuit breaker. The exploit runs in public, and only its own chain pauses. BounTEE keeps the exploit sealed until the payout and pauses every covered chain.
 - **Sealed-Glass Proofs** (Tramèr et al., 2017): showed that a TEE can prove a bug exists, for a fair-exchange bounty. BounTEE turns that idea into a working bounty, live on mainnet.
 
-What neither has is what NEAR makes possible: one keyless contract that holds the bounty, pauses the covered contracts on every chain through Chain Signatures, and lets an AI agent claim with claim-only access ([Why NEAR](#why-near)).
+What neither has is what NEAR makes possible: one contract that holds the bounty, pauses the covered contracts on every chain through Chain Signatures, and lets an AI agent claim with claim-only access ([Why NEAR](#why-near)).
 
 ## Roadmap
 
@@ -392,7 +531,7 @@ After the hackathon, BounTEE grows in two phases: first hardening what's live, t
 
 | Deliverable | How I'll know it worked |
 |---|---|
-| A third-party audit of the bounty contract, with the five known issues fixed in a new deployment that is still keyless | Report published; every high and critical issue fixed |
+| A third-party audit of the bounty contract, with the findings in [docs/audit.md](docs/audit.md) fixed in a new deployment | Report published; every high and critical issue fixed |
 | The bounty contract checks the TEE's attestation itself, so nobody has to trust OutLayer's result | A forged result is refused on chain |
 | One or two pilot Protocols posting small live bounties | The first bounty posted by someone other than me, paid or ended |
 
@@ -409,7 +548,7 @@ NEAR's MPC network already signs and verifies all of these chains on mainnet (`v
 
 ### Sustainability
 
-The 0.5 NEAR posting fee covers only BounTEE's on-chain costs, so today it earns nothing. To pay for itself, the Protocol would pay a small service fee on top of the bounty at posting; the Whitehat still gets the whole bounty, and the contract stays keyless.
+The 0.5 NEAR posting fee covers only BounTEE's on-chain costs, so today it earns nothing. To pay for itself, the Protocol would pay a small service fee on top of the bounty at posting; the Whitehat still gets the whole bounty.
 
 ### How NEAR could help
 
@@ -419,7 +558,7 @@ A few things would help most: support funding the audit and an introduction to a
 
 Built for the NEAR hackathon (October to November 2026), for two tracks:
 
-- **Security** ("AI Security & Defense: trust, but verify"). BounTEE uses all three of the track's hints: an AI agent claims with claim-only access (a NEAR **function-call access key**), and anyone can check the **TEE attestation** of each result with `bountee verify`. The transactions are in the last two rows of [Why NEAR](#why-near).
+- **Security** ("AI Security & Defense: trust, but verify"). BounTEE uses all three of the track's hints: **agent security** and NEAR **function-call access keys** (an AI agent claims with claim-only access), and **TEE attestation** (anyone can check each result with `bountee verify`). The transactions are in the last two rows of [Why NEAR](#why-near).
 - **Privacy.** The exploit stays sealed until the Whitehat is paid: only the bounty contract's own TEE jobs can read it, and a copy sent to OutLayer directly is refused. The transaction is in the last row of [Why NEAR](#why-near).
 
 ## Run the tests
@@ -458,5 +597,5 @@ MIT licensed. See [LICENSE](LICENSE).
 <br>
 <img src="brand/bountee-mark.svg" alt="" width="48">
 <br>
-<sub>BounTEE · proven on NEAR mainnet</sub>
+<sub>BounTEE</sub>
 </div>

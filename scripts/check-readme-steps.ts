@@ -3,15 +3,19 @@
 //
 //   node scripts/check-readme-steps.ts [--offline] [--strict] [--readme <file>] [--json]
 //
-// Steps. A step is a `$ <command>` line in a ```console block; the lines after it, up to the
-// next `$ ` line or the block's end, are what its output must show: each must appear in the
-// command's stdout or stderr, compared with runs of spaces collapsed. The command runs from the
-// repo root under bash, with `bountee` meaning `node cli/src/main.ts`, and must exit 0. A
-// ```console online block needs the network (but no keys or funds); --offline skips it. A
-// ```console pending block, or a command holding a placeholder, is reported pending, not run.
+// Steps. A step is a command line in a ```sh check block: what a reader copies and pastes, one
+// command per line, with no prompt. The ```text block that follows it (before the next code
+// block) holds what the block's output must show, one line per expectation, in order: each must
+// appear in the commands' stdout or stderr, compared with runs of spaces collapsed, after the
+// previous one. Each command runs from the repo root under bash, with `bountee` meaning
+// `node cli/src/main.ts`, and must exit 0; a missing expectation fails the command whose output
+// should have held it. A ```sh check online block needs the network (but no keys or funds);
+// --offline skips it. A ```sh check pending block, or a command holding a placeholder, is
+// reported pending, not run. Plain ```sh blocks (setup, claims) are never run. Every command
+// in a step block must print at least one expected line.
 //
 // Placeholders. `<!-- PENDING: what goes here -->`, anywhere in the README (prose, tables, link
-// targets, console blocks), marks a slot still waiting for a fact. Each is reported pending;
+// targets, code blocks), marks a slot still waiting for a fact. Each is reported pending;
 // a link or step holding one is not checked.
 //
 // Links. Markdown links and images, reference definitions, and HTML href/src, outside code:
@@ -54,7 +58,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 type Status = "ok" | "FAIL" | "pending" | "skipped";
-type Step = { command: string; expect: string[]; online: boolean; pending: boolean };
+type Step = { commands: string[]; expect: string[]; online: boolean; pending: boolean };
 type Link = { target: string; status: Status; reason?: string };
 
 const repo = fileURLToPath(new URL("../", import.meta.url));
@@ -81,20 +85,17 @@ const ENDPOINTS = {
 const PLACEHOLDER = /<!--\s*PENDING:\s*([\s\S]*?)\s*-->/g;
 const hasPlaceholder = (s: string) => /<!--\s*PENDING:/.test(s);
 
-/** Every step in the README, in order. */
+/** Every step block in the README, in order: its commands and the output they must show. */
 function steps(markdown: string): Step[] {
   const out: Step[] = [];
-  for (const [, info, body] of markdown.matchAll(/^```(console[^\n]*)\n([\s\S]*?)^```/gm)) {
-    const tags = info!.split(/\s+/);
-    for (const line of body!.split("\n")) {
-      if (line.startsWith("$ ")) {
-        const command = line.slice(2).trim();
-        out.push({ command, expect: [], online: tags.includes("online"), pending: tags.includes("pending") || hasPlaceholder(command) });
-      } else if (line.trim() && out.length) {
-        out.at(-1)!.expect.push(line.trim());
-      }
-    }
-  }
+  const blocks = [...markdown.matchAll(/^```([^\n]*)\n([\s\S]*?)^```/gm)].map(([, info, body]) => ({ tags: info!.trim().split(/\s+/), body: body! }));
+  blocks.forEach(({ tags, body }, i) => {
+    if (tags[0] !== "sh" || tags[1] !== "check") return;
+    const next = blocks[i + 1];
+    const commands = body.split("\n").map((l) => l.trim()).filter(Boolean);
+    const expect = next?.tags[0] === "text" ? next.body.split("\n").map((l) => l.trim()).filter(Boolean) : [];
+    out.push({ commands, expect, online: tags.includes("online"), pending: tags.includes("pending") || commands.some(hasPlaceholder) });
+  });
   return out;
 }
 
@@ -346,19 +347,30 @@ const parityResult = await parity(markdown);
 
 const results: { command: string; status: Status; missing?: string[]; output?: string }[] = [];
 for (const step of steps(markdown)) {
-  if (step.pending) {
-    results.push({ command: step.command, status: "pending" });
+  if (step.pending || (step.online && flag("--offline"))) {
+    for (const command of step.commands) results.push({ command, status: step.pending ? "pending" : "skipped" });
     continue;
   }
-  if (step.online && flag("--offline")) {
-    results.push({ command: step.command, status: "skipped" });
-    continue;
-  }
-  const res = spawnSync("bash", ["-c", `${bountee}\n${step.command}`], { cwd: repo, encoding: "utf8", timeout: 600_000 });
-  const output = squash(`${res.stdout ?? ""}${res.stderr ?? ""}`);
-  const missing = step.expect.filter((e) => !output.includes(squash(e)));
-  const ok = res.status === 0 && missing.length === 0;
-  results.push(ok ? { command: step.command, status: "ok" } : { command: step.command, status: "FAIL", missing, output: `exit ${res.status}\n${output}` });
+  // The expectations are read in order across the block's commands: each command must show the
+  // next one, and takes as many more as its output shows, so a missing line fails the command
+  // that should have printed it; any left at the end fail the last command.
+  let next = 0;
+  step.commands.forEach((command, i) => {
+    const res = spawnSync("bash", ["-c", `${bountee}\n${command}`], { cwd: repo, encoding: "utf8", timeout: 600_000 });
+    const output = squash(`${res.stdout ?? ""}${res.stderr ?? ""}`);
+    const from = next;
+    let at = 0;
+    while (next < step.expect.length) {
+      const found = output.indexOf(squash(step.expect[next]!), at);
+      if (found < 0) break;
+      at = found + squash(step.expect[next]!).length;
+      next++;
+    }
+    const last = i === step.commands.length - 1;
+    const missing = next === from ? step.expect.slice(next, next + 1) : last ? step.expect.slice(next) : [];
+    const ok = res.status === 0 && missing.length === 0;
+    results.push(ok ? { command, status: "ok" } : { command, status: "FAIL", missing, output: `exit ${res.status}\n${output}` });
+  });
 }
 
 const failed =
