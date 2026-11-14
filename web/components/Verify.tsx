@@ -170,7 +170,13 @@ export function VerifyTerminal({ id, state }: { id: BountyId; state?: PublicStat
             <div className="vrun">
               <div className="vsub">
                 <h3>On your machine</h3>
-                <p>These rebuild the code from source, so they run only with the command below.</p>
+                <p>
+                  These rebuild the code from source, so they run only with the command below.{" "}
+                  <a href="https://github.com/Vasqq/bountee#check-every-claim-yourself" target="_blank" rel="noopener">
+                    Set it up from the README
+                  </a>{" "}
+                  first.
+                </p>
               </div>
               <ul className="vlocal" aria-label="Checks only the command runs">
                 {(result ? local : [null, null]).map((r, i) =>
