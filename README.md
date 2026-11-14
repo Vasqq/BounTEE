@@ -194,61 +194,86 @@ bountee --version
 
 ## Check every claim yourself
 
-No keys or funds needed. Before you start, do the [Setup](#setup).
+No keys or funds needed. **Before you start:** do the [Setup](#setup). Step 6 also needs Docker running.
 
-To run every step below at once and check each one's output:
+**To run every step at once**, with each output checked for you:
 
 ```sh
 node scripts/check-readme-steps.ts
 ```
 
-Steps 1 to 3 need no network.
+At the end you should see `0 failed`. Or run the steps one by one, in order. Steps 1 to 3 work offline.
 
 **1. A real exploit pays, and a cheat pays nothing.** These replay recorded claims through the judge you built in Setup, against an earlier demo vault, [`demo/src/DemoVault.sol`](demo/src/DemoVault.sol). In the cheat, a depositor withdraws its own money: funds leave the vault, but nothing is stolen.
 
-```console
-$ bountee test --job demo/fixtures/exploit.json
+```sh check
+bountee test --job demo/fixtures/exploit.json
+bountee test --job demo/fixtures/cheat.json
+```
+
+You should see:
+
+```text
 verdict: PAYS (minimum_theft_reached)
-$ bountee test --job demo/fixtures/cheat.json
 verdict: ZERO (below_minimum_theft)
 ```
 
 **2. The judge isn't tuned to my demo.** Three [Damn Vulnerable DeFi](https://www.damnvulnerabledefi.xyz) v4 levels, each with an exploit that pays and a cheat that doesn't.
 
-```console
-$ bountee test --job demo/fixtures/dvd/truster-exploit.json
+```sh check
+bountee test --job demo/fixtures/dvd/truster-exploit.json
+bountee test --job demo/fixtures/dvd/truster-cheat.json
+bountee test --job demo/fixtures/dvd/side-entrance-exploit.json
+bountee test --job demo/fixtures/dvd/side-entrance-cheat.json
+bountee test --job demo/fixtures/dvd/puppet-exploit.json
+bountee test --job demo/fixtures/dvd/puppet-cheat.json
+```
+
+You should see:
+
+```text
 verdict: PAYS (minimum_theft_reached)
-$ bountee test --job demo/fixtures/dvd/truster-cheat.json
 verdict: ZERO (below_minimum_theft)
-$ bountee test --job demo/fixtures/dvd/side-entrance-exploit.json
 verdict: PAYS (minimum_theft_reached)
-$ bountee test --job demo/fixtures/dvd/side-entrance-cheat.json
 verdict: ZERO (below_minimum_theft)
-$ bountee test --job demo/fixtures/dvd/puppet-exploit.json
 verdict: PAYS (minimum_theft_reached)
-$ bountee test --job demo/fixtures/dvd/puppet-cheat.json
 verdict: ZERO (below_minimum_theft)
 ```
 
 **3. A real historical hack pays.** The June 2023 DEPUSDT/LEVUSDC hack, replayed against Ethereum mainnet's real state at the block before it.
 
-```console
-$ bountee test --job cli/test/fixtures/historical/depusdt-levusdc.json
+```sh check
+bountee test --job cli/test/fixtures/historical/depusdt-levusdc.json
+```
+
+You should see:
+
+```text
 verdict: PAYS (minimum_theft_reached)
 block: 17484161
 ```
 
 **4. The bounty contract holds no keys.** This reads mainnet with no account.
 
-```console online
-$ curl -s https://free.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"bounty3.bountee.near"}}'
+```sh check online
+curl -s https://free.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"bounty3.bountee.near"}}'
+```
+
+You should see a reply that includes:
+
+```text
 "keys":[]
 ```
 
 **5. The demo's winning exploit, re-run on your machine.** `rerun` fetches the published exploit and the proofs its claim put on NEAR, replays them without contacting Base, and compares with the TEE's verdict (the tool labels it `enclave`).
 
-```console online
-$ bountee rerun demo.bountee.near/demo --contract bounty3.bountee.near --network mainnet
+```sh check online
+bountee rerun demo.bountee.near/demo --contract bounty3.bountee.near --network mainnet
+```
+
+You should see:
+
+```text
 verdict: PAYS (minimum_theft_reached)
 enclave: PAYS (minimum_theft_reached)
 same verdict as the enclave
@@ -256,8 +281,13 @@ same verdict as the enclave
 
 **6. Rebuild the contract and judge, and check the whole demo bounty.** `verify` rebuilds the contract and the judge from the commit the deployment names, in Docker, and compares their hashes with what ran. It checks the TEE's attestation against Intel's certificates, the payout, each pause's landing and its verified record on NEAR, and re-runs the published exploit under the rebuilt judge. The rebuild takes up to 10 minutes.
 
-```console online
-$ bountee verify demo.bountee.near/demo --contract bounty3.bountee.near --network mainnet
+```sh check online
+bountee verify demo.bountee.near/demo --contract bounty3.bountee.near --network mainnet
+```
+
+You should see, among other detail:
+
+```text
 pass contract_code
 pass judge_build
 pass attestation
