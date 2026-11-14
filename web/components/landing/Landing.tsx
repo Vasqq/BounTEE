@@ -93,7 +93,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
                 <span className="ln" aria-hidden="true"><span data-dec>Get </span><span className="paid" data-dec>paid</span></span>
                 <span className="ln last" aria-hidden="true">Pause it on&nbsp;<span className="roll " id="roll"><span className="chain on"><img className="wm" src="/brand/Base_lockup_blue_dark.svg" width="1280" height="323.84" style={{ height: "0.62em" }} alt="Base" /></span><span className="chain"><img className="wm" src="/brand/Arbitrum_One_horizontal_blue_dark.svg" width="1653.24" height="420.29" style={{ height: "0.74em" }} alt="Arbitrum One" /></span></span></span>
               </h1>
-              <p className="sub">Bug bounties that pay themselves. A Whitehat, or their AI agent, proves an exploit inside a sealed trusted execution environment (TEE). NEAR pays them and signs a pause for every chain the bounty covers.</p>
+              <p className="sub">Bug bounties that pay themselves. A Whitehat, or their AI agent, proves an exploit inside a sealed trusted execution environment. NEAR pays them and signs a pause for every chain the bounty covers.</p>
               <div className="cta"><a className="btn btn-ink" href="#story">See it run</a></div>
             </div>
           </div>
