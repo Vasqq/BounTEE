@@ -12,13 +12,9 @@ Bug bounties that pay themselves. A Whitehat, or their AI agent, seals an exploi
 [![NEAR mainnet](https://img.shields.io/badge/NEAR-mainnet-00EC97)](https://nearblocks.io/address/bounty3.bountee.near)
 [![Chain Signatures](https://img.shields.io/badge/Chain%20Signatures-pauses%20signed-00EC97)](https://nearblocks.io/txns/6xbAxbuABt1i2f37YQobnCpot1iuSfUfKKRSih5nV5DL)
 [![OutLayer TDX](https://img.shields.io/badge/OutLayer-TDX%20attested-5B5BD6)](https://api.outlayer.ai/attestations/by-tx/6xbAxbuABt1i2f37YQobnCpot1iuSfUfKKRSih5nV5DL)
-[![Base](https://img.shields.io/badge/Base-paused-0052FF)](https://basescan.org/tx/0xdb51859768a260f5b151540cdec806e45cf8e0367c4c9cea9fa2bd910a184eb3)
-[![Arbitrum One](https://img.shields.io/badge/Arbitrum%20One-paused-28A0F0)](https://arbiscan.io/tx/0x74c9e4b697a61ca0512a3bee5a016adc45cc1190c081ed669ab6e1db37158573)
-[![Rust](https://img.shields.io/badge/Rust-contract%20%26%20judge-B7410E?logo=rust&logoColor=white)](contract/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-CLI%20%26%20web-3178C6?logo=typescript&logoColor=white)](cli/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+[![Paused on Base and Arbitrum One](https://img.shields.io/badge/Paused-Base%20%C2%B7%20Arbitrum%20One-0052FF)](#mainnet-proof)
 
-[Demo video](<!-- PENDING: demo video URL -->) · [Live site](https://bountee.dev) · [Try it on testnet](https://testnet.bountee.dev) · [How it works](#how-it-works) · [Mainnet proof](#mainnet-proof) · [Hackathon tracks](#hackathon-tracks) · [Setup](#setup) · [Check every claim](#check-every-claim-yourself) · [Architecture](#architecture) · [Roadmap](#roadmap)
+[Demo video](<!-- PENDING: demo video URL -->) · [Live site](https://bountee.dev) · [Try it on testnet](https://testnet.bountee.dev) · [Mainnet proof](#mainnet-proof) · [Setup](#setup) · [Check every claim](#check-every-claim-yourself)
 
 <br>
 
