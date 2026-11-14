@@ -122,10 +122,12 @@ export function claimInputBound(proofsJsonBytes: number, headerBytes: number, bl
 export const MAX_TX_GAS = 1_000_000_000_000_000n;
 
 /**
- * The gas a claim attached to a contract built before it named a claim's gas by size (#35):
- * such a contract (bounty3.bountee.testnet, 7b59e73) names only `min_claim_gas`, and its claims
- * were filed and rehearsed at this. More wouldn't help it: it keeps a fixed share back whatever
- * is attached.
+ * The gas a claim attaches to a contract built before it named a claim's gas by size (#35):
+ * such a contract (bounty3.bountee.testnet, 7b59e73) names only `min_claim_gas` (200 Tgas), and
+ * its claims were filed and rehearsed at this. It passes what is left on to the claim's job, and
+ * signs the pauses in the same transaction only when enough remains (about 170 Tgas plus 20 per
+ * covered contract): a two-contract bounty does, a much wider one's PAYS waits for `sign_pauses`,
+ * which `claim` then sends.
  */
 const CLAIM_GAS_BEFORE_SIZE_RULE = 300_000_000_000_000n;
 
@@ -145,8 +147,7 @@ export function claimGas(fees: any, inputBytes: number, covered: number, contrac
       BigInt(covered) * BigInt(fees.claim_gas_per_covered_contract) +
       BigInt(inputBytes) * BigInt(fees.claim_gas_per_input_byte);
   } else if (fees.min_claim_gas !== undefined) {
-    const least = BigInt(fees.min_claim_gas);
-    gas = least > CLAIM_GAS_BEFORE_SIZE_RULE ? least : CLAIM_GAS_BEFORE_SIZE_RULE;
+    gas = CLAIM_GAS_BEFORE_SIZE_RULE;
   } else {
     throw new Error(`${contract}'s fees() names no claim gas (neither claim_gas_base nor min_claim_gas), so the tool can't tell what a claim must attach (nothing was spent)`);
   }

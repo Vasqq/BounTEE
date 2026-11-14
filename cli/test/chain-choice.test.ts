@@ -165,8 +165,11 @@ const arbReplay = JSON.parse(readFileSync(ARB_JOB, "utf8")).replay;
 
 /** Each signed transaction sent to NEAR, decoded. */
 const sent: { method: string; args: any; gas: bigint }[] = [];
-/** The bounty's rules, and how old the stand-in chain says a claimed block is, and its hash there (default the Arbitrum job's). */
-/** fees(), when a test plays a real deployment's (fixtures/deployed-fees.json). */
+/**
+ * The bounty's rules, how old the stand-in chain says a claimed block is, and its hash there
+ * (default the Arbitrum job's), and fees() when a test plays a real deployment's
+ * (fixtures/deployed-fees.json).
+ */
 let world: { rules: unknown; blockAgeSecs?: number; blockHash?: string; fees?: Record<string, unknown> };
 const keystore = generateKeyPairSync("x25519");
 const keystorePub = keystore.publicKey.export({ format: "der", type: "spki" }).subarray(12).toString("hex");
@@ -287,7 +290,7 @@ const DEPLOYED = JSON.parse(readFileSync(new URL("fixtures/deployed-fees.json", 
 // R11.2, #35: bounty3.bountee.near (0c5d488) names a claim's gas by its size; the README's
 // Whitehat path files on bounty3.bountee.testnet (7b59e73, built before that rule), whose fees()
 // names only min_claim_gas and whose claims were filed and rehearsed at 300 Tgas.
-test("R11.2 D1: claim of a testnet job files with the claim gas each README deployment's fees() names: by its size on bounty3.bountee.near, 300 Tgas on bounty3.bountee.testnet", async () => {
+test("R11.2: claim of a testnet job files with the claim gas each README deployment's fees() names: by its size on bounty3.bountee.near, 300 Tgas on bounty3.bountee.testnet", async () => {
   world = { rules: TWO_CHAIN_RULES, fees: DEPLOYED["bounty3.bountee.near"].fees };
   const main = await claim(["--job", ARB_JOB, "--chain", "arbitrum-sepolia"], ARBITRUM_SEPOLIA);
   expect(main.code, main.stderr).toBe(0);
