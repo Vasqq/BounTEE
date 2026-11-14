@@ -768,9 +768,11 @@ return {
   // the covered chain: a wordmark dithers out, the next dithers in
   const roll = document.getElementById('roll'), chains = [...roll.querySelectorAll('.chain')];
   const ditherImg = (img, dir, dur) => new Promise(done => {
+    // The canvas is the logo's exact size, not rounded up: a canvas a pixel bigger than the logo
+    // made it look like it shrank when the real image took over.
     const r = img.getBoundingClientRect(), dpr = devicePixelRatio || 1, W = Math.ceil(r.width), H = Math.ceil(r.height);
-    const cv = document.createElement('canvas'); cv.width = W * dpr; cv.height = H * dpr;
-    cv.style.cssText = `position:absolute;left:${r.left + scrollX}px;top:${r.top + scrollY}px;width:${W}px;height:${H}px;pointer-events:none;z-index:5`;
+    const cv = document.createElement('canvas'); cv.width = Math.ceil(r.width * dpr); cv.height = Math.ceil(r.height * dpr);
+    cv.style.cssText = `position:absolute;left:${r.left + scrollX}px;top:${r.top + scrollY}px;width:${r.width}px;height:${r.height}px;pointer-events:none;z-index:5`;
     document.body.appendChild(cv); img.style.visibility = 'hidden';
     const ctx = cv.getContext('2d'), t0 = performance.now(), o = { W, H };
     ctx.imageSmoothingEnabled = false;
