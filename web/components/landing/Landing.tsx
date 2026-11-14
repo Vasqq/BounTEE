@@ -204,7 +204,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
           <div className="wrap faq">
             <div className="faq-l">
               <h2 id="faqH">Common questions.</h2>
-              <p className="lead">The short answers. The README has the long ones, each with a command to check it.</p>
+              <p className="lead">Your most asked questions, answered.</p>
               <svg className="iso" id="faqArt" aria-hidden="true"></svg>
             </div>
             <div>
