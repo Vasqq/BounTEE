@@ -80,6 +80,8 @@ let world: {
   afterRetry: { verdict: unknown; bounty?: Record<string, unknown> };
   /** What `sign_pauses` leaves the bounty as. */
   afterSign: Record<string, unknown>;
+  /** The contract's fees(), when a test plays a real deployment's (fixtures/deployed-fees.json). */
+  fees?: Record<string, unknown>;
 };
 const sent: Sent[] = [];
 const outcomes = new Map<string, unknown>();
@@ -180,7 +182,7 @@ const VIEWS: Record<string, (args: any) => unknown> = {
   bounty: ({ id }) => (id.protocol === BOUNTY.protocol && id.name === BOUNTY.name ? world.bounty : null),
   claim_balance: () => world.balance.toString(),
   config: () => ({ outlayer: "outlayer.testnet", usdc: "usdc.testnet", judge_build_hash: `0x${"5a".repeat(32)}` }),
-  fees: () => ({
+  fees: () => world.fees ?? ({
     job_deposit: String(20n * 10n ** 21n),
     storage_price_per_byte: String(10n ** 19n),
     job_input_free_bytes: 32768,
@@ -194,7 +196,7 @@ const VIEWS: Record<string, (args: any) => unknown> = {
     min_verify_pause_gas_base: "50000000000000",
     min_verify_pause_gas_per_pause: "10000000000000",
     verify_pause_fee_per_pause: VERIFY_FEE.toString(),
-  }),
+  }) as Record<string, unknown>,
   pause_verifications: () => [
     { chain_id: PAUSE.chain_id, verified: world.verified, verified_pauses: world.verified ? [PAUSE.tx_hash] : [], attempts: world.verified ? 1 : 0, prepaid_attempts_left: world.prepaidLeft, verifying: false },
   ],
@@ -453,6 +455,50 @@ test("R11.1 R14.1: claim --retry refuses, sending nothing, when the Whitehat can
   const spent = await bountee(RETRY());
   expect(spent.code).toBe(1);
   expect(JSON.parse(spent.stderr.split("\n")[0]!).error).toMatch(/^the claim key's allowance holds 0\.2 NEAR and retry_claim takes 0\.2[2-9]\d* of it up front: add a claim key with a larger --allowance \(nothing was spent\)$/);
+  expect(sent).toHaveLength(0);
+}, 60_000);
+
+// ---- The claim gas each README deployment names (R11.2, R2.6, #35) ---------------------------
+
+/**
+ * fees() as the two contracts the README names answer it, read live (neither can be upgraded).
+ * bounty3.bountee.near (0c5d488) names a claim's gas by its size; bounty3.bountee.testnet
+ * (7b59e73, built before that rule) names only `min_claim_gas`, and its claims were filed and
+ * rehearsed at 300 Tgas.
+ */
+const DEPLOYED = JSON.parse(readFileSync(new URL("fixtures/deployed-fees.json", import.meta.url), "utf8"));
+const TGAS = 10n ** 12n;
+
+test("R2.6 R11.2: claim --retry attaches the claim gas each README deployment's fees() names: by the claim's size on bounty3.bountee.near, 300 Tgas on bounty3.bountee.testnet", async () => {
+  const mainnet = DEPLOYED["bounty3.bountee.near"].fees;
+  world.fees = mainnet;
+  const main = await bountee(RETRY());
+  expect(main.code, main.stderr).toBe(0);
+  expect(methods()).toStrictEqual(["retry_claim"]);
+  // claim_gas_base + one covered contract + a per-byte part for the job's input, which carries
+  // the proofs and header as filed plus the rules and the claim's framing (well under 4 KB).
+  const perBytes = sent[0]!.gas! - BigInt(mainnet.claim_gas_base) - BigInt(mainnet.claim_gas_per_covered_contract);
+  expect(perBytes % BigInt(mainnet.claim_gas_per_input_byte)).toBe(0n);
+  const bytes = Number(perBytes / BigInt(mainnet.claim_gas_per_input_byte));
+  expect(bytes).toBeGreaterThan(PROOFS.length + state.header.length);
+  expect(bytes).toBeLessThan(PROOFS.length + state.header.length + 4096);
+
+  reset();
+  world.fees = DEPLOYED["bounty3.bountee.testnet"].fees;
+  const test = await bountee(RETRY());
+  expect(test.code, test.stderr).toBe(0);
+  expect(methods()).toStrictEqual(["retry_claim"]);
+  expect(sent[0]!.gas).toBe(300n * TGAS);
+}, 60_000);
+
+test("R11.2: claim --retry on a contract whose fees() names no claim gas refuses, sending nothing, and names the contract", async () => {
+  const { min_claim_gas: _, ...none } = DEPLOYED["bounty3.bountee.testnet"].fees;
+  world.fees = none;
+  const r = await bountee(RETRY());
+  expect(r.code).toBe(1);
+  expect(JSON.parse(r.stderr.split("\n")[0]!).error).toBe(
+    `${CONTRACT}'s fees() names no claim gas (neither claim_gas_base nor min_claim_gas), so the tool can't tell what a claim must attach (nothing was spent)`,
+  );
   expect(sent).toHaveLength(0);
 }, 60_000);
 

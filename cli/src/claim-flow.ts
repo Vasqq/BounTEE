@@ -122,16 +122,34 @@ export function claimInputBound(proofsJsonBytes: number, headerBytes: number, bl
 export const MAX_TX_GAS = 1_000_000_000_000_000n;
 
 /**
- * The gas a claim (or a retry) attaches: what the contract's `fees()` names for a job input of
- * `inputBytes` (an upper bound, `claimInputBytes`) on a bounty covering `covered` contracts, so
- * its job is requested and a PAYS signs every pause in the same transaction (R11.2). Refused,
- * before any fee, when no transaction can carry that much.
+ * The gas a claim attached to a contract built before it named a claim's gas by size (#35):
+ * such a contract (bounty3.bountee.testnet, 7b59e73) names only `min_claim_gas`, and its claims
+ * were filed and rehearsed at this. More wouldn't help it: it keeps a fixed share back whatever
+ * is attached.
  */
-export function claimGas(fees: any, inputBytes: number, covered: number): bigint {
-  const gas =
-    BigInt(fees.claim_gas_base) +
-    BigInt(covered) * BigInt(fees.claim_gas_per_covered_contract) +
-    BigInt(inputBytes) * BigInt(fees.claim_gas_per_input_byte);
+const CLAIM_GAS_BEFORE_SIZE_RULE = 300_000_000_000_000n;
+
+/**
+ * The gas a claim (or a retry) attaches: what `contract`'s `fees()` names for a job input of
+ * `inputBytes` (an upper bound, `claimInputBytes`) on a bounty covering `covered` contracts, so
+ * its job is requested and a PAYS signs every pause in the same transaction (R11.2). A contract
+ * keeps the rule it was built with (none can be upgraded), so the tool reads whichever one its
+ * `fees()` publishes: the size rule, or a contract from before it the gas its claims were
+ * rehearsed at. Refused, before any fee, when it names neither or no transaction can carry it.
+ */
+export function claimGas(fees: any, inputBytes: number, covered: number, contract: string): bigint {
+  let gas: bigint;
+  if (fees.claim_gas_base !== undefined) {
+    gas =
+      BigInt(fees.claim_gas_base) +
+      BigInt(covered) * BigInt(fees.claim_gas_per_covered_contract) +
+      BigInt(inputBytes) * BigInt(fees.claim_gas_per_input_byte);
+  } else if (fees.min_claim_gas !== undefined) {
+    const least = BigInt(fees.min_claim_gas);
+    gas = least > CLAIM_GAS_BEFORE_SIZE_RULE ? least : CLAIM_GAS_BEFORE_SIZE_RULE;
+  } else {
+    throw new Error(`${contract}'s fees() names no claim gas (neither claim_gas_base nor min_claim_gas), so the tool can't tell what a claim must attach (nothing was spent)`);
+  }
   if (gas > MAX_TX_GAS) {
     throw new Error(`this claim's proofs are too large to file: it needs ${gas / 1_000_000_000_000n} Tgas, more than a transaction's ${MAX_TX_GAS / 1_000_000_000_000n}`);
   }

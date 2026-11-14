@@ -218,7 +218,7 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
   const fees = await near.view(contract, "fees");
   const inputBytes = claimInputBytes({ rules: liveRules, bounty, whitehat, block, header, proofsJson });
   const cost = claimCost(fees, inputBytes, sealed.length);
-  const gas = claimGas(fees, inputBytes, rules!.covered_contracts.length);
+  const gas = claimGas(fees, inputBytes, rules!.covered_contracts.length, contract);
   const submitArgs = { bounty, block, header, proofs: proofsJson, sealed_exploit: sealed };
   await checkClaimNear(near, contract, whitehat, cost, { method: "submit_claim", gas, deposit: 0n, argsBytes: JSON.stringify(submitArgs).length });
   const added = await ensureClaimBalance(near, contract, whitehat, cost);
@@ -287,7 +287,7 @@ async function retryClaim(args: string[], c: Context & { given?: BountyId }, onS
   const live = await c.near.view<{ rules: Rules }>(c.contract, "bounty", { id: filed.bounty });
   const inputBytes = claimInputBytes({ rules: live.rules, bounty: filed.bounty, whitehat: c.whitehat, block: filed.block, header: filed.header, proofsJson: proofs });
   const cost = claimCost(fees, inputBytes, 0);
-  const gas = claimGas(fees, inputBytes, live.rules.covered_contracts.length);
+  const gas = claimGas(fees, inputBytes, live.rules.covered_contracts.length, c.contract);
   const retryArgs = { claim_id: claimId, proofs };
   await checkClaimNear(c.near, c.contract, c.whitehat, cost, { method: "retry_claim", gas, deposit: 0n, argsBytes: JSON.stringify(retryArgs).length });
   const added = await ensureClaimBalance(c.near, c.contract, c.whitehat, cost);

@@ -302,7 +302,7 @@ if (WHITEHAT) {
   // call is the most ever held at once.
   const claimGas = await Promise.all(
     claimBudgets.map((c) =>
-      near.upfrontNear([{ method: "submit_claim", gas: claimGasFor(fees, c.input_bytes, CHAIN_IDS.length), deposit: 0n, argsBytes: c.input_bytes }]),
+      near.upfrontNear([{ method: "submit_claim", gas: claimGasFor(fees, c.input_bytes, CHAIN_IDS.length, CONTRACT), deposit: 0n, argsBytes: c.input_bytes }]),
     ),
   );
   const claimGasNear = claimGas.reduce((m, x) => (x > m ? x : m), 0n);
