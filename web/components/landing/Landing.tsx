@@ -256,7 +256,6 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
             <div className="close-art"><svg className="iso" id="closeArt" aria-hidden="true"></svg></div>
           </div>
           <div className="foot">
-            <span>BounTEE · NEAR hackathon, security track. Every proof here is a mainnet transaction.</span>
             <nav aria-label="Footer"><a href="#story">The demo</a><a href="#verify">Verify</a><a href="#trust">Trust</a><a href="https://github.com/Vasqq/bountee">Source</a>{footerLinks}</nav>
           </div>
         </div>
