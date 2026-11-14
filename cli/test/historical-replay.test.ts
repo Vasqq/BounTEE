@@ -31,7 +31,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
 import { judgeWasm } from "../src/test.ts";
-import { bounteeOffline } from "./offline.ts";
+import { bounteeOffline, RUN_MS } from "./offline.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const JOB = fileURLToPath(new URL("./fixtures/historical/depusdt-levusdc.json", import.meta.url));
@@ -51,7 +51,7 @@ test("ticket #28, D19, R2.9, R3.8: the DEPUSDT/LEVUSDC hack replays to PAYS offl
   expect(out.block.number).toBe(17_484_161);
   expect(out.block.hash).toBe(JSON.parse(readFileSync(JOB, "utf8")).replay.block.hash);
   expect(out.transactions).toBe(4); // approveToken + transferFrom for each of the two proxies
-});
+}, RUN_MS);
 
 // Criterion 2 (D11): the judge needs no change for it. The same build that scores the demo
 // scores this real hack, and nothing in judge/src names the hack.

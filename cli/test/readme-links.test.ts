@@ -4,7 +4,7 @@
 //
 //   T (sandboxed) — `node scripts/check-readme-steps.ts`, spawned inside the OS sandbox that
 //     denies all networking (cli/test/offline.ts), against a small README written for each test.
-//       Catches: a placeholder (`<!-- PENDING: … -->`) in prose, a table, a link or a console
+//       Catches: a placeholder (`<!-- PENDING: … -->`) in prose, a table, a link or a code
 //       block that isn't reported pending, or that --strict lets through; a link to a repo path
 //       that doesn't exist; an --offline run that reaches for the network, or that skips the
 //       chain and URL checks without saying so.
@@ -58,8 +58,11 @@ describe("offline (network denied)", () => {
         "",
         "[Live site](<!-- PENDING: live site URL -->)",
         "",
-        "```console online",
-        "$ bountee verify <!-- PENDING: demo bounty id --> --network mainnet",
+        "```sh check online",
+        "bountee verify <!-- PENDING: demo bounty id --> --network mainnet",
+        "```",
+        "",
+        "```text",
         "pass contract_code",
         "```",
         "",

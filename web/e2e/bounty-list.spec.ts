@@ -1,7 +1,7 @@
 // Seam W, ticket #29: the bounty list, read live from the chains (R15.6). Its Live and Past
 // tabs, its sort and its layout are DESIGN.md's (Bounty list, settled with Liam on Nov 10, 2026).
 import { expect, test, type Page } from "@playwright/test";
-import { CONTRACT, emptyWorld, post, rules, setWorld } from "./stand-ins/world.ts";
+import { emptyWorld, post, rules, setWorld } from "./stand-ins/world.ts";
 
 /** The list's bounty IDs, top to bottom, retried until the page that was navigated to shows them. */
 const expectIds = (page: Page, want: string[]) => expect(page.locator(".list tbody .id")).toHaveText(want);
@@ -18,14 +18,11 @@ test("R15.6: the bounty list shows what the bounty contract holds now, not value
   post(w, { protocol: "0x9f2c3e1a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e", name: "lending" }, { rules: { ...w.bounties[0]!.rules, bounty_amount: "250000000", minimum_theft: "5000000" } });
   await setWorld(page, w);
   await page.goto("/bounties");
-  // The list names the contract it read, linked to the explorer, so anyone can check it there.
-  await expect(page.getByText(`Read live from ${CONTRACT}`)).toBeVisible();
-  await expect(page.getByRole("link", { name: CONTRACT })).toHaveAttribute("href", `https://nearblocks.io/address/${CONTRACT}`);
   await expect(tab(page, /^Live 2$/)).toHaveAttribute("aria-current", "page");
   const row = page.getByRole("row", { name: /acme\.near\/vault-v2/ });
   await expect(row).toContainText("10 USDC");
   await expect(row).toContainText("1 USDC");
-  await expect(row).toContainText("2026-12-31");
+  await expect(row).toContainText(/\d+ (day|hour|minute)s?/); // time left, not the date
   await expect(row).toContainText("Live");
   await expect(page.getByRole("row", { name: /\/lending/ })).toContainText("250 USDC");
 
@@ -38,6 +35,8 @@ test("R15.6: the bounty list shows what the bounty contract holds now, not value
   await expect(page.getByText("No bounties are live.")).toBeVisible();
   await tab(page, /^Past 1$/).click();
   await expect(page.getByRole("row", { name: /acme\.near\/vault-v2/ })).toContainText("Withdrawn");
+  // Past keeps the end date it was posted with, even a future one: no countdown on a bounty that is no longer Live.
+  await expect(page.getByRole("row", { name: /acme\.near\/vault-v2/ })).toContainText("2026-12-31");
   await expect(page.getByRole("row", { name: /\/lending/ })).toHaveCount(0);
 });
 

@@ -69,7 +69,7 @@ export interface BountyView {
 
 export type Stage =
   /** `claim` shows it as soon as the exploit is sealed locally, before filing: no claim id yet. */
-  | { stage: "sealed"; claim_id: number | null; secret_profile?: string }
+  | { stage: "sealed"; claim_id: number | null; secret_profile?: string; tx_hash?: string }
   | { stage: "checking"; claim_id: number; submitted_at_ns: string }
   | { stage: "verdict"; claim_id: number; verdict: Verdict }
   | { stage: "no_verdict" | "store_failed"; claim_id: number }
@@ -381,7 +381,9 @@ export function formatStage(s: Stage): string {
     case "sealed":
       return s.claim_id === null
         ? "sealed on this machine; filing the claim"
-        : `claim ${s.claim_id}: sealed (held by the contract as secret ${s.secret_profile})`;
+        : s.tx_hash
+          ? `claim ${s.claim_id}: filed in transaction ${s.tx_hash}; don't file it again (follow it with \`bountee status ${s.claim_id}\`)`
+          : `claim ${s.claim_id}: sealed (held by the contract as secret ${s.secret_profile})`;
     case "checking":
       return `claim ${s.claim_id}: checking in the enclave`;
     case "verdict":

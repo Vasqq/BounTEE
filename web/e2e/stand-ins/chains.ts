@@ -112,7 +112,8 @@ function nearRpc(w: World, method: string, params: any): { result?: unknown; err
     if (params.request_type === "view_access_key" && w.posting && params.public_key === `ed25519:${base58.encode(Buffer.from(w.posting.relayerKeyHex, "hex"))}`) {
       return w.posting.onboarded.includes(params.account_id)
         ? { result: { nonce: 0, permission: { FunctionCall: { allowance: null, receiver_id: params.account_id, method_names: ["rlp_execute"] } } } }
-        : { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCESS_KEY" }, message: "access key does not exist while viewing" } };
+        : // As NEAR's RPC answers (testnet and mainnet, Nov 14): a missing key is a result holding an error, not a JSON-RPC error.
+          { result: { error: `access key ${params.public_key} does not exist while viewing`, logs: [], block_height: 1, block_hash: "stand-in" } };
     }
     if (params.request_type === "view_access_key") {
       const claimKey = w.claimKeys?.[`${params.account_id}/${params.public_key}`];

@@ -63,6 +63,8 @@ The key can't top up the claim balance. If it is short, `bountee claim` stops be
 
 ## When something fails
 
+- **`claim` fails after a stage carrying a `claim_id` (it says "filed in transaction …"), or you aren't sure whether it filed:** the claim exists. Don't file again: a second claim spends the claim balance again. Follow it with `bountee status <claim id> --contract <bounty contract> --watch --timeout 540 --json` as in step 6.
+- **`claim` says "the claim may have been filed":** don't file again. Report the message to your Whitehat and stop.
 - **`claim` stops because the claim balance is short:** report the amount it names and stop.
 - **`claim` says the bounty isn't live:** someone else's claim won it first, or it ended. Check with `bountee show`. Don't file again.
 - **`test` or `claim` refuses, listing the covered chains:** you left out `--chain` on a bounty that covers several chains, or named one it doesn't cover. Run it again with `--chain` naming one of the chains listed.

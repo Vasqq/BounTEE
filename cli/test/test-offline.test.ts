@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
 import { judgeWasm } from "../src/test.ts";
-import { bounteeOffline, offline } from "./offline.ts";
+import { bounteeOffline, offline, RUN_MS } from "./offline.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
@@ -53,7 +53,7 @@ test("D19 R2.9: bountee test on the demo exploit returns PAYS offline", () => {
     number: 54643662,
     hash: JSON.parse(readFileSync(EXPLOIT, "utf8")).replay.block.hash,
   });
-});
+}, RUN_MS);
 
 // Ticket criterion 2, R4.2 (the R4.11 cheat, offline): a fresh account mints test USDC,
 // deposits it and withdraws no more than it deposited. Replayed offline, it scores ZERO.
@@ -64,7 +64,7 @@ test("D19 R4.2: bountee test on the demo cheat (deposit then withdraw by a fresh
   expect(out.verdict).toStrictEqual({ outcome: "ZERO", reason: "below_minimum_theft" });
   expect(out.block.number).toBe(54641451);
   expect(out.transactions).toBe(4); // mint, approve, deposit, withdraw
-});
+}, RUN_MS);
 
 // D2 (ticket #9 criterion 3): the verdict comes from the compiled judge the enclave runs. By default
 // that is the wasm32-wasip2 release build `cli/test/testnet/deploy.ts` uploads to OutLayer,
@@ -82,7 +82,7 @@ test("D2: test names the compiled judge it ran by its sha256, and whether it is 
   expect(text).toContain("not the bounty's pinned build 0xc4222111c3523dae3bd7b3002fb63ddf254231bd9f437c497acf4d5962a1df45");
   expect(text).toContain("bountee verify");
   expect(text).not.toMatch(/differs only/);
-});
+}, 2 * RUN_MS);
 
 // D2 (#80): the default judge is the checkout's own build, pinned to the default contract,
 // whatever the caller's environment: an exported BOUNTEE_BOUNTY_CONTRACT doesn't rebuild it

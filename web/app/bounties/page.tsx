@@ -3,6 +3,7 @@
 // (components/BountyTable.tsx), so switching never waits on a read. No filters or pagination.
 import { connection } from "next/server";
 import { AppNav } from "@/components/AppNav.tsx";
+import { DitherBand } from "@/components/DitherBand.tsx";
 import { BountyTable } from "@/components/BountyTable.tsx";
 import { ReadFailed } from "@/components/ReadFailed.tsx";
 import { TryTestnet } from "@/components/TryTestnet.tsx";
@@ -22,6 +23,9 @@ export default async function Bounties() {
   return (
     <>
       <AppNav current="bounties" />
+      <div className="band-wrap" aria-hidden="true">
+        <DitherBand />
+      </div>
       <main className="app wrap" id="main">
         <h1 className="page-title">Bounties</h1>
         {list === null ? (

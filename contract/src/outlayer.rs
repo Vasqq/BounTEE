@@ -66,16 +66,20 @@ pub fn store_sealed_exploit(
 }
 
 /// Request a job running the pinned judge build on `input`, optionally with the claim's
-/// secret profile. OutLayer refunds what the job doesn't use to `payer`. `gas` is asked
-/// only once the request's arguments are written, so the work of writing a large input
-/// (a claim's proofs) is already spent and can't overrun the gas the caller keeps back.
+/// secret profile. OutLayer refunds what the job doesn't use to `payer`.
+///
+/// The request gets `floor` as static gas plus, by weight, all the gas the calling method
+/// leaves unused. near-sdk builds promises lazily, when the method returns, and that is when
+/// a receipt's per-byte costs are charged; a static figure worked out earlier from the gas
+/// left can't see them coming, and a mainnet claim's large input overran it (#35). Unused
+/// gas is shared out after those costs are paid, so nothing has to be foreseen.
 pub fn request_job(
     config: &Config,
     input: &str,
     secret_profile: Option<&str>,
     payer: &AccountId,
     deposit: NearToken,
-    gas: impl FnOnce() -> Gas,
+    floor: Gas,
 ) -> Promise {
     let args = json!({
         "source": { "WasmUrl": {
@@ -102,7 +106,7 @@ pub fn request_job(
         "request_execution".to_owned(),
         args,
         deposit,
-        gas(),
+        floor,
         GasWeight(1),
     )
 }
