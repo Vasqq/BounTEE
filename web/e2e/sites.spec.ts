@@ -35,5 +35,8 @@ test("D31: the mainnet landing page's Open the app and Post a bounty buttons ope
   await setWorld(page, finishedDemo());
   await page.goto("/");
   await expect(page.getByRole("link", { name: "Open the app" })).toHaveAttribute("href", `${SITES.testnet}/bounties`);
-  await expect(page.getByRole("link", { name: "Post a bounty" })).toHaveAttribute("href", `${SITES.testnet}/post`);
+  // Every "Post a bounty" button on the page (the Protocols section has one too) opens the testnet site.
+  const posts = page.getByRole("link", { name: "Post a bounty" });
+  expect(await posts.count()).toBeGreaterThan(0);
+  for (const link of await posts.all()) await expect(link).toHaveAttribute("href", `${SITES.testnet}/post`);
 });
