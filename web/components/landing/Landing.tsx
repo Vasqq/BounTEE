@@ -37,7 +37,7 @@ function AllTransactions({ demo, nearExplorer }: { demo: Demo; nearExplorer: str
               <span className="n">{i + 1}.</span>
               <span className="name">{name}</span>
               <span className="meta">
-                {txs.map((tx, k) => (tx.hash ? <TxChip key={k} chain={tx.chain} hash={tx.hash} href={tx.href} /> : <TxPending key={k} chain={tx.chain} explorer={tx.href} />))}
+                {txs.map((tx, k) => (tx.hash ? <TxChip key={k} chain={tx.chain} hash={tx.hash} href={tx.href} copy={false} prefix="TX: " /> : <TxPending key={k} chain={tx.chain} explorer={tx.href} />))}
                 {!txs.length && (last && s.publishPending ? <><span className="chip">NEAR</span><span className="chip mute">{s.publishPending}</span></> : <TxPending chain="NEAR" explorer={nearExplorer} />)}
               </span>
             </li>
@@ -74,7 +74,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
             <li><a href="#who">Whitehats</a></li>
             <li><a href="#verify">Verify</a></li>
             <li><a href="#trust">Trust</a></li>
-            <li><a href="#faq">FAQ</a></li>
+            <li><a href="#faq">Questions</a></li>
           </ul>
           <a className="btn btn-ink" href={`${appSite}/bounties`}>Open the app</a>
         </div>
@@ -93,11 +93,10 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
                 <span className="ln" aria-hidden="true"><span data-dec>Get </span><span className="paid" data-dec>paid.</span></span>
                 <span className="ln last" aria-hidden="true">Pause it on&nbsp;<span className="roll " id="roll"><span className="chain on"><img className="wm" src="/brand/Base_lockup_blue_dark.svg" width="1280" height="323.84" style={{ height: "0.62em" }} alt="Base" /></span><span className="chain"><img className="wm" src="/brand/Arbitrum_One_horizontal_blue_dark.svg" width="1653.24" height="420.29" style={{ height: "0.74em" }} alt="Arbitrum One" /></span></span></span>
               </h1>
-              <p className="sub">Bug bounties that pay themselves. A Whitehat, or their AI agent, proves an exploit inside a sealed enclave. NEAR pays them and signs a pause for every chain the bounty covers. Nobody approves it.</p>
-              <div className="cta"><a className="btn btn-ink" href="#verify">Verify it yourself</a><a className="btn btn-line" href="#story">See it run</a></div>
+              <p className="sub">Bug bounties that pay themselves. A Whitehat, or their AI agent, proves an exploit inside a sealed trusted execution environment (TEE). NEAR pays them and signs a pause for every chain the bounty covers.</p>
+              <div className="cta"><a className="btn btn-ink" href="#story">See it run</a></div>
             </div>
           </div>
-          <a className="cue" href="#story"><span>see it run</span><i /></a>
         </section>
 
         <section className="story" id="story" aria-labelledby="storyH">
@@ -117,13 +116,13 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
             <div className="stage">
               <div className="stage-in">
                 <figure className="world">
-                  <figcaption className="world-bar"><b id="storyName"></b><span className="now" aria-hidden="true"><span id="storyNow">1. Posted</span></span></figcaption>
                   <svg className="iso" id="storyArt" aria-hidden="true"></svg>
                 </figure>
                 <ol className="panels" id="panels"></ol>
               </div>
             </div>
           </div>
+          <div className="wrap story-cta"><a className="btn btn-ink" href="#verify">Verify it yourself</a></div>
           {demo && <AllTransactions demo={demo} nearExplorer={nearExplorer} />}
         </section>
 
@@ -131,7 +130,6 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
           <div className="wrap">
             <div className="who-head">
               <h2 id="whoH" className="rise">You, or your agent.</h2>
-              <p className="lead rise" style={delay("80ms")}>Same commands, same Enclave, same payout to your NEAR account. The only difference is the key that signs the claim.</p>
             </div>
             <div className="who-cols rise" style={delay("120ms")}>
               <div>
@@ -152,7 +150,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
 
         <section className="statement" aria-label="In short">
           <div className="wrap">
-            <p id="statement">Nobody approves the payout or the pause. The Enclave proves the theft, NEAR pays once, and every covered contract stops. Each step is a transaction you can check.</p>
+            <p id="statement">Nobody approves the payout or the pause. The TEE proves the theft, NEAR pays once, and every covered contract stops. Each step is a transaction you can check.</p>
           </div>
         </section>
 
@@ -192,7 +190,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
               <div>
                 <h3>You trust</h3>
                 <ul>
-                  <li><svg className="glyph iso" data-glyph="enclave" aria-hidden="true"></svg><div><b>OutLayer's enclave, Intel TDX</b><p>To run the judge it attests to, and keep sealed exploits sealed.</p></div></li>
+                  <li><svg className="glyph iso" data-glyph="enclave" aria-hidden="true"></svg><div><b>OutLayer's trusted execution environment, Intel TDX</b><p>To run the judge it attests to, and keep sealed exploits sealed.</p></div></li>
                   <li><svg className="glyph iso" data-glyph="mpc" aria-hidden="true"></svg><div><b>NEAR's MPC network</b><p>To sign pauses only for the bounty contract, and confirm they landed.</p></div></li>
                   <li><svg className="glyph iso" data-glyph="rpc" aria-hidden="true"></svg><div><b>Three independent RPCs per chain</b><p>To agree on the recent block a claim is judged against.</p></div></li>
                   <li><svg className="glyph iso" data-glyph="code" aria-hidden="true"></svg><div><b>BounTEE's deployed code</b><p>Which you can rebuild from source and match, hash for hash.</p></div></li>
@@ -205,13 +203,13 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
         <section id="faq" aria-labelledby="faqH">
           <div className="wrap faq">
             <div className="faq-l">
-              <h2 id="faqH">Questions judges ask.</h2>
+              <h2 id="faqH">Common questions.</h2>
               <p className="lead">The short answers. The README has the long ones, each with a command to check it.</p>
               <svg className="iso" id="faqArt" aria-hidden="true"></svg>
             </div>
             <div>
               <div className="qa"><h3><button type="button" aria-expanded="false" aria-controls="a1">What counts as an exploit?<span className="pm" aria-hidden="true"><svg viewBox="0 0 10 10"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></span></button></h3><div className="ans" id="a1"><div><p>Theft from the covered contracts of at least the minimum theft, valued at the prices fixed at posting. Value taken from other contracts, and legitimate outflows passed off as theft, count for nothing.</p></div></div></div>
-              <div className="qa"><h3><button type="button" aria-expanded="false" aria-controls="a2">How does the exploit stay secret?<span className="pm" aria-hidden="true"><svg viewBox="0 0 10 10"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></span></button></h3><div className="ans" id="a2"><div><p>It is sealed so only the bounty contract's own enclave job can read it. The Protocol can open it once the Whitehat is paid, and it is published after the disclosure delay.</p></div></div></div>
+              <div className="qa"><h3><button type="button" aria-expanded="false" aria-controls="a2">How does the exploit stay secret?<span className="pm" aria-hidden="true"><svg viewBox="0 0 10 10"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></span></button></h3><div className="ans" id="a2"><div><p>It is sealed so only the bounty contract's own TEE job can read it. The Protocol can open it once the Whitehat is paid, and it is published after the disclosure delay.</p></div></div></div>
               <div className="qa"><h3><button type="button" aria-expanded="false" aria-controls="a3">Who sends the pause?<span className="pm" aria-hidden="true"><svg viewBox="0 0 10 10"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></span></button></h3><div className="ans" id="a3"><div><p>Anyone. NEAR's MPC network signs it, so whoever sends it can't change it. Every bounty page has a Send pause button that needs no wallet.</p></div></div></div>
               <div className="qa"><h3><button type="button" aria-expanded="false" aria-controls="a4">Do I need a wallet to check any of this?<span className="pm" aria-hidden="true"><svg viewBox="0 0 10 10"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></span></button></h3><div className="ans" id="a4"><div><p>No. Everything here is read from the chains, and the command-line tool's verify needs no keys and no funds. Only posting a bounty and opening a winning exploit need a wallet.</p></div></div></div>
               <div className="qa"><h3><button type="button" aria-expanded="false" aria-controls="a5">Can an AI agent claim?<span className="pm" aria-hidden="true"><svg viewBox="0 0 10 10"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></span></button></h3><div className="ans" id="a5"><div><p>{demo?.story.claimKey ? "Yes. The demo bounty was won by one. " : "Yes. "}A Whitehat gives their agent a claim key that can file claims and nothing else. Payouts go to the Whitehat, never to the key.</p></div></div></div>

@@ -45,7 +45,7 @@ const CheckGlyph = () => (
 );
 
 /** A transaction that exists: chain, shortened hash linking to its explorer page, copy. `proven`: a payout, in green (Principle 1). */
-export function TxChip({ chain, hash, href, proven = false, copy: canCopy = true }: { chain: string; hash: string; href: string; proven?: boolean; copy?: boolean }) {
+export function TxChip({ chain, hash, href, proven = false, copy: canCopy = true, prefix = "" }: { chain: string; hash: string; href: string; proven?: boolean; copy?: boolean; prefix?: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -61,7 +61,7 @@ export function TxChip({ chain, hash, href, proven = false, copy: canCopy = true
       <span className="chip">{chain}</span>
       <span className={`chip link${proven ? " ok" : ""}`}>
         <a href={href} target="_blank" rel="noopener" title={hash}>
-          {shortHash(hash)}
+          {prefix}{shortHash(hash)}
           <Ext />
         </a>
         {canCopy && (
