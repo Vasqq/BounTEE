@@ -23,6 +23,10 @@ export class NearError extends Error {}
 export async function rpc<T>(url: string, method: string, params: unknown): Promise<T> {
   const r = await post<{ result?: T; error?: unknown }>(url, { jsonrpc: "2.0", id: 1, method, params });
   if (r.error !== undefined) throw new NearError(JSON.stringify(r.error));
+  // A query that finds nothing (a missing access key) answers with an error inside its result,
+  // not a JSON-RPC error: as NEAR's RPC does on testnet and mainnet (Nov 14).
+  const inner = (r.result as { error?: unknown } | undefined)?.error;
+  if (typeof inner === "string") throw new NearError(inner);
   return r.result as T;
 }
 
