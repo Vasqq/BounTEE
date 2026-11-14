@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
 import { judgeWasm } from "../src/test.ts";
-import { bounteeOffline } from "./offline.ts";
+import { bounteeOffline, RUN_MS } from "./offline.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const job = (name: string) => `${repo}demo/fixtures/dvd/${name}.json`;
@@ -36,7 +36,7 @@ for (const [level, , exploitTxs, cheatTxs] of levels) {
     const out = JSON.parse(res.stdout);
     expect(out.verdict).toStrictEqual({ outcome: "PAYS", reason: "minimum_theft_reached" });
     expect(out.transactions).toBe(exploitTxs);
-  });
+  }, RUN_MS);
 
   test(`D19 R4.2: bountee test on the DVD ${level} bounty's cheat returns ZERO offline`, () => {
     const res = bounteeOffline(["test", "--job", job(`${level}-cheat`), "--json"]);
@@ -44,7 +44,7 @@ for (const [level, , exploitTxs, cheatTxs] of levels) {
     const out = JSON.parse(res.stdout);
     expect(out.verdict).toStrictEqual({ outcome: "ZERO", reason: "below_minimum_theft" });
     expect(out.transactions).toBe(cheatTxs);
-  });
+  }, RUN_MS);
 }
 
 // The jobs judge the adapted levels (the bounties), each at the same fixed block, and the

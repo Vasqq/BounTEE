@@ -49,11 +49,12 @@ import { parseBlockRef, parseExploit, parseAccountProof, parseRules, type BlockR
 import { parseBountyId, proofChain, refuseUncovered } from "./bounties.ts";
 import { chainLabel, parseChain } from "./chains.ts";
 import { parseRpcFlags } from "./broadcast.ts";
-import { checkClaimNear, claimCost, claimInputBytes, ensureClaimBalance, prepareClaim, readJob, settle, type Settlement } from "./claim-flow.ts";
+import { checkClaimNear, claimCost, claimGas, claimInputBytes, ensureClaimBalance, prepareClaim, readJob, settle, type Settlement } from "./claim-flow.ts";
 import { proofsMatchingClaim, type ProofsSource } from "./claim-proofs.ts";
 import { KEYSTORE_API, NEAR_RPC, type Network } from "./endpoints.ts";
 import { formatNear, Near, parseNetwork } from "./near.ts";
 import { seal } from "./seal.ts";
+import { describeError, isNetworkError } from "./transport.ts";
 import {
   claimStatus,
   formatReceipt,
@@ -67,8 +68,6 @@ import {
   type StatusOptions,
 } from "./status.ts";
 
-/** `submit_claim` needs at least 200 Tgas; the rest goes to storing the secret, the job and, on PAYS, signing the pauses. */
-export const CLAIM_GAS = 300_000_000_000_000n;
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -165,11 +164,13 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
 
   // A dry run only seals, filing and spending nothing, so it reads no bounty: its rules, and so the covered chains, stay unread.
   let rules: Rules | undefined;
+  let liveRules: unknown;
   if (!args.includes("--dry-run")) {
     const live = await near.view<{ state: string; rules: unknown } | null>(contract, "bounty", { id: bounty });
     if (!live) throw new Error(`no bounty ${bountyText} on ${contract}`);
     if (live.state !== "live") throw new Error(`bounty ${bountyText} is ${live.state}: it takes no claims${live.state === "paid" || live.state === "signing" || live.state === "paying" ? " (it has been won)" : ""}`);
     rules = parseRules(live.rules);
+    liveRules = live.rules;
   }
 
   let exploit: Exploit;
@@ -215,18 +216,25 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
 
   const proofsJson = JSON.stringify(proofs);
   const fees = await near.view(contract, "fees");
-  const cost = claimCost(fees, claimInputBytes(proofsJson.length, header.length, JSON.stringify(block).length), sealed.length);
+  const inputBytes = claimInputBytes({ rules: liveRules, bounty, whitehat, block, header, proofsJson });
+  const cost = claimCost(fees, inputBytes, sealed.length);
+  const gas = claimGas(fees, inputBytes, rules!.covered_contracts.length, contract);
   const submitArgs = { bounty, block, header, proofs: proofsJson, sealed_exploit: sealed };
-  await checkClaimNear(near, contract, whitehat, cost, { method: "submit_claim", gas: CLAIM_GAS, deposit: 0n, argsBytes: JSON.stringify(submitArgs).length });
+  await checkClaimNear(near, contract, whitehat, cost, { method: "submit_claim", gas, deposit: 0n, argsBytes: JSON.stringify(submitArgs).length });
   const added = await ensureClaimBalance(near, contract, whitehat, cost);
   if (added > 0n) out.topped_up_near = formatNear(added);
 
-  const outcome = await near.account(whitehat).signAndSendTransaction({
-    receiverId: contract,
-    actions: [actions.functionCall("submit_claim", submitArgs, CLAIM_GAS, 0n)],
-    waitUntil: "EXECUTED_OPTIMISTIC",
-    throwOnFailure: false,
-  });
+  let outcome;
+  try {
+    outcome = await near.account(whitehat).signAndSendTransaction({
+      receiverId: contract,
+      actions: [actions.functionCall("submit_claim", submitArgs, gas, 0n)],
+      waitUntil: "EXECUTED_OPTIMISTIC",
+      throwOnFailure: false,
+    });
+  } catch (e) {
+    throw mayHaveLanded(e, `${whitehat}'s submit_claim on ${contract}`, "the claim may have been filed", "file");
+  }
   const status = outcome.status as { SuccessValue?: string; Failure?: unknown };
   if (status.SuccessValue === undefined) {
     throw new Error(`the claim was refused: ${JSON.stringify(status.Failure ?? status)}`);
@@ -234,8 +242,21 @@ export async function claim(args: string[], onStage: (s: Stage) => void = () => 
   out.claim_id = Number(JSON.parse(Buffer.from(status.SuccessValue, "base64").toString("utf8")));
   out.tx_hash = outcome.transaction.hash;
   saveClaimTxs(contract, out.claim_id, [out.tx_hash]);
+  // Filed: say so with its ID before following it, so a failure after this point never
+  // leaves the Whitehat unsure whether the claim exists (#35).
+  onStage({ stage: "sealed", claim_id: out.claim_id, tx_hash: out.tx_hash });
   if (args.includes("--no-wait")) return out;
   return seeThrough(args, { near, network, contract, whitehat, bounty }, out, [out.tx_hash], new Set(["sealed"]), onStage);
+}
+
+/**
+ * A send that got no answer from NEAR, after the transport's own resends, may still have
+ * landed: running it again could pay for a second claim or job (#35). Say so, rather than
+ * report a plain failure. Any other error is a failure before anything was sent.
+ */
+function mayHaveLanded(e: unknown, what: string, may: string, again: string): unknown {
+  if (!isNetworkError(e)) return e;
+  return new Error(`${may} (no answer from NEAR: ${describeError(e)}). Don't ${again} again: look for ${what} first`);
 }
 
 interface Context {
@@ -263,18 +284,26 @@ async function retryClaim(args: string[], c: Context & { given?: BountyId }, onS
   const out: ClaimResult = { bounty_contract: c.contract, retried: true, claim_id: claimId, block: filed.block };
   const fees = await c.near.view(c.contract, "fees");
   // The new job's input is the claim's own; no secret is stored again.
-  const cost = claimCost(fees, claimInputBytes(proofs.length, filed.header.length, JSON.stringify(filed.block).length), 0);
+  const live = await c.near.view<{ rules: Rules }>(c.contract, "bounty", { id: filed.bounty });
+  const inputBytes = claimInputBytes({ rules: live.rules, bounty: filed.bounty, whitehat: c.whitehat, block: filed.block, header: filed.header, proofsJson: proofs });
+  const cost = claimCost(fees, inputBytes, 0);
+  const gas = claimGas(fees, inputBytes, live.rules.covered_contracts.length, c.contract);
   const retryArgs = { claim_id: claimId, proofs };
-  await checkClaimNear(c.near, c.contract, c.whitehat, cost, { method: "retry_claim", gas: CLAIM_GAS, deposit: 0n, argsBytes: JSON.stringify(retryArgs).length });
+  await checkClaimNear(c.near, c.contract, c.whitehat, cost, { method: "retry_claim", gas, deposit: 0n, argsBytes: JSON.stringify(retryArgs).length });
   const added = await ensureClaimBalance(c.near, c.contract, c.whitehat, cost);
   if (added > 0n) out.topped_up_near = formatNear(added);
 
-  const outcome = await c.near.account(c.whitehat).signAndSendTransaction({
-    receiverId: c.contract,
-    actions: [actions.functionCall("retry_claim", retryArgs, CLAIM_GAS, 0n)],
-    waitUntil: "EXECUTED_OPTIMISTIC",
-    throwOnFailure: false,
-  });
+  let outcome;
+  try {
+    outcome = await c.near.account(c.whitehat).signAndSendTransaction({
+      receiverId: c.contract,
+      actions: [actions.functionCall("retry_claim", retryArgs, gas, 0n)],
+      waitUntil: "EXECUTED_OPTIMISTIC",
+      throwOnFailure: false,
+    });
+  } catch (e) {
+    throw mayHaveLanded(e, `${c.whitehat}'s retry_claim of claim ${claimId} on ${c.contract}`, "the retry may have been sent", "retry");
+  }
   const status = outcome.status as { SuccessValue?: string; Failure?: unknown };
   if (status.SuccessValue === undefined) throw new Error(`the retry was refused: ${JSON.stringify(status.Failure ?? status)}`);
   out.tx_hash = outcome.transaction.hash;

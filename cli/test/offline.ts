@@ -36,10 +36,18 @@ export function sandbox(): string[] {
   return prefix;
 }
 
+/**
+ * How long one sandboxed command may run. A test that runs the tool gives itself this much per
+ * run: each run rebuilds the judge (a no-op cargo check) and replays it in wasmtime, 0.7 s alone
+ * but over 1.5 s while another suite file compiles on every core, so vitest's 5 s default cut
+ * short a test that runs the tool twice.
+ */
+export const RUN_MS = 300_000;
+
 /** `cmd args` with networking denied. */
 export function offline(cmd: string, args: string[], env: NodeJS.ProcessEnv = process.env) {
   const [bin, ...pre] = sandbox();
-  const res = spawnSync(bin!, [...pre, cmd, ...args], { encoding: "utf8", timeout: 300_000, env });
+  const res = spawnSync(bin!, [...pre, cmd, ...args], { encoding: "utf8", timeout: RUN_MS, env });
   if (res.error) throw new Error(`can't deny networking here: ${res.error.message}`);
   return { code: res.status, stdout: res.stdout, stderr: res.stderr };
 }

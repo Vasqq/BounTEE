@@ -164,9 +164,13 @@ const ARB_JOB = `${repo}judge/tests/fixtures/arbitrum-sepolia/drain.json`;
 const arbReplay = JSON.parse(readFileSync(ARB_JOB, "utf8")).replay;
 
 /** Each signed transaction sent to NEAR, decoded. */
-const sent: { method: string; args: any }[] = [];
-/** The bounty's rules, and how old the stand-in chain says a claimed block is, and its hash there (default the Arbitrum job's). */
-let world: { rules: unknown; blockAgeSecs?: number; blockHash?: string };
+const sent: { method: string; args: any; gas: bigint }[] = [];
+/**
+ * The bounty's rules, how old the stand-in chain says a claimed block is, and its hash there
+ * (default the Arbitrum job's), and fees() when a test plays a real deployment's
+ * (fixtures/deployed-fees.json).
+ */
+let world: { rules: unknown; blockAgeSecs?: number; blockHash?: string; fees?: Record<string, unknown> };
 const keystore = generateKeyPairSync("x25519");
 const keystorePub = keystore.publicKey.export({ format: "der", type: "spki" }).subarray(12).toString("hex");
 
@@ -175,7 +179,7 @@ const VIEWS: Record<string, (args: any) => unknown> = {
   bounty: ({ id }) =>
     id.protocol === BOUNTY.protocol && id.name === BOUNTY.name ? { id: BOUNTY, rules: world.rules, state: "live", winning_claim: null, signed_pauses: [] } : null,
   config: () => ({ outlayer: "outlayer.testnet", usdc: "usdc.testnet", judge_build_hash: `0x${"5a".repeat(32)}` }),
-  fees: () => ({ job_deposit: String(20n * 10n ** 21n), storage_price_per_byte: String(10n ** 19n), job_input_free_bytes: 32768, secret_row_overhead_bytes: 1024 }),
+  fees: () => world.fees ?? ({ job_deposit: String(20n * 10n ** 21n), storage_price_per_byte: String(10n ** 19n), job_input_free_bytes: 32768, secret_row_overhead_bytes: 1024 , claim_gas_base: "220000000000000", claim_gas_per_covered_contract: "20000000000000", claim_gas_per_input_byte: "600000000"}),
   claim_balance: () => String(3n * YOCTO),
 };
 
@@ -207,7 +211,7 @@ const route: Route = (where, method, p) => {
     const bytes = Buffer.from(p.signed_tx_base64 ?? p[0], "base64");
     const { transaction: tx } = decodeSignedTransaction(bytes);
     const fc: any = (tx.actions[0] as any).functionCall;
-    sent.push({ method: fc.methodName, args: JSON.parse(Buffer.from(fc.args).toString("utf8")) });
+    sent.push({ method: fc.methodName, args: JSON.parse(Buffer.from(fc.args).toString("utf8")), gas: BigInt(fc.gas) });
     const hash = base58.encode(createHash("sha256").update(bytes).digest());
     // The contract files it as claim 7.
     return {
@@ -278,6 +282,34 @@ test("D26 D1: claim of a job saved on the second chain files its block, chain in
     // The recency re-check asked the block's chain, and no other.
     expect(evmAsked()).toEqual([`chain ${ARBITRUM_SEPOLIA} eth_getBlockByNumber`]);
   }
+}, 60_000);
+
+/** fees() as the two contracts the README names answer it, read live (neither can be upgraded). */
+const DEPLOYED = JSON.parse(readFileSync(new URL("fixtures/deployed-fees.json", import.meta.url), "utf8"));
+
+// R11.2, #35: bounty3.bountee.near (0c5d488) names a claim's gas by its size; the README's
+// Whitehat path files on bounty3.bountee.testnet (7b59e73, built before that rule), whose fees()
+// names only min_claim_gas and whose claims were filed and rehearsed at 300 Tgas.
+test("R11.2: claim of a testnet job files with the claim gas each README deployment's fees() names: by its size on bounty3.bountee.near, 300 Tgas on bounty3.bountee.testnet", async () => {
+  world = { rules: TWO_CHAIN_RULES, fees: DEPLOYED["bounty3.bountee.near"].fees };
+  const main = await claim(["--job", ARB_JOB, "--chain", "arbitrum-sepolia"], ARBITRUM_SEPOLIA);
+  expect(main.code, main.stderr).toBe(0);
+  expect(sent.map((s) => s.method)).toEqual(["submit_claim"]);
+  const f = world.fees!;
+  // claim_gas_base + two covered contracts + a per-byte part for the job's input, which carries
+  // the proofs and header as filed plus the rules and the claim's framing (well under 4 KB).
+  const perBytes = sent[0]!.gas - BigInt(f.claim_gas_base as string) - 2n * BigInt(f.claim_gas_per_covered_contract as string);
+  expect(perBytes % BigInt(f.claim_gas_per_input_byte as string)).toBe(0n);
+  const bytes = Number(perBytes / BigInt(f.claim_gas_per_input_byte as string));
+  const filed = sent[0]!.args.proofs.length + sent[0]!.args.header.length;
+  expect(bytes).toBeGreaterThan(filed);
+  expect(bytes).toBeLessThan(filed + 4096);
+
+  world = { rules: TWO_CHAIN_RULES, fees: DEPLOYED["bounty3.bountee.testnet"].fees };
+  const test = await claim(["--job", ARB_JOB, "--chain", "arbitrum-sepolia"], ARBITRUM_SEPOLIA);
+  expect(test.code, test.stderr).toBe(0);
+  expect(sent.map((s) => s.method)).toEqual(["submit_claim"]);
+  expect(sent[0]!.gas).toBe(300_000_000_000_000n);
 }, 60_000);
 
 /** The Arbitrum Sepolia job as `claim --exploit --evidence` takes it. */

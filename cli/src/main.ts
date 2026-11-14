@@ -10,6 +10,7 @@
 // as one JSON document on stdout, an error as `{"error": …}` on stderr, and a claim's live
 // stages as one JSON line each on stderr.
 import { readFileSync } from "node:fs";
+import { describeError, retryNetworkErrors } from "./transport.ts";
 import { balanceCommand, formatBalanceResult } from "./balance.ts";
 import { formatBounty, formatList, listBounties, parseBountyId, showBounty } from "./bounties.ts";
 import { formatBuildResult, reproducibleBuild } from "./build.ts";
@@ -30,6 +31,9 @@ import { formatReplayResult, formatTestResult, replayJob, testCommand } from "./
 import { formatVerifyResult as formatVerifyPauses, verifyPauses } from "./verify-pause.ts";
 import { formatVerifyResult, verify } from "./verify.ts";
 import { BARE_FLAGS, USAGES } from "./usage.ts";
+
+// A request that gets no HTTP answer is sent again before any command can fail on it (#35).
+retryNetworkErrors();
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const args = process.argv.slice(2);
@@ -313,5 +317,5 @@ try {
     fail(`unknown command: ${args.join(" ")}\n${Object.values(USAGES).join("\n")}`, 2);
   }
 } catch (e) {
-  fail((e as Error).message);
+  fail(describeError(e));
 }

@@ -47,6 +47,7 @@ const FEES = {
   min_withdraw_bounty_gas: (100n * TGAS).toString(), min_sign_pauses_gas_base: (50n * TGAS).toString(),
   min_sign_pauses_gas_per_contract: (50n * TGAS).toString(), min_verify_pause_gas_base: (50n * TGAS).toString(),
   min_verify_pause_gas_per_pause: (50n * TGAS).toString(),
+  claim_gas_base: "220000000000000", claim_gas_per_covered_contract: "20000000000000", claim_gas_per_input_byte: "600000000",
 };
 // NEP-145's storage_balance_bounds on Circle's USDC: 0.00125 NEAR to register an account.
 const STORAGE_MIN = 1_250_000_000_000_000_000_000n;
@@ -86,6 +87,7 @@ beforeAll(async () => {
           if (p.method_name === "fees") return nearView(FEES);
           if (p.method_name === "config") return nearView({ seed: { native: "1000000000000000000", tokens: [] }, judge_build_hash: `0x${"d6".repeat(32)}`, usdc: USDC });
           if (p.method_name === "posting_fee_balance") return nearView("0");
+          if (p.method_name === "claim_balance") return nearView("0");
           if (p.method_name === "bounty") return nearView(null);
         }
         if (p.account_id === USDC) {
