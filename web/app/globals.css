@@ -264,12 +264,13 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
 h1, h2, h3, .hero h1, .close h2, .mark, .statement p, .ledger b { font-weight: 360; font-optical-sizing: auto; letter-spacing: -0.03em; } .hero h1 { line-height: 0.98; font-size: clamp(52px, 5.3vw, 80px); max-width: none; } .mark { font-weight: 500; letter-spacing: -0.02em; font-size: 23px; } .ledger b { font-weight: 450; } h1 em, h2 em { font-style: italic; font-weight: 300; }
 /* hero: parts layout, poster words, decode load-in */
 .pw h1 .paid { color: var(--ok); }
-.pw .roll .chain { justify-self: start; align-self: center; transition: none; transform: none; opacity: 0; }
+.pw .roll .chain { position: absolute; left: 0; bottom: 0; transition: none; transform: none; opacity: 0; }
 .pw .roll .chain.on { opacity: 1; }
 .pw .roll { transition: none; }
 .js .pw .roll .wm { visibility: hidden; }
 .pw .roll .wm { width: auto; display: block; }
-.pw .roll { height: 1em; vertical-align: -0.12em; }
+/* An inline-block with hidden overflow sits its bottom edge on the line's text baseline, and the logos sit on that edge: both chains' bottoms line up with "Pause it on". */
+.pw .roll { display: inline-block; height: 1em; vertical-align: baseline; }
 .js .pw .ln.last { opacity: 0; transform: translateY(0.12em); transition: opacity 420ms var(--ease), transform 420ms var(--ease); }
 .js .pw .ln.last.in { opacity: 1; transform: none; }
 .hero-t { display: block; min-height: 100svh; padding: 0; position: relative; overflow: hidden; }
