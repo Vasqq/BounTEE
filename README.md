@@ -335,6 +335,8 @@ The [testnet site](https://testnet.bountee.dev) runs the same web app against `b
 
 Find the bug in a Live bounty's vault, prove it, and claim the bounty's test USDC.
 
+Here's me walking through the Whitehat journey, step by step: [watch on YouTube](https://youtu.be/8SQj71whDwc)
+
 **Before you start:** do the [Setup](#setup) and install [Foundry](https://getfoundry.sh). Check it with `forge --version`.
 
 **1. Make your testnet account.**
