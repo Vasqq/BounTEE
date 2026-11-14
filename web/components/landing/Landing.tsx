@@ -103,7 +103,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
 
         <section className="story" id="story" aria-labelledby="storyH">
           <div className="wrap story-head">
-            <h2 id="storyH" className="rise">The demo, one transaction at a time.</h2>
+            <h2 id="storyH" className="rise">The demo, one transaction at a time</h2>
             <div>
               <p className="lead rise" style={delay("80ms")}>{demo?.story.claimKey ? "A Whitehat claimed it: an independent AI agent, given only the instructions file and a claim key, found the bug and filed the claim. The Whitehat was paid by rule: no triage, no downgrade, nobody to dispute it." : "A Whitehat's claim is paid by rule: no triage, no downgrade, nobody to dispute it. Each step links its mainnet transaction once it happens."}</p>
               <dl className="proof rise" style={delay("140ms")} aria-label="What ran on mainnet">
@@ -130,18 +130,18 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
         <section className="who" id="who" aria-labelledby="whoH">
           <div className="wrap">
             <div className="who-head">
-              <h2 id="whoH" className="rise">You, or your agent.</h2>
+              <h2 id="whoH" className="rise">You, or your agent</h2>
             </div>
             <div className="who-cols rise" style={delay("120ms")}>
               <div>
                 <svg className="glyph iso" data-glyph="whitehat" aria-hidden="true"></svg>
-                <h3>You, with your own key.</h3>
+                <h3>You, with your own key</h3>
                 <p>Write the exploit as a Foundry script, test it locally against the rule that will judge it, and claim from the terminal. It is sealed on your machine before it leaves.</p>
                 <div className="term-mini"><code id="cmdYou"><span className="p" aria-hidden="true">$</span>bountee claim &lt;protocol&gt;/&lt;name&gt;</code><button className="copy" type="button" data-copy="cmdYou">Copy</button></div>
               </div>
               <div>
                 <svg className="glyph iso" data-glyph="agent" aria-hidden="true"></svg>
-                <h3>Your agent, with a claim key.</h3>
+                <h3>Your agent, with a claim key</h3>
                 <p>A key on your own account that can file claims and nothing else. It can't move funds, withdraw your balance or add keys, and you can revoke it any time.</p>
                 <div className="term-mini"><code id="cmdAgent"><span className="p" aria-hidden="true">$</span>bountee key add --contract &lt;contract&gt; --as &lt;you&gt;</code><button className="copy" type="button" data-copy="cmdAgent">Copy</button></div>
               </div>
@@ -152,18 +152,18 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
         <section className="who protocols" id="protocols" aria-labelledby="protocolsH">
           <div className="wrap">
             <div className="who-head">
-              <h2 id="protocolsH" className="rise">Pay only for a proven theft.</h2>
+              <h2 id="protocolsH" className="rise">Pay only for a proven theft</h2>
             </div>
             <div className="who-cols rise" style={delay("120ms")}>
               <div>
                 <svg className="glyph iso" data-glyph="vault" aria-hidden="true"></svg>
-                <h3>Set it up once.</h3>
+                <h3>Set it up once</h3>
                 <p>Give BounTEE the pause role on your contracts. Add a few cents of gas for pause and lock the bounty in USDC. The rules are fixed when you post.</p>
                 <div className="card-act"><a className="btn btn-ink" href={`${appSite}/post`}>Post a bounty</a></div>
               </div>
               <div>
                 <svg className="glyph iso" data-glyph="mpc" aria-hidden="true"></svg>
-                <h3>Then do nothing.</h3>
+                <h3>Then do nothing</h3>
                 <p>When a Whitehat proves a theft, the pause is signed and sent for every covered contract. You don&apos;t need to approve it. The bounty is paid out once. After the payout you can open the exploit to fix the bug.</p>
               </div>
             </div>
@@ -179,7 +179,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
         <section id="verify" aria-labelledby="verifyH">
           <div className="wrap">
             <div className="verify-head">
-              <h2 id="verifyH" className="rise">Don't take our word. Run the checks.</h2>
+              <h2 id="verifyH" className="rise">Don't take our word. Run the checks</h2>
               <p className="lead rise" style={delay("80ms")}>Check the mainnet demo above yourself. The command-line tool reads that bounty from the chains and rebuilds the code from source. It needs no keys and no funds. This is what it reports.</p>
             </div>
             <div className="term" id="term">
@@ -198,7 +198,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
 
         <section className="trust" id="trust" aria-labelledby="trustH">
           <div className="wrap">
-            <h2 id="trustH" className="rise">What nobody can do, and what you still trust.</h2>
+            <h2 id="trustH" className="rise">What nobody can do, and what you still trust</h2>
             <div className="ledger rise">
               <div>
                 <h3>Nobody can</h3>
@@ -225,7 +225,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
         <section id="faq" aria-labelledby="faqH">
           <div className="wrap faq">
             <div className="faq-l">
-              <h2 id="faqH">Common questions.</h2>
+              <h2 id="faqH">Common questions</h2>
               <p className="lead">Your most asked questions, answered.</p>
               <svg className="iso" id="faqArt" aria-hidden="true"></svg>
             </div>
@@ -245,7 +245,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
         <div className="wrap">
           <div className="close-grid">
             <div>
-              <h2 className="rise">Put a bounty on your contracts.</h2>
+              <h2 className="rise">Put a bounty on your contracts</h2>
               <p className="lead">Grant the pause role, add a few cents of pause gas, and post from the Ethereum wallet you already use.</p>
               <div className="cta">
                 <a className="btn btn-ink" href={`${appSite}/post`}>Post a bounty</a>
