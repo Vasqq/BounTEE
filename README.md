@@ -51,7 +51,7 @@ BounTEE depends on NEAR for five things, and each one ran on mainnet.
 
 ## How it works
 
-Every bounty goes through eight steps. The diagram below walks through a typical journey, from the Protocol's setup, through a claim that isn't a real bug and pays nothing, to the real exploit paid.
+A paid bounty goes through eight steps. The diagram below walks through a typical journey, from the Protocol's setup, through a claim that isn't a real bug and pays nothing, to the real exploit paid.
 
 ```mermaid
 sequenceDiagram
@@ -139,7 +139,7 @@ A Whitehat can also claim themselves; both paths are under [As a Whitehat](#as-a
 
 ## Setup
 
-Do this once. Every section below starts from here.
+Do this once. Every command-line section below starts from here.
 
 **1. Install these tools.**
 
@@ -173,6 +173,8 @@ cargo build --release -p bountee-judge --target wasm32-wasip2
 alias bountee='node cli/src/main.ts'
 ```
 
+If your shell doesn't keep aliases between commands (an AI agent's often doesn't), run `node cli/src/main.ts` from the `bountee` folder wherever this README says `bountee`.
+
 **6. Check it works.** You should see `bountee 0.1.0`.
 
 ```sh
@@ -190,7 +192,7 @@ bountee --version
 
 ## Check every claim yourself
 
-**Before you start:** do the [Setup](#setup). Step 6 also needs Docker running.
+**Before you start:** do the [Setup](#setup).
 
 **To run every step at once**, with each output checked for you:
 
@@ -312,11 +314,11 @@ no check failed
 
 ## Known gaps
 
-- **Not audited by a third party.** My own audit found no critical or high issues, and its five known issues are listed in [docs/audit.md](docs/audit.md). They stay unfixed so the demo runs the build the full rehearsal ran. The audit covered the build first deployed as `bounty.bountee.near`, not the later changes that let `bounty3.bountee.near` take a claim proven on any covered chain.
+- **Not audited by a third party.** My own audit found no critical or high issues; its findings are listed in [docs/audit.md](docs/audit.md). They stay unfixed because the deployed build has to be the one the full testnet rehearsal ran, and any fix changes its code hash. The audit covered the build first deployed as `bounty.bountee.near`, not the later changes that let `bounty3.bountee.near` take a claim proven on any covered chain.
 - **No admin, no upgrades.** If NEAR's MPC network changes its interface so pauses can't be signed, or Circle blocklists the winner, that bounty is stuck and its USDC stays locked.
 - **The contract trusts OutLayer's result.** It doesn't check the TEE's attestation itself; anyone can check it afterwards with `bountee verify`.
 - **One payout per bounty, EVM chains only.** A bounty pays its first proven exploit and closes. Each claim is proven on one covered chain, so an exploit that needs two chains' state at once can't be judged.
-- **The demo bounty is deliberately small:** 10 USDC (see [Mainnet proof](#mainnet-proof)).
+- **The demo bounty is deliberately small** (see [Mainnet proof](#mainnet-proof)).
 
 ## Use it
 
@@ -343,13 +345,13 @@ bountee init
 
 You should see `Created bountee-….testnet with 10 testnet NEAR from NEAR's faucet`. Note that account name: step 5 needs it.
 
-**2. Pick a Live bounty.** On the [testnet site](https://testnet.bountee.dev), open a bounty marked **Live**. Its name is at the top, like `harrowgate-lend.testnet/money-market`. Print its details:
+**2. Pick a Live bounty.** On the [testnet site](https://testnet.bountee.dev), open a bounty marked **Live** whose name, at the top, has the form `<protocol>.testnet/<name>`. Print its details:
 
 ```sh
 bountee show <bounty name> --contract bounty3.bountee.testnet --network testnet
 ```
 
-You should see `live`, the minimum theft, and under `covered contracts` each chain with the vault's full address. The vault's source is [`demo/src/PositionVault.sol`](demo/src/PositionVault.sol).
+You should see `live`, the minimum theft in USDC's smallest unit (1000000 is 1 USDC), and under `covered contracts` each chain with the vault's full address. The vault's source is [`demo/src/PositionVault.sol`](demo/src/PositionVault.sol).
 
 **3. Write your exploit** as a Foundry script, in a project beside the repo:
 
@@ -357,7 +359,7 @@ You should see `live`, the minimum theft, and under `covered contracts` each cha
 forge init ../my-exploit
 ```
 
-Its `run()` wraps the attack in `vm.startBroadcast()` and `vm.stopBroadcast()`, and sends the stolen tokens to `msg.sender`. Write the vault's address as `cast to-check-sum-address <address>` prints it. Running `forge build` in `../my-exploit` should show `Compiler run successful!`
+Write it as `../my-exploit/script/Exploit.s.sol`. Its `run()` wraps the attack in `vm.startBroadcast()` and `vm.stopBroadcast()`, and sends the stolen tokens to `msg.sender`. Use the vault's address on the chain you'll test it on in step 4, written as `cast to-check-sum-address <address>` prints it. Running `forge build` in `../my-exploit` should show `Compiler run successful!`
 
 **4. Test it on your machine.** It's free and sends nothing. The first run can take a few minutes.
 
@@ -365,7 +367,9 @@ Its `run()` wraps the attack in `vm.startBroadcast()` and `vm.stopBroadcast()`, 
 bountee test ../my-exploit/script/Exploit.s.sol --bounty <bounty name> --chain base-sepolia --contract bounty3.bountee.testnet --network testnet
 ```
 
-You should see `verdict: PAYS (minimum_theft_reached)`. A note that your judge is "not the bounty's pinned build" is expected. `ZERO` means your exploit took less than the bounty's minimum theft (shown on its page), or one of its transactions failed: fix the script and test again.
+`--chain` is a chain the bounty covers: `base-sepolia` or `arbitrum-sepolia`.
+
+You should see `verdict: PAYS (minimum_theft_reached)`. A note that your judge is "not the bounty's pinned build" is expected. `ZERO` means your exploit took less than the bounty's minimum theft (from step 2), or one of its transactions failed: fix the script and test again.
 
 **5. Claim it.** It costs about 0.3 testnet NEAR, whatever the result.
 
@@ -373,13 +377,13 @@ You should see `verdict: PAYS (minimum_theft_reached)`. A note that your judge i
 bountee claim ../my-exploit/script/Exploit.s.sol --bounty <bounty name> --chain base-sepolia --contract bounty3.bountee.testnet --as <your account> --network testnet
 ```
 
-Within about a minute you should see:
+Within about a minute you should see, with one `pause landed` line per covered chain:
 
 ```text
-claim 5: verdict PAYS (minimum_theft_reached)
-claim 5: paid 2000000 to <your account>
-claim 5: pause landed on chain 84532 (success, …)
-claim 5: pause landed on chain 421614 (success, …)
+claim <id>: verdict PAYS (minimum_theft_reached)
+claim <id>: paid 2000000 to <your account>
+claim <id>: pause landed on chain 84532 (success, …)
+claim <id>: pause landed on chain 421614 (success, …)
 ```
 
 Keep it running. About 10 minutes later you'll see `pause verified on NEAR` for each chain, then a receipt listing every transaction. The bounty page now shows **Paid**.
@@ -388,7 +392,7 @@ Keep it running. About 10 minutes later you'll see `pause verified on NEAR` for 
 
 Your AI agent can find the bug and claim for you with claim-only access: it can call only `submit_claim` and `retry_claim`, can't move your money, and every win is paid to your account.
 
-Before you start, do the [Setup](#setup). Then, before the agent starts, follow [For the Whitehat: before you hand over](docs/agent-instructions.md#for-the-whitehat-before-you-hand-over): put `bountee` on the agent's PATH, top up your claim balance (the agent can't), and grant claim-only access with `bountee key add`. Then give the agent that folder and [docs/agent-instructions.md](docs/agent-instructions.md). `bountee key revoke` withdraws the access afterwards.
+Before you start, do the [Setup](#setup). Then, before the agent starts, follow [For the Whitehat: before you hand over](docs/agent-instructions.md#for-the-whitehat-before-you-hand-over): put `bountee` on the agent's PATH, top up your claim balance (the agent can't), and grant claim-only access with `bountee key add --out-dir <folder>`. Then give the agent that folder and [docs/agent-instructions.md](docs/agent-instructions.md). `bountee key revoke` withdraws the access afterwards.
 
 ### As a Protocol
 
@@ -494,7 +498,7 @@ This time comes from the block timestamps of the transactions in the [step table
 <summary><strong>Stated limits</strong></summary>
 
 - **A pause protects only the covered contracts.** Copies of the same code deployed elsewhere stay exposed.
-- **Publishing the exploit exposes those copies further.** Winning exploits are published after the disclosure delay the Protocol chose at posting (1 to 90 days).
+- **Publishing the exploit exposes those copies further.** Winning exploits are published after the disclosure delay the Protocol chose at posting.
 - **Payouts are open to anyone, with no allowlist or KYC (identity checks).** Circle, USDC's issuer, can blocklist an account on NEAR's USDC, which would freeze a sanctioned winner's payout.
 - **Anyone can post a bounty on a copy of someone else's code**, to get a working exploit of it. Granting the pause role proves control of the covered contracts, not authorship of the code in them.
 - **A failed claim reveals its read set, never its exploit.** The claim's proofs go on NEAR, so anyone can see which fresh addresses and storage slots it touched.
@@ -527,7 +531,7 @@ After the hackathon, BounTEE grows in two phases: first hardening what's live, t
 
 | Deliverable | How I'll know it worked |
 |---|---|
-| A third-party audit of the bounty contract, with the five known issues fixed in a new deployment | Report published; every high and critical issue fixed |
+| A third-party audit of the bounty contract, with the findings in [docs/audit.md](docs/audit.md) fixed in a new deployment | Report published; every high and critical issue fixed |
 | The bounty contract checks the TEE's attestation itself, so nobody has to trust OutLayer's result | A forged result is refused on chain |
 | One or two pilot Protocols posting small live bounties | The first bounty posted by someone other than me, paid or ended |
 
@@ -554,7 +558,7 @@ A few things would help most: support funding the audit and an introduction to a
 
 Built for the NEAR hackathon (October to November 2026), for two tracks:
 
-- **Security** ("AI Security & Defense: trust, but verify"). BounTEE uses all three of the track's hints: an AI agent claims with claim-only access (a NEAR **function-call access key**), and anyone can check the **TEE attestation** of each result with `bountee verify`. The transactions are in the last two rows of [Why NEAR](#why-near).
+- **Security** ("AI Security & Defense: trust, but verify"). BounTEE uses all three of the track's hints: **agent security** and NEAR **function-call access keys** (an AI agent claims with claim-only access), and **TEE attestation** (anyone can check each result with `bountee verify`). The transactions are in the last two rows of [Why NEAR](#why-near).
 - **Privacy.** The exploit stays sealed until the Whitehat is paid: only the bounty contract's own TEE jobs can read it, and a copy sent to OutLayer directly is refused. The transaction is in the last row of [Why NEAR](#why-near).
 
 ## Run the tests
