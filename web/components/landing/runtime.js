@@ -941,64 +941,8 @@ return {
     ctx.imageSmoothingEnabled = false; ctx.drawImage(small, 0, 0, map.w * CELL, map.h * CELL);
   };
   addEventListener('resize', size); size();
-
-  // The scroll cue, in the circuit's own language: a plain grey line and arrowhead that stay on the page,
-  // and the same green Bayer dither the hero scans over its circuits, here a light that travels down the
-  // arrow with a streaming packet, blooms on the head, then rests. It has its own small canvas because
-  // the hero's canvas is masked away at the bottom, where the cue sits.
-  const CUE = { w: 72, h: 76, x: 36, top: 8, len: 44, arm: 10, travel: 1500, bloom: 900, cycle: 3600 };
-  CUE.tip = CUE.top + CUE.len;
-  const cc = document.createElement('canvas'), cctx = cc.getContext('2d');
-  cc.setAttribute('aria-hidden', 'true');
-  cc.style.cssText = `position:absolute;left:50%;bottom:44px;width:${CUE.w}px;height:${CUE.h}px;margin-left:${-CUE.w / 2}px;pointer-events:none;z-index:1`;
-  hero.appendChild(cc);
-  const cueDpr = devicePixelRatio || 1; cc.width = CUE.w * cueDpr; cc.height = CUE.h * cueDpr; cctx.setTransform(cueDpr, 0, 0, cueDpr, 0, 0);
-  const cw = CUE.w / CELL, ch = CUE.h / CELL;
-  const cueSmall = document.createElement('canvas'); cueSmall.width = cw; cueSmall.height = ch;
-  const cueS = cueSmall.getContext('2d'), cueImg = cueS.createImageData(cw, ch);
-  const strokeCue = (g) => {
-    g.beginPath(); g.moveTo(CUE.x, CUE.top); g.lineTo(CUE.x, CUE.tip);
-    g.moveTo(CUE.x - CUE.arm, CUE.tip - CUE.arm); g.lineTo(CUE.x, CUE.tip); g.lineTo(CUE.x + CUE.arm, CUE.tip - CUE.arm); g.stroke();
-  };
-  // a brightness map of the arrow, built as the circuit's is: a soft stroke sampled per cell
-  const cueMap = (() => {
-    const c = document.createElement('canvas'); c.width = cw; c.height = ch;
-    const g = c.getContext('2d'); g.scale(1 / CELL, 1 / CELL); g.strokeStyle = '#fff'; g.fillStyle = '#fff'; g.lineWidth = 1.7; g.lineCap = 'round'; g.lineJoin = 'round';
-    g.filter = 'blur(0.6px)'; strokeCue(g);
-    g.beginPath(); g.ellipse(CUE.x, CUE.top, 3.4, 2, 0, 0, Math.PI * 2); g.fill();
-    const d = g.getImageData(0, 0, cw, ch).data, v = new Float32Array(cw * ch);
-    for (let i = 0; i < v.length; i++) v[i] = d[i * 4] / 255;
-    return v;
-  })();
-  const ease2 = k => k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
-  const drawCue = now => {
-    cctx.clearRect(0, 0, CUE.w, CUE.h);
-    // the plain arrow and its start dot, drawn like the circuit's grey lines
-    cctx.strokeStyle = 'rgba(100, 102, 106, 0.62)'; cctx.fillStyle = 'rgba(116, 118, 122, 0.75)'; cctx.lineWidth = 1; cctx.lineCap = 'butt';
-    strokeCue(cctx); cctx.beginPath(); cctx.ellipse(CUE.x, CUE.top, 2.4, 1.4, 0, 0, Math.PI * 2); cctx.fill();
-    // the light: travels top to tip, blooms on the head, then eases away
-    const t = reduce ? CUE.travel + 200 : now % CUE.cycle, k = Math.min(1, t / CUE.travel), ly = CUE.top + ease2(k) * CUE.len;
-    const since = t - CUE.travel, bloom = since > 0 ? Math.max(0, 1 - since / CUE.bloom) : 0;
-    const R = 18 + bloom * 16, strength = since > 0 ? 0.25 + bloom * 0.75 : 1;
-    const d = cueImg.data; d.fill(0);
-    for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
-      const b = cueMap[y * cw + x]; if (b < 0.02) continue;
-      const dist = Math.hypot(x * CELL - CUE.x, y * CELL - ly), kk = Math.max(0, 1 - dist / R), e = Math.max(kk * kk * (3 - 2 * kk) * strength, 0.34);
-      if (b * e * 1.5 > BAYER[(y & 3) * 4 + (x & 3)]) { const i = (y * cw + x) * 4; d[i] = 0; d[i + 1] = 236; d[i + 2] = 151; d[i + 3] = Math.round(120 + e * 130); }
-    }
-    // the packet and its short trail, as the circuit's moving packets are
-    if (since <= 0) for (const [back, wgt] of [[0, 0.7], [8, 0.4], [16, 0.2]]) {
-      const cy = (ly - back) / CELL, cx = CUE.x / CELL; if (ly - back < CUE.top) continue;
-      for (let y = Math.floor(cy - 5); y <= cy + 5; y++) for (let x = Math.floor(cx - 3); x <= cx + 3; x++) {
-        if (x < 0 || y < 0 || x >= cw || y >= ch) continue;
-        const dd = Math.hypot(x - cx, (y - cy) / 1.7), b = Math.max(0, 1 - dd / 2.6) * wgt;
-        if (b > BAYER[(y & 3) * 4 + (x & 3)]) { const i = (y * cw + x) * 4; d[i] = 0; d[i + 1] = 236; d[i + 2] = 151; d[i + 3] = 200; }
-      }
-    }
-    cueS.putImageData(cueImg, 0, 0); cctx.imageSmoothingEnabled = false; cctx.drawImage(cueSmall, 0, 0, cw * CELL, ch * CELL);
-  };
-  const loop = now => { if (visible) { draw(now); drawCue(now); } if (!reduce) requestAnimationFrame(loop); };
-  if (reduce) { draw(0); drawCue(0); } else requestAnimationFrame(loop);
+  const loop = now => { if (visible) draw(now); if (!reduce) requestAnimationFrame(loop); };
+  if (reduce) draw(0); else requestAnimationFrame(loop);
 })();
   started = api;
   return api;
