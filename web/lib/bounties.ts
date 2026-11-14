@@ -6,7 +6,7 @@ import { rpc as evmRpc } from "@bountee/cli/src/proofs.ts";
 import { balance, receipt } from "./evm.ts";
 import { forBounty, history, type ContractEvent, type Find } from "./history.ts";
 import { borshString, txReceipts, view, viewState } from "./near.ts";
-import { isoDate, units } from "./format.ts";
+import { isoDate, units, utcMinute } from "./format.ts";
 
 export interface BountyId {
   protocol: string;
@@ -414,7 +414,7 @@ export async function readBounty(id: BountyId): Promise<BountyPage | null> {
     state: publicState(b.state, r.end_date_ns),
     amount: usdc(r.bounty_amount, decimals),
     minimumTheft: usdc(r.minimum_theft, decimals),
-    ends: isoDate(r.end_date_ns),
+    ends: utcMinute(r.end_date_ns),
     claimsJudged: judged,
     recencyMinutes: r.recency_limit_secs / 60,
     disclosureDelayDays: r.disclosure_delay_days,

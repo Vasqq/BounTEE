@@ -217,8 +217,6 @@ test("D30: on testnet every link on the bounty list and a bounty page is a testn
   await expect(page.getByRole("row", { name: /tallowfen-swap\.testnet\/amm/ })).toContainText("Live");
   await page.getByRole("link", { name: "Past 1" }).click();
   await expect(page).toHaveURL(/\?tab=past$/);
-  await expect(page.getByText("Read live from bounty3.bountee.testnet")).toBeVisible();
-  await expect(page.getByRole("link", { name: "bounty3.bountee.testnet" })).toHaveAttribute("href", "https://testnet.nearblocks.io/address/bounty3.bountee.testnet");
   const row = page.getByRole("row", { name: /brassmoor-lend\.testnet\/pool/ });
   await expect(row.getByRole("img", { name: "Base Sepolia" }).first().locator("path")).toHaveAttribute("fill", "#0000ff");
   await expect(row.getByRole("img", { name: "Arbitrum Sepolia" }).first().locator("rect")).toHaveAttribute("fill", "#213147");

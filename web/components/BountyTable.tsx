@@ -6,7 +6,8 @@
 // forward and a shared link all land on the same view with no new read. Every control is still
 // a real link or GET form, so the page works without JavaScript.
 import { useSearchParams } from "next/navigation";
-import type { MouseEvent, ReactNode } from "react";
+import { useEffect, useState } from "react";
+import type { CSSProperties, MouseEvent, ReactNode } from "react";
 import { ReadFailed } from "./ReadFailed.tsx";
 import { ChainMark } from "./ChainMark.tsx";
 import { StatusChip } from "./Chips.tsx";
@@ -14,6 +15,7 @@ import { Hint } from "./Hint.tsx";
 import { SortSelect } from "./SortSelect.tsx";
 import { countsFor, firstDir, flip, idOf, rowsFor, viewHref, viewOf, type Dir, type SortKey, type Tab, type View } from "@/lib/bounty-list.ts";
 import type { BountyList, BountyRow } from "@/lib/bounties.ts";
+import { timeLeft } from "@/lib/format.ts";
 import { useBountyList } from "@/lib/live.ts";
 
 const href = (r: BountyRow) => `/bounties/${encodeURIComponent(r.id.protocol)}/${encodeURIComponent(r.id.name)}`;
@@ -60,10 +62,40 @@ function SortHeader({ view, sort, right, tip, children }: { view: View; sort: So
   );
 }
 
+/** A Live bounty shows its time left, ticking; every other state keeps the end date it was posted with. Starts at the server's read so it hydrates the same. */
+function Ends({ row, readAt, lead = "" }: { row: BountyRow; readAt: number; lead?: string }) {
+  const [now, setNow] = useState(readAt);
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+  const left = row.state === "Live" ? timeLeft(row.endNs, now) : null;
+  return left === null ? <>{row.ends}</> : <>{lead}{left}</>;
+}
+
+/** "250 USDC": the number large, the currency small. */
+function Amount({ text }: { text: string }) {
+  const at = text.lastIndexOf(" ");
+  if (at < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)}
+      <span className="cur">{text.slice(at + 1)}</span>
+    </>
+  );
+}
+
 const clock = (ms: number) => new Date(ms).toISOString().slice(11, 19) + " UTC";
 
 export function BountyTable({ initial, readAt }: { initial: BountyList; readAt: number }) {
   const q = useBountyList(initial, readAt);
+  // The rows dither in once, as the page loads. After that a tab or sort switch is instant, and a row a re-read moves must not replay it.
+  const [reveal, setReveal] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setReveal(false), 1600);
+    return () => clearTimeout(t);
+  }, []);
   const list = q.data;
   const view = viewOf(Object.fromEntries(useSearchParams()));
   const rows = rowsFor(list.rows, view);
@@ -85,16 +117,10 @@ export function BountyTable({ initial, readAt }: { initial: BountyList; readAt: 
           <ReadFailed what="Couldn't refresh from NEAR" lastGood={clock(q.dataUpdatedAt)} onRetry={() => q.refetch()} />
         </div>
       )}
-      <p className="source">
-        Read live from{" "}
-        <a className="datum" href={list.contractHref} target="_blank" rel="noopener">
-          {list.contract}
-        </a>
-      </p>
       {rows.length === 0 ? (
         <p className="empty">{EMPTY[view.tab]}</p>
       ) : (
-        <table className="list">
+        <table className="list" data-reveal={reveal || undefined}>
           <thead>
             <tr>
               <SortHeader view={view} sort="bounty">
@@ -113,17 +139,17 @@ export function BountyTable({ initial, readAt }: { initial: BountyList; readAt: 
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={idOf(r)}>
+            {rows.map((r, i) => (
+              <tr key={idOf(r)} style={{ "--i": i } as CSSProperties}>
                 <td>
                   <span className="head">
+                    <StatusChip state={r.state} />
                     <a className="id" href={href(r)}>
                       {idOf(r)}
                     </a>
-                    <StatusChip state={r.state} />
                   </span>
                   <span className="sub">
-                    {r.amount} · ends {r.ends}
+                    {r.amount} · ends <Ends row={r} readAt={readAt} lead="in " />
                     <span className="marks">
                       {r.chains.map((c) => (
                         <ChainMark key={c.id} chainId={c.id} name={c.name} />
@@ -138,9 +164,13 @@ export function BountyTable({ initial, readAt }: { initial: BountyList; readAt: 
                     ))}
                   </span>
                 </td>
-                <td className="r">{r.amount}</td>
+                <td className="r pays">
+                  <Amount text={r.amount} />
+                </td>
                 <td className="r">{r.minimumTheft}</td>
-                <td className="r">{r.ends}</td>
+                <td className="r">
+                  <Ends row={r} readAt={readAt} />
+                </td>
               </tr>
             ))}
           </tbody>

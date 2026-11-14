@@ -10,7 +10,6 @@ import type { BountyId, BountyPage, ChainPause, PostingFailure, PublicState } fr
 import { plural, shortAccount, shortHash } from "@/lib/format.ts";
 import { bountyKey, useBounty } from "@/lib/live.ts";
 import { net } from "@/lib/network.ts";
-import { BOUNTY_CONTRACT } from "@/lib/pinned.ts";
 import { ChainMark } from "./ChainMark.tsx";
 import { Ext, StatusChip, TxChip, TxPending } from "./Chips.tsx";
 import { CommandBlock } from "./CommandBlock.tsx";
@@ -78,13 +77,6 @@ export function BountyLive({ id }: { id: BountyId }) {
           </h1>
           {b ? <StatusChip state={b.state} /> : <Bar w={64} h={30} i={1} />}
         </div>
-        <p className="source">
-          <span className="live-dot" key={q.dataUpdatedAt} aria-hidden="true" />
-          Read live from{" "}
-          <a href={b?.contractHref ?? undefined} target="_blank" rel="noopener">
-            {b?.contract ?? BOUNTY_CONTRACT}
-          </a>
-        </p>
       </header>
       {q.isError && (
         <div className="block">
@@ -151,7 +143,7 @@ function Figures({ b }: { b: BountyPage | null }) {
       : s === "Withdrawn"
         ? "The smart contracts this bounty was for."
         : "The smart contracts this bounty is for. If someone proves an exploit, all of them are paused.";
-  const endsTip = endsLabel === "Ended" ? "The last day exploits could be submitted (UTC time)." : "The last day to submit an exploit (UTC time).";
+  const endsTip = endsLabel === "Ended" ? "The last moment exploits could be submitted (UTC time)." : "The last moment to submit an exploit (UTC time).";
   return (
     <section className="block" aria-labelledby="summaryH">
       <h2 id="summaryH">Summary</h2>
