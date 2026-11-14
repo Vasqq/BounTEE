@@ -108,7 +108,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
               <dl className="proof rise" style={delay("140ms")} aria-label="What ran on mainnet">
                 <dt>Ran on</dt><dd>{demo?.chains ? `${listOf(["NEAR", ...demo.chains])} mainnet` : DASH}</dd>
                 <dt>Claimed by</dt><dd>{demo?.story.claimKey ? "a Whitehat's AI agent, with a claim key" : DASH}</dd>
-                <dt>Paid</dt><dd>{demo?.paidOnce ? <><span className="ok">{demo.amount}</span>, once</> : DASH}</dd>
+                <dt>Paid</dt><dd>{demo?.paidOnce ? <span className="ok">{demo.amount}</span> : DASH}</dd>
                 <dt>Every step</dt><dd>{demo?.contract ? <a href={demo.contractHref} target="_blank" rel="noopener">{demo.contract} on nearblocks</a> : <a href={nearExplorer} target="_blank" rel="noopener">tx pending</a>}</dd>
               </dl>
             </div>

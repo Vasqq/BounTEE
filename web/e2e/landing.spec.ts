@@ -78,7 +78,7 @@ test("R15.6, D28: the story's amounts and delay are the bounty's on chain, and t
   await expect(panel(page, 0)).toContainText("locked 25 USDC behind rules nobody can change");
   await expect(panel(page, 2)).toContainText("The TEE replayed the exploit with revm against Base at block 38,000,001. It took more than the 2 USDC minimum theft.");
   await expect(panel(page, 7)).toContainText("After the 3-day disclosure delay");
-  await expect(page.getByRole("definition").filter({ hasText: "25 USDC" })).toContainText("25 USDC, once");
+  await expect(page.getByRole("definition").filter({ hasText: "25 USDC" })).toContainText("25 USDC");
 });
 
 test("D4, ADR-0017, ADR-0022: no testnet string or explorer link ships in the mainnet build", async ({ page }) => {
