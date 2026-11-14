@@ -158,13 +158,13 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
               <div>
                 <svg className="glyph iso" data-glyph="vault" aria-hidden="true"></svg>
                 <h3>Set it up once.</h3>
-                <p>Give BounTEE the pause role on your vault on each chain, add a few cents of pause gas, and lock the bounty in USDC. The rules are fixed when you post.</p>
+                <p>Give BounTEE the pause role on your contracts. Add a few cents of gas for pause and lock the bounty in USDC. The rules are fixed when you post.</p>
                 <div className="card-act"><a className="btn btn-ink" href={`${appSite}/post`}>Post a bounty</a></div>
               </div>
               <div>
                 <svg className="glyph iso" data-glyph="mpc" aria-hidden="true"></svg>
                 <h3>Then do nothing.</h3>
-                <p>When a Whitehat proves a theft, the pause is signed and sent for every covered contract. You don&apos;t approve it. The bounty is paid once. After the payout you can open the exploit to fix the bug.</p>
+                <p>When a Whitehat proves a theft, the pause is signed and sent for every covered contract. You don&apos;t need to approve it. The bounty is paid out once. After the payout you can open the exploit to fix the bug.</p>
               </div>
             </div>
           </div>
