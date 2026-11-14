@@ -57,10 +57,6 @@
 .datum { font-family: var(--mono); font-size: var(--fs-sm); }
 
 /* bounty list */
-/* The line naming the contract the list was read from (R15.6). */
-.source { color: var(--ink-2); margin-top: 16px; font-size: var(--fs-sm); }
-.source a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; transition: text-decoration-color var(--t1) var(--ease); }
-.source a:hover { text-decoration-color: var(--ink); }
 .list-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; margin-top: 24px; }
 /* Live and Past: a segmented pair on a ground-2 track, the open one lifted a step, never ink (one ink action per view). */
 .tabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--r-sm); background: var(--ground-2); }
@@ -83,9 +79,9 @@
 .list th a:focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; border-radius: 2px; }
 .list th a.hint-term { cursor: pointer; }
 .list th.col-chains { width: 88px; }
-.list th.col-pays { width: 136px; }
+.list th.col-pays { width: 156px; }
 .list th.col-theft { width: 160px; }
-.list th.col-ends { width: 132px; }
+.list th.col-ends { width: 200px; }
 .sort-arrow { width: 12px; height: 12px; flex: none; }
 /* Fixed layout: the value columns keep their widths whatever the tab or sort shows, and the
    bounty column takes the rest, its ID ending in an ellipsis rather than widening the table. */
@@ -142,12 +138,6 @@
 
 /* Bounty details (DESIGN.md, Bounty page): the header and figures answer what every reader asks
    first; each block below has a plain heading. Tone steps, never lines; green only on chain facts. */
-.bounty-head .source { margin-top: 14px; }
-/* The live-read dot: it flashes once each time a fresh read of the chains lands (every 15 s). Grey: a read
-   proves nothing by itself, so it is never green. */
-.live-dot { display: inline-block; vertical-align: middle; margin: -2px 9px 0 1px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); animation: live-read 900ms var(--ease) both; }
-@keyframes live-read { 0% { background: var(--ink); box-shadow: 0 0 0 0 color-mix(in srgb, var(--ink) 45%, transparent); } 100% { background: var(--ink-3); box-shadow: 0 0 0 7px color-mix(in srgb, var(--ink) 0%, transparent); } }
-@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 
 /* The figures: type on one ground-2 band, never tiles. The money is the largest figure on the screen. */
 .figs { display: flex; flex-wrap: wrap; gap: 24px 32px;
@@ -285,7 +275,7 @@
 .vstep .n { color: var(--ink-3); }
 .vstep .st { font: 500 var(--fs-sm)/1.3 var(--text); }
 .vstep .st.pass { color: var(--ok); }
-.vstep .st.wait { color: var(--ink-3); }
+.vstep .st.wait { color: var(--ink-2); }
 .vstep .st.fail { color: var(--fail); }
 .vstep .det { color: var(--ink-3); overflow-wrap: anywhere; }
 .vstep .det a { color: var(--ink-2); text-underline-offset: 3px; text-decoration-color: var(--line-2); }
@@ -347,12 +337,15 @@
   .list tr:hover { background: var(--surface); }
   .list td { display: none; background: none; height: auto; }
   .list td:first-child { display: grid; align-content: center; gap: 4px; width: auto; height: 72px; padding: 0 16px; border-radius: var(--r-sm); }
-  .list .head { justify-content: space-between; }
+  .list .head { justify-content: flex-start; }
   .list .sub { display: block; width: 100%; font: 400 var(--fs-sm)/1.5 var(--text); color: var(--ink-2); }
   .list .sub .marks { margin-left: 6px; }
 }
 @media (max-width: 560px) {
   .nav ul.app-links li.verify { display: none; }
+  /* The Testnet badge adds about 80px to the brand, so on a phone the bar no longer fits all three: wordmark, badge, Bounties and the
+     Post a bounty button ran off the screen's edge at every width from 360 to 430px. The Bounties link gives way, as Verify already does. */
+  .nav ul.app-links.badged { display: none; }
 }
 .app .block h2.h-panel, .panel-app h2.h-panel { font-size: var(--fs-4); }
 .panel-app h2.h-panel + * { margin-top: 12px; }
@@ -484,3 +477,51 @@ fieldset.covered > .btn { justify-self: start; }
 .task-label { font: 400 var(--fs-sm)/1.4 var(--text); color: var(--ink-2); }
 .task-label .datum { color: var(--ink); }
 .post-error { margin-bottom: 24px; padding: 12px 16px; background: var(--ground-2); border-radius: var(--r-sm); font-size: var(--fs-sm); color: var(--ink); }
+
+/* Dither: ordered 4x4 Bayer tiles drawn as SVG, so the effects below need no script and render with the server's HTML. */
+.list .head::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 16px; border-radius: var(--r-sm) 0 0 var(--r-sm); pointer-events: none; opacity: 0; transition: opacity var(--t2) var(--ease);
+  /* Only the row's 16px padding: the edge stays clear of the status chip. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2300ec97' fill-opacity='0.55'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='1' y='0' width='1' height='1'/%3E%3Crect x='2' y='0' width='1' height='1'/%3E%3Crect x='3' y='0' width='1' height='1'/%3E%3Crect x='1' y='1' width='1' height='1'/%3E%3Crect x='3' y='1' width='1' height='1'/%3E%3Crect x='0' y='2' width='1' height='1'/%3E%3Crect x='1' y='2' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3Crect x='3' y='2' width='1' height='1'/%3E%3Crect x='1' y='3' width='1' height='1'/%3E%3Crect x='3' y='3' width='1' height='1'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2300ec97' fill-opacity='0.55'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='2' y='0' width='1' height='1'/%3E%3Crect x='1' y='1' width='1' height='1'/%3E%3Crect x='3' y='1' width='1' height='1'/%3E%3Crect x='0' y='2' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3Crect x='1' y='3' width='1' height='1'/%3E%3Crect x='3' y='3' width='1' height='1'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2300ec97' fill-opacity='0.55'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='2' y='0' width='1' height='1'/%3E%3Crect x='0' y='2' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2300ec97' fill-opacity='0.55'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3C/svg%3E");
+  background-position: 0px 0, 4px 0, 8px 0, 12px 0;
+  background-size: 4px 4px; background-repeat: repeat-y; }
+@media (hover: hover) and (pointer: fine) { .list tr:hover .head::before { opacity: 1; } }
+/* Rows dither in once, as the list loads (BountyTable drops data-reveal after 1.6 s): a mask stepping from empty to full through the same tiles. */
+@keyframes dither-in {
+  0.0% { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3C/svg%3E"); }
+  12.5% { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3C/svg%3E"); }
+  25.0% { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3C/svg%3E"); }
+  37.5% { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='3' y='3' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3Crect x='9' y='9' width='3' height='3'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='3' y='3' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3Crect x='9' y='9' width='3' height='3'/%3E%3C/svg%3E"); }
+  50.0% { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='3' y='3' width='3' height='3'/%3E%3Crect x='9' y='3' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3Crect x='3' y='9' width='3' height='3'/%3E%3Crect x='9' y='9' width='3' height='3'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='3' y='3' width='3' height='3'/%3E%3Crect x='9' y='3' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3Crect x='3' y='9' width='3' height='3'/%3E%3Crect x='9' y='9' width='3' height='3'/%3E%3C/svg%3E"); }
+  62.5% { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='3' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='3' y='3' width='3' height='3'/%3E%3Crect x='9' y='3' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3Crect x='9' y='6' width='3' height='3'/%3E%3Crect x='3' y='9' width='3' height='3'/%3E%3Crect x='9' y='9' width='3' height='3'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='3' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='3' y='3' width='3' height='3'/%3E%3Crect x='9' y='3' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3Crect x='9' y='6' width='3' height='3'/%3E%3Crect x='3' y='9' width='3' height='3'/%3E%3Crect x='9' y='9' width='3' height='3'/%3E%3C/svg%3E"); }
+  75.0% { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='3' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='9' y='0' width='3' height='3'/%3E%3Crect x='3' y='3' width='3' height='3'/%3E%3Crect x='9' y='3' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='3' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3Crect x='9' y='6' width='3' height='3'/%3E%3Crect x='3' y='9' width='3' height='3'/%3E%3Crect x='9' y='9' width='3' height='3'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='3' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='9' y='0' width='3' height='3'/%3E%3Crect x='3' y='3' width='3' height='3'/%3E%3Crect x='9' y='3' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='3' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3Crect x='9' y='6' width='3' height='3'/%3E%3Crect x='3' y='9' width='3' height='3'/%3E%3Crect x='9' y='9' width='3' height='3'/%3E%3C/svg%3E"); }
+  87.5% { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='3' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='9' y='0' width='3' height='3'/%3E%3Crect x='0' y='3' width='3' height='3'/%3E%3Crect x='3' y='3' width='3' height='3'/%3E%3Crect x='9' y='3' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='3' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3Crect x='9' y='6' width='3' height='3'/%3E%3Crect x='3' y='9' width='3' height='3'/%3E%3Crect x='6' y='9' width='3' height='3'/%3E%3Crect x='9' y='9' width='3' height='3'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='black'%3E%3Crect x='0' y='0' width='3' height='3'/%3E%3Crect x='3' y='0' width='3' height='3'/%3E%3Crect x='6' y='0' width='3' height='3'/%3E%3Crect x='9' y='0' width='3' height='3'/%3E%3Crect x='0' y='3' width='3' height='3'/%3E%3Crect x='3' y='3' width='3' height='3'/%3E%3Crect x='9' y='3' width='3' height='3'/%3E%3Crect x='0' y='6' width='3' height='3'/%3E%3Crect x='3' y='6' width='3' height='3'/%3E%3Crect x='6' y='6' width='3' height='3'/%3E%3Crect x='9' y='6' width='3' height='3'/%3E%3Crect x='3' y='9' width='3' height='3'/%3E%3Crect x='6' y='9' width='3' height='3'/%3E%3Crect x='9' y='9' width='3' height='3'/%3E%3C/svg%3E"); }
+  100.0%,100% { -webkit-mask-image: none; mask-image: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .list[data-reveal] td { animation: dither-in 520ms steps(1, end) both; animation-delay: calc(min(var(--i, 0), 12) * 45ms); -webkit-mask-size: 12px 12px; mask-size: 12px 12px; }
+}
+
+/* Pays: the amount in the display serif, its currency small beside it. */
+.list td.pays { font: 360 24px/1 var(--display); letter-spacing: -0.03em; font-optical-sizing: auto; font-variant-numeric: tabular-nums; color: var(--ink); }
+.list td.pays .cur { font: 500 var(--fs-sm)/1 var(--text); letter-spacing: 0; color: var(--ink-3); margin-left: 4px; }
+
+/* The Bounties header band: a slow field of faint green dither behind the title (components/DitherBand.tsx). */
+/* Full width and clipped at the viewport, so the field runs off the screen's edge instead of ending at the content column. It sits
+   behind the page (z-index -1), fades out toward the left and the bottom, and is dimmer on a phone. */
+.band-wrap { position: absolute; top: 0; left: 0; right: 0; height: 380px; overflow: hidden; pointer-events: none; z-index: -1; }
+.dither-band { position: absolute; right: 0; top: 0; width: min(1100px, 100%); height: 100%; opacity: 0.9;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.35) 35%, #000 85%), linear-gradient(180deg, transparent 0%, #000 24%, rgba(0,0,0,0.5) 62%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.35) 35%, #000 85%), linear-gradient(180deg, transparent 0%, #000 24%, rgba(0,0,0,0.5) 62%, transparent 100%);
+  mask-composite: intersect; }
+@media (max-width: 600px) { .band-wrap { height: 300px; } .dither-band { width: 100%; opacity: 0.4; } }
+
+/* Covered contracts rows: the list's hover edge, inside the cell's own padding so it never touches the chain name. */
+.dtable td:first-child { position: relative; }
+.dtable td:first-child::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 20px; border-radius: var(--r-sm) 0 0 var(--r-sm); pointer-events: none; opacity: 0; transition: opacity var(--t2) var(--ease);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2300ec97' fill-opacity='0.8'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='1' y='0' width='1' height='1'/%3E%3Crect x='2' y='0' width='1' height='1'/%3E%3Crect x='3' y='0' width='1' height='1'/%3E%3Crect x='0' y='1' width='1' height='1'/%3E%3Crect x='1' y='1' width='1' height='1'/%3E%3Crect x='3' y='1' width='1' height='1'/%3E%3Crect x='0' y='2' width='1' height='1'/%3E%3Crect x='1' y='2' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3Crect x='3' y='2' width='1' height='1'/%3E%3Crect x='1' y='3' width='1' height='1'/%3E%3Crect x='2' y='3' width='1' height='1'/%3E%3Crect x='3' y='3' width='1' height='1'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2300ec97' fill-opacity='0.8'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='1' y='0' width='1' height='1'/%3E%3Crect x='2' y='0' width='1' height='1'/%3E%3Crect x='1' y='1' width='1' height='1'/%3E%3Crect x='3' y='1' width='1' height='1'/%3E%3Crect x='0' y='2' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3Crect x='3' y='2' width='1' height='1'/%3E%3Crect x='1' y='3' width='1' height='1'/%3E%3Crect x='3' y='3' width='1' height='1'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2300ec97' fill-opacity='0.8'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='2' y='0' width='1' height='1'/%3E%3Crect x='1' y='1' width='1' height='1'/%3E%3Crect x='0' y='2' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3Crect x='3' y='3' width='1' height='1'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2300ec97' fill-opacity='0.8'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3Crect x='2' y='0' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' fill='%2300ec97' fill-opacity='0.8'%3E%3Crect x='0' y='0' width='1' height='1'/%3E%3C/svg%3E");
+  background-position: 0px 0, 4px 0, 8px 0, 12px 0, 16px 0;
+  background-size: 4px 4px; background-repeat: repeat-y; }
+@media (hover: hover) and (pointer: fine) { .dtable tbody tr:hover td:first-child::before { opacity: 1; } }
+@media (max-width: 900px) { .dtable td:first-child::before { width: 14px; } }
+@media (max-width: 560px) { .dtable td:first-child::before { width: 10px; } }
