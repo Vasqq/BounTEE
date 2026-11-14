@@ -151,7 +151,7 @@ Do this once. Every section below starts from here.
 - [pnpm](https://pnpm.io/installation)
 - [Rust](https://rustup.rs)
 - [wasmtime](https://wasmtime.dev)
-- [Docker](https://docs.docker.com/get-docker/), only for step 6 of [Check every claim yourself](#check-every-claim-yourself). Open it so it's running.
+- [Docker](https://docs.docker.com/get-docker/) and [cargo-near](https://github.com/near/cargo-near#installation), only for step 6 of [Check every claim yourself](#check-every-claim-yourself). Open Docker so it's running.
 
 **2. Get the code.** Copy each box, paste it into your terminal and press Enter.
 
@@ -202,7 +202,13 @@ bountee --version
 node scripts/check-readme-steps.ts
 ```
 
-At the end you should see `0 failed`. Or run the steps one by one, in order. Steps 1 to 3 work offline.
+It runs step 6's rebuild too, so allow up to 15 minutes. At the end you should see:
+
+```text
+steps: 12 ok, 0 failed, 0 pending, 0 skipped (online)
+```
+
+and `0 failed` on the `links:` line below it. Any line starting `FAIL` names what broke. Or run the steps one by one, in order. Steps 1 to 3 work offline.
 
 **1. A real exploit pays, and a cheat pays nothing.** These replay recorded claims through the judge you built in Setup, against an earlier demo vault, [`demo/src/DemoVault.sol`](demo/src/DemoVault.sol). In the cheat, a depositor withdraws its own money: funds leave the vault, but nothing is stolen.
 
@@ -285,7 +291,7 @@ same verdict as the enclave
 bountee verify demo.bountee.near/demo --contract bounty3.bountee.near --network mainnet
 ```
 
-You should see, among other detail:
+After the build log, you should see a `pass` line for each check (the pauses once per chain), ending with `no check failed`:
 
 ```text
 pass contract_code
@@ -297,6 +303,12 @@ pass pause_verified
 pass rerun
 no check failed
 ```
+
+**If a step fails:**
+
+- `sanity check failed`: Docker isn't running. Open it and run it again.
+- `Rate limits exceeded` or `HTTP 429`: the public NEAR endpoint is busy. Wait a minute and run it again.
+- `command not found` for `bountee`: see "Opened a new terminal window?" in [Setup](#setup).
 
 <img src="docs/images/verify-mainnet.png" alt="The demo bounty's Verify section on the mainnet site" width="900">
 
