@@ -353,6 +353,9 @@
 }
 @media (max-width: 560px) {
   .nav ul.app-links li.verify { display: none; }
+  /* The Testnet badge adds about 80px to the brand, so on a phone the bar no longer fits all three: wordmark, badge, Bounties and the
+     Post a bounty button ran off the screen's edge at every width from 360 to 430px. The Bounties link gives way, as Verify already does. */
+  .nav ul.app-links.badged { display: none; }
 }
 .app .block h2.h-panel, .panel-app h2.h-panel { font-size: var(--fs-4); }
 .panel-app h2.h-panel + * { margin-top: 12px; }

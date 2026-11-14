@@ -26,7 +26,7 @@ export function AppNav({ current }: { current?: "bounties" | "post" }) {
         <Wordmark href="/" label="BounTEE, home" />
         {net.network === "testnet" && <TestnetBadge />}
       </span>
-      <ul className="app-links">
+      <ul className={net.network === "testnet" ? "app-links badged" : "app-links"}>
         <li>
           <a href="/bounties" aria-current={current === "bounties" ? "page" : undefined}>
             Bounties
