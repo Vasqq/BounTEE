@@ -173,7 +173,9 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
 .statement .w.lit.ok { color: var(--ok); }
 
 /* verify */
-.verify-head { display: grid; grid-template-columns: 1.25fr 1fr; gap: 40px; align-items: end; margin-bottom: 40px; }
+.verify-body { margin-top: 28px; display: flex; flex-direction: column; align-items: flex-start; gap: 24px; max-width: 64em; }
+.verify-body .lead a { color: var(--ink); text-underline-offset: 3px; }
+.verify-body .term-mini { margin-top: 0; align-self: stretch; }
 .term { border: 1px solid var(--line); border-radius: var(--r); background: #0e0f0f; font: 400 var(--fs-sm)/1.6 var(--mono); overflow: hidden; }
 .term-bar { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 20px; border-bottom: 1px solid var(--line); }
 .term-bar code { flex: 1; min-width: 0; font: inherit; color: var(--ink); overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
@@ -184,20 +186,6 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
 .copy:hover { background: var(--line); }
 .copy:active { transform: scale(0.97); }
 .term-body { padding: 18px 20px 22px; }
-.term .note { color: var(--ink-3); margin-bottom: 14px; }
-.run li { display: grid; grid-template-columns: 6ch minmax(0, 1.05fr) minmax(0, 1fr); gap: 16px; padding: 9px 0; border-top: 1px dashed var(--line); }
-.run li:first-child { border-top: 0; }
-.run .st { font-weight: 500; }
-.run .st.pass { color: var(--ok); }
-.run .st.wait { color: var(--ink-3); }
-.run .name { color: var(--ink); }
-.run .det { color: var(--ink-3); }
-.run .det a { color: var(--ink-2); text-underline-offset: 3px; text-decoration-color: var(--line-2); }
-.run .det a:hover { color: var(--ink); }
-.sum { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--ink-2); }
-.sum b { color: var(--ok); font-weight: 500; }
-.js .term .run li, .js .term .sum { opacity: 0; transform: translateY(4px); transition: opacity var(--t2) var(--ease), transform var(--t2) var(--ease); }
-.js .term.ran .run li, .js .term.ran .sum { opacity: 1; transform: none; }
 .verify-foot { margin-top: 16px; color: var(--ink-3); font-size: var(--fs-sm); }
 
 /* trust: a ledger with iso glyphs, as in the world above */
@@ -249,7 +237,7 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
 }
 @media (max-width: 900px) {
   .hero-grid, .close-grid, .who-head, .who-cols { grid-template-columns: minmax(0, 1fr); }
-  .story-head, .verify-head { grid-template-columns: 1fr; gap: 18px; }
+  .story-head { grid-template-columns: 1fr; gap: 18px; }
   .stage-in { grid-template-columns: 1fr; gap: 16px; align-items: start; }
   .world svg { height: clamp(280px, 44svh, 520px); }
   .js .stage { padding-top: 76px; padding-bottom: 92px; align-items: flex-start; }
@@ -257,8 +245,6 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
   .ledger { grid-template-columns: 1fr; }
   .faq { grid-template-columns: 1fr; }
   .faq-l { position: static; }
-  .run li { grid-template-columns: 6ch minmax(0, 1fr); gap: 2px 12px; }
-  .run .det { grid-column: 2; }
   .rail li { grid-template-columns: 3ch 1fr auto; }
   .rail .d { display: none; }
   .dock button:not([aria-current="step"]) .lbl { display: none; }
@@ -273,7 +259,6 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
   *, *::before, *::after { transition-duration: 1ms !important; animation-duration: 1ms !important; transition-delay: 0ms !important; }
   .pulse { animation: none; stroke-dasharray: none; opacity: 0; }
   .js .rise { opacity: 1; transform: none; }
-  .js .term .run li, .js .term .sum { opacity: 1; transform: none; }
 }
 /* locked: Graphite palette, Newsreader + Switzer + IBM Plex Mono */
 h1, h2, h3, .hero h1, .close h2, .mark, .statement p, .ledger b { font-weight: 360; font-optical-sizing: auto; letter-spacing: -0.03em; } .hero h1 { line-height: 0.98; font-size: clamp(52px, 5.3vw, 80px); max-width: none; } .mark { font-weight: 500; letter-spacing: -0.02em; font-size: 23px; } .ledger b { font-weight: 450; } h1 em, h2 em { font-style: italic; font-weight: 300; }

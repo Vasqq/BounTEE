@@ -2,12 +2,11 @@
 // The landing page: the locked prototype's markup (landing C3), with the demo bounty's values
 // read live (lib/demo.ts) in place of the prototype's placeholders. The pictures, story panels,
 // dock and hero motion are the prototype's own script (runtime.js).
-import { useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 import type { Demo } from "@/lib/demo.ts";
 import { listOf } from "@/lib/format.ts";
-import { useDemo, useVerify } from "@/lib/live.ts";
+import { useDemo } from "@/lib/live.ts";
 import { TxChip, TxPending } from "../Chips.tsx";
-import { VerifyRun } from "../Verify.tsx";
 import { Wordmark } from "../Wordmark.tsx";
 import { startLanding } from "./runtime.js";
 
@@ -52,8 +51,8 @@ function AllTransactions({ demo, nearExplorer }: { demo: Demo; nearExplorer: str
 /** `appSite`: the site the app's buttons open, with no trailing slash; empty for this one (D31). */
 export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }: { nearExplorer: string; initialDemo?: Demo | null; footerLinks?: ReactNode; appSite?: string }) {
   const { data: demo = null } = useDemo(initialDemo);
-  const demoId = useMemo(() => (demo ? { protocol: demo.story.protocol, name: demo.story.name } : null), [demo?.story.protocol, demo?.story.name]); // eslint-disable-line react-hooks/exhaustive-deps
-  const { data: result } = useVerify(demoId);
+  // The demo bounty's page, where the same live checks run (D6).
+  const demoPage = demo ? `/bounties/${encodeURIComponent(demo.story.protocol)}/${encodeURIComponent(demo.story.name)}` : "";
   // The prototype's script draws the story; it starts once and takes each new read in place.
   useEffect(() => {
     const page = startLanding();
@@ -178,21 +177,12 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
 
         <section id="verify" aria-labelledby="verifyH">
           <div className="wrap">
-            <div className="verify-head">
-              <h2 id="verifyH" className="rise">Don't take our word. Run the checks</h2>
-              <p className="lead rise" style={delay("80ms")}>Check the mainnet demo above yourself. The command-line tool reads that bounty from the chains and rebuilds the code from source. It needs no keys and no funds. This is what it reports.</p>
+            <h2 id="verifyH" className="rise">Don't take our word. Verify it yourself</h2>
+            <div className="verify-body">
+              <p className="lead rise" style={delay("80ms")}>Four checks read live from the {demoPage ? <a href={`${demoPage}#verify`}>mainnet bounty's page</a> : "mainnet bounty's page"}. The other three run on your machine, with no keys or funds.</p>
+              {demo && <div className="term-mini rise" style={delay("140ms")}><code id="cmdVerify"><span className="p" aria-hidden="true">$</span>{demo.story.command}</code><button className="copy" type="button" data-copy="cmdVerify">Copy</button></div>}
+              <a className="btn btn-line rise" style={delay("200ms")} href="https://github.com/Vasqq/bountee#setup" target="_blank" rel="noopener">Set it up from the README</a>
             </div>
-            <div className="term" id="term">
-              <div className="term-bar">
-                <code id="cmd"></code>
-                <button className="copy" type="button" data-copy="cmd">Copy</button>
-              </div>
-              <div className="term-body">
-                <p className="note" id="termNote"></p>
-                {result ? <VerifyRun rows={result.rows} /> : <ul className="run" aria-label="Check results" />}
-              </div>
-            </div>
-            <p className="verify-foot">Prefer the browser? Every bounty page runs the same checks, read live from the chains.</p>
           </div>
         </section>
 

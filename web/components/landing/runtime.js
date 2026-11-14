@@ -17,7 +17,7 @@ const X = { near: 'https://nearblocks.io/', base: 'https://basescan.org/', arb: 
 // anything not on chain yet, a value is an en dash and a transaction is "tx pending".
 const DASH = '–';
 const CHAIN_EXPLORER = { Base: X.base, 'Arbitrum One': X.arb };
-const live = { protocol: null, name: null, amount: DASH, min: DASH, delay: null, pauses: null, chains: null, steps: [], checked: false, claimKey: null, verdict: null, cheat: false, cheatByWhitehat: false, provenOn: null, oneTx: false, publishPending: 'pending', command: null, paidOnce: false, landed: null, verified: null, published: false };
+const live = { protocol: null, name: null, amount: DASH, min: DASH, delay: null, pauses: null, chains: null, steps: [], checked: false, claimKey: null, verdict: null, cheat: false, cheatByWhitehat: false, provenOn: null, oneTx: false, publishPending: 'pending', paidOnce: false, landed: null, verified: null, published: false };
 const BOUNTY = {
   actor: 'agent', who: 'Whitehat',
   get name() { return live.name || DASH; }
@@ -54,8 +54,6 @@ function stepsFor() {
     { d: `After the ${days(live.delay)} disclosure delay the winning exploit is published, so anyone can re-run it. Until then only the Protocol can open it.`, tx: tx(7, []), pending: live.publishPending }
   ];
 }
-// The server's command (lib/network.ts `verifyCommand`), so the contract and network are the table's.
-const cmdFor = () => live.command || 'bountee verify <protocol>/<name>';
 const ext = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4 2h6v6M10 2 3 9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
 const short = h => h.length > 12 ? `${h.slice(0, 6)}…${h.slice(-4)}` : h;
 // Everything put into HTML from the chains is escaped, attributes included.
@@ -607,17 +605,11 @@ const panelsEl = document.getElementById('panels');
 panelsEl.innerHTML = stepsFor().map((s, i) => `<li class="panel${i ? '' : ' on'}" data-step="${i}"><h3><span class="n">${num(i)}</span>${STEPS[i]}</h3><p>${esc(s.d)}</p><div class="meta">${chipHTML(s)}</div></li>`).join('');
 // Live data swaps into the panels in place: their text and chips, never their order or state.
 function renderStory() {
-    stepsFor().forEach((s, i) => { const li = panelsEl.children[i]; li.querySelector('p').textContent = s.d; li.querySelector('.meta').innerHTML = chipHTML(s); });
-  document.getElementById('cmd').innerHTML = `<span class="p" aria-hidden="true">$</span>${esc(cmdFor())}`;
-  document.getElementById('termNote').textContent = `reading ${BOUNTY.name} from NEAR, ${chainList()}`;
+  stepsFor().forEach((s, i) => { const li = panelsEl.children[i]; li.querySelector('p').textContent = s.d; li.querySelector('.meta').innerHTML = chipHTML(s); });
   story.draw(Math.max(0, active), reduce ? 1 : 0.999);
 }
 const dock = document.getElementById('dock');
 dock.innerHTML = STEPS.map((n, i) => `<button type="button" data-go="${i}"><span class="k">${num(i)}</span><span class="lbl">${n}</span></button>`).join('');
-
-// verify
-document.getElementById('cmd').innerHTML = `<span class="p" aria-hidden="true">$</span>${esc(cmdFor())}`;
-document.getElementById('termNote').textContent = `reading ${BOUNTY.name} from NEAR, ${chainList()}`;
 
 // pictures
 const story = buildStory(document.getElementById('storyArt'), BOUNTY);
@@ -673,11 +665,6 @@ if (document.fonts) document.fonts.ready.then(() => story.draw(Math.max(0, activ
 // entrances
 const io = new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } }), { rootMargin: '0px 0px -8% 0px' });
 document.querySelectorAll('.rise').forEach(el => io.observe(el));
-
-// verify run plays once
-const term = document.getElementById('term');
-[...term.querySelectorAll('.run li, .sum')].forEach((l, i) => l.style.transitionDelay = (reduce ? 0 : 120 + i * 140) + 'ms');
-new IntersectionObserver(([en], o) => { if (en.isIntersecting) { term.classList.add('ran'); o.disconnect(); } }, { rootMargin: '0px 0px -20% 0px' }).observe(term);
 
 // copy buttons
 document.querySelectorAll('.copy').forEach(btn => btn.addEventListener('click', async () => {
