@@ -107,7 +107,7 @@ Everything here is on mainnet: NEAR, Base and Arbitrum One.
 
 | Account | Address |
 |---|---|
-| Bounty contract (keyless) | [`bounty3.bountee.near`](https://nearblocks.io/address/bounty3.bountee.near) |
+| Bounty contract | [`bounty3.bountee.near`](https://nearblocks.io/address/bounty3.bountee.near) |
 | Protocol | [`demo.bountee.near`](https://nearblocks.io/address/demo.bountee.near) |
 | Whitehat | [`d394d052…f6aea6b8`](https://nearblocks.io/address/d394d052bf52d60330c55853bd508fe7d6159243969668f9fdfbf101f6aea6b8) |
 | Pause-role address, the same on both chains | [`0x1a36e8fd…215316c8` on Base](https://basescan.org/address/0x1a36e8fd8a9a1861647c05e4fc44294c215316c8) · [on Arbitrum One](https://arbiscan.io/address/0x1a36e8fd8a9a1861647c05e4fc44294c215316c8) |
@@ -187,14 +187,14 @@ bountee --version
 
 **Now pick what to do:**
 
-- [Check every claim yourself](#check-every-claim-yourself): re-run the proofs. No keys, no funds.
+- [Check every claim yourself](#check-every-claim-yourself): re-run the proofs.
 - [As a Whitehat](#as-a-whitehat): find the bug in a testnet bounty and claim it.
 - [With your AI agent](#with-your-ai-agent): let your agent claim for you.
 - [As a Protocol](#as-a-protocol) needs no Setup: it runs in your browser, with a wallet.
 
 ## Check every claim yourself
 
-No keys or funds needed. **Before you start:** do the [Setup](#setup). Step 6 also needs Docker running.
+**Before you start:** do the [Setup](#setup). Step 6 also needs Docker running.
 
 **To run every step at once**, with each output checked for you:
 
@@ -253,7 +253,7 @@ verdict: PAYS (minimum_theft_reached)
 block: 17484161
 ```
 
-**4. The bounty contract holds no keys.** This reads mainnet with no account.
+**4. The bounty contract holds no keys.** This reads mainnet.
 
 ```sh check online
 curl -s https://free.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"bounty3.bountee.near"}}'
@@ -315,7 +315,7 @@ no check failed
 > [!IMPORTANT]
 > The testnet site is for trying BounTEE with no real money: NEAR testnet, Base Sepolia and Arbitrum Sepolia. Nothing on it is evidence; the proof above is all mainnet.
 
-The [testnet site](https://testnet.bountee.dev) runs the same web app against `bounty3.bountee.testnet`, which takes Circle's testnet USDC and holds no keys.
+The [testnet site](https://testnet.bountee.dev) runs the same web app against `bounty3.bountee.testnet`, which takes Circle's testnet USDC.
 
 <img src="docs/images/bounties-testnet.png" alt="The testnet site's bounty list" width="900">
 
@@ -409,7 +409,7 @@ flowchart LR
         WEB["web app<br/>web/"]
     end
     subgraph NEAR["NEAR"]
-        C["bounty contract<br/>contract/ (keyless)"]
+        C["bounty contract<br/>contract/"]
         MPC["MPC network<br/>Chain Signatures, foreign-tx verification"]
         USDC["Circle USDC"]
     end
@@ -503,7 +503,7 @@ Bounties that pay on a proven exploit aren't new in crypto. Two come closest:
 - **HoneyPause** (a winner at ETHDenver 2024): an on-chain exploit bounty tied to a circuit breaker. The exploit runs in public, and only its own chain pauses. BounTEE keeps the exploit sealed until the payout and pauses every covered chain.
 - **Sealed-Glass Proofs** (Tramèr et al., 2017): showed that a TEE can prove a bug exists, for a fair-exchange bounty. BounTEE turns that idea into a working bounty, live on mainnet.
 
-What neither has is what NEAR makes possible: one keyless contract that holds the bounty, pauses the covered contracts on every chain through Chain Signatures, and lets an AI agent claim with claim-only access ([Why NEAR](#why-near)).
+What neither has is what NEAR makes possible: one contract that holds the bounty, pauses the covered contracts on every chain through Chain Signatures, and lets an AI agent claim with claim-only access ([Why NEAR](#why-near)).
 
 ## Roadmap
 
@@ -513,7 +513,7 @@ After the hackathon, BounTEE grows in two phases: first hardening what's live, t
 
 | Deliverable | How I'll know it worked |
 |---|---|
-| A third-party audit of the bounty contract, with the five known issues fixed in a new deployment that is still keyless | Report published; every high and critical issue fixed |
+| A third-party audit of the bounty contract, with the five known issues fixed in a new deployment | Report published; every high and critical issue fixed |
 | The bounty contract checks the TEE's attestation itself, so nobody has to trust OutLayer's result | A forged result is refused on chain |
 | One or two pilot Protocols posting small live bounties | The first bounty posted by someone other than me, paid or ended |
 
@@ -530,7 +530,7 @@ NEAR's MPC network already signs and verifies all of these chains on mainnet (`v
 
 ### Sustainability
 
-The 0.5 NEAR posting fee covers only BounTEE's on-chain costs, so today it earns nothing. To pay for itself, the Protocol would pay a small service fee on top of the bounty at posting; the Whitehat still gets the whole bounty, and the contract stays keyless.
+The 0.5 NEAR posting fee covers only BounTEE's on-chain costs, so today it earns nothing. To pay for itself, the Protocol would pay a small service fee on top of the bounty at posting; the Whitehat still gets the whole bounty.
 
 ### How NEAR could help
 
