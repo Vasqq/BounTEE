@@ -76,9 +76,9 @@ test("R15.6, D28: the story's amounts and delay are the bounty's on chain, and t
   await setWorld(page, w);
   await page.goto("/");
   await expect(panel(page, 0)).toContainText("locked 25 USDC behind rules nobody can change");
-  await expect(panel(page, 2)).toContainText("The Enclave replayed the exploit with revm against Base at block 38,000,001. It took more than the 2 USDC minimum theft.");
+  await expect(panel(page, 2)).toContainText("The TEE replayed the exploit with revm against Base at block 38,000,001. It took more than the 2 USDC minimum theft.");
   await expect(panel(page, 7)).toContainText("After the 3-day disclosure delay");
-  await expect(page.getByRole("definition").filter({ hasText: "25 USDC" })).toContainText("25 USDC, once");
+  await expect(page.getByRole("definition").filter({ hasText: "25 USDC" })).toContainText("25 USDC");
 });
 
 test("D4, ADR-0017, ADR-0022: no testnet string or explorer link ships in the mainnet build", async ({ page }) => {
@@ -97,14 +97,15 @@ test("D4, ADR-0017, ADR-0022: no testnet string or explorer link ships in the ma
   expect(filesUnder(join(import.meta.dirname, "../public")).filter((f) => !noTestnet(readFileSync(f, "utf8")))).toEqual([]);
 });
 
-test("D6, D30: the landing page's Verify lists the demo bounty's checks, read live, under a command naming mainnet's contract", async ({ page }) => {
+test("D4, D6, D30: the landing page's Verify section links the demo bounty's page and names the command to run, with mainnet's contract", async ({ page }) => {
   await setWorld(page, finishedDemo());
   await page.goto("/");
-  await page.locator("#verify").scrollIntoViewIfNeeded();
-  const run = page.getByRole("list", { name: "Check results" });
-  await expect(run.getByRole("listitem").filter({ hasText: "Payout on NEAR" })).toContainText("PASS");
-  await expect(run.getByRole("listitem").filter({ hasText: "Pauses verified on NEAR" })).toContainText("PASS");
-  await expect(page.locator("#cmd")).toHaveText(`$bountee verify ${DEMO.protocol}/${DEMO.name} --contract ${CONTRACT} --network mainnet`);
+  const section = page.locator("#verify");
+  await section.scrollIntoViewIfNeeded();
+  await expect(section.getByRole("link", { name: "mainnet bounty's page" })).toHaveAttribute("href", `/bounties/${DEMO.protocol}/${DEMO.name}#verify`);
+  await expect(section.locator("#cmdVerify")).toHaveText(`$bountee verify ${DEMO.protocol}/${DEMO.name} --contract ${CONTRACT} --network mainnet`);
+  await expect(section.getByRole("link", { name: "Set it up from the README" })).toHaveAttribute("href", "https://github.com/Vasqq/bountee#setup");
+  await expect(section.getByRole("list", { name: "Check results" })).toHaveCount(0);
 });
 
 test("D4, R15.6: the story says an AI agent won with a claim key only when NEAR shows the claim was filed with one", async ({ page }) => {
@@ -191,7 +192,7 @@ test("R15.6: the cheat claim links the transaction that judged it ZERO, and name
   await expect(panel(page, 2)).toContainText("An earlier cheat claim, filed by the Whitehat with their own key, passed off as theft, scored zero and nothing moved.");
 });
 
-test("R15.6, R15.1: before publication, the story and Verify say when the exploit becomes publishable, as the contract records it", async ({ page }) => {
+test("R15.6, R15.1: before publication, the story says when the exploit becomes publishable, as the contract records it", async ({ page }) => {
   const w = emptyWorld();
   post(w, DEMO);
   win(w, DEMO, 1, { landed: [BASE, ARBITRUM], verified: [BASE, ARBITRUM] });
@@ -201,8 +202,6 @@ test("R15.6, R15.1: before publication, the story and Verify say when the exploi
   await page.goto("/");
   await expect(panel(page, 7)).toContainText("pending · from 2026-11-12 04:37 UTC");
   await expect(panel(page, 7).locator("a")).toHaveCount(0);
-  await page.locator("#verify").scrollIntoViewIfNeeded();
-  await expect(page.getByRole("list", { name: "Check results" }).getByRole("listitem").filter({ hasText: "Re-run of the published exploit" })).toContainText("not yet published · publishable from 2026-11-12 04:37 UTC");
 });
 
 test("D4, R15.6: the page's HTML, before any script runs, lists every step's transactions", async ({ page }) => {

@@ -5,7 +5,7 @@ import "./app.css";
 import { Providers } from "./providers.tsx";
 
 const description =
-  "Bug bounties that pay a Whitehat, human or AI agent, once an enclave proves the exploit, and pause the vulnerable contract on every chain the bounty covers.";
+  "Bug bounties that pay a Whitehat, human or AI agent, once a trusted execution environment (TEE) proves the exploit, and pause the vulnerable contract on every chain the bounty covers.";
 
 // The brand set's icons and link preview live in public/ (copied from brand/). Next makes the preview
 // image absolute from the deployment's URL; set NEXT_PUBLIC_SITE_URL where that isn't Vercel.

@@ -17,7 +17,7 @@ const X = { near: 'https://nearblocks.io/', base: 'https://basescan.org/', arb: 
 // anything not on chain yet, a value is an en dash and a transaction is "tx pending".
 const DASH = '–';
 const CHAIN_EXPLORER = { Base: X.base, 'Arbitrum One': X.arb };
-const live = { protocol: null, name: null, amount: DASH, min: DASH, delay: null, pauses: null, chains: null, steps: [], checked: false, claimKey: null, verdict: null, cheat: false, cheatByWhitehat: false, provenOn: null, oneTx: false, publishPending: 'pending', command: null, paidOnce: false, landed: null, verified: null, published: false };
+const live = { protocol: null, name: null, amount: DASH, min: DASH, delay: null, pauses: null, chains: null, steps: [], checked: false, claimKey: null, verdict: null, cheat: false, cheatByWhitehat: false, provenOn: null, oneTx: false, publishPending: 'pending', paidOnce: false, landed: null, verified: null, published: false };
 const BOUNTY = {
   actor: 'agent', who: 'Whitehat',
   get name() { return live.name || DASH; }
@@ -38,13 +38,13 @@ function stepsFor() {
         : `The Protocol locks ${live.amount} behind rules nobody can change, once the posting check confirms the pause role and pause gas on ${chainList()}.`,
       tx: tx(0, [t('NEAR', X.near)]) },
     { d: (live.claimKey
-        ? 'The Whitehat\'s AI agent, holding only a claim key, sealed the exploit it found so only the bounty contract\'s enclave job can read it, and filed the claim. The key can claim and nothing else.'
-        : 'The Whitehat seals the exploit so only the bounty contract\'s enclave job can read it, and files the claim.') +
+        ? 'The Whitehat\'s AI agent, holding only a claim key, sealed the exploit it found so only the bounty contract\'s TEE job can read it, and filed the claim. The key can claim and nothing else.'
+        : 'The Whitehat seals the exploit so only the bounty contract\'s TEE job can read it, and files the claim.') +
         (live.oneTx ? ' Filing, judging, signing and payout ran in this one NEAR transaction.' : ''),
       tx: tx(1, [t('NEAR', X.near)]) },
     { d: (live.verdict === 'PAYS'
-          ? `The Enclave replayed the exploit with revm against ${live.provenOn ? `${live.provenOn.chain} at block ${live.provenOn.block.toLocaleString('en-US')}` : 'a covered chain\'s recent state'}. It took more than the ${live.min} minimum theft.`
-          : `The Enclave replays the exploit with revm against a covered chain's recent state, and pays only a theft of at least the ${live.min} minimum.`) +
+          ? `The TEE replayed the exploit with revm against ${live.provenOn ? `${live.provenOn.chain} at block ${live.provenOn.block.toLocaleString('en-US')}` : 'a covered chain\'s recent state'}. It took more than the ${live.min} minimum theft.`
+          : `The TEE replays the exploit with revm against a covered chain's recent state, and pays only a theft of at least the ${live.min} minimum.`) +
         (live.cheat ? ` An earlier cheat claim${live.cheatByWhitehat ? ', filed by the Whitehat with their own key,' : ''} passed off as theft, scored zero and nothing moved.` : ''),
       chips: [...(live.verdict === 'PAYS' ? [['ok', 'Verdict PAYS']] : []), ...(live.cheat && !(ex[2] || []).some(x => x.chain === 'Cheat claim: ZERO') ? [['mute', 'Cheat claim: ZERO']] : [])], tx: tx(2, [t('NEAR', X.near)]) },
     { d: `NEAR's MPC network ${ex[3] && ex[3].length ? 'signed' : 'signs'} a pause for every covered contract. Only the bounty contract can ask it to, and only after a PAYS verdict.`, tx: tx(3, [t('NEAR MPC', X.near)]) },
@@ -54,12 +54,8 @@ function stepsFor() {
     { d: `After the ${days(live.delay)} disclosure delay the winning exploit is published, so anyone can re-run it. Until then only the Protocol can open it.`, tx: tx(7, []), pending: live.publishPending }
   ];
 }
-// The server's command (lib/network.ts `verifyCommand`), so the contract and network are the table's.
-const cmdFor = () => live.command || 'bountee verify <protocol>/<name>';
 const ext = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4 2h6v6M10 2 3 9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
 const short = h => h.length > 12 ? `${h.slice(0, 6)}…${h.slice(-4)}` : h;
-const copyIco = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M8.5 1.5h-6a1 1 0 0 0-1 1v6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
-const checkIco = '<svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="m2.5 6.5 2.3 2.3L9.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 // Everything put into HTML from the chains is escaped, attributes included.
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
@@ -412,7 +408,7 @@ function buildStory(svg, bounty, opts = {}) {
 
   // floating tags: title + state, in screen space above each object
   const mctx = document.createElement('canvas').getContext('2d');
-  const titles = { wh: bounty.who, near: 'Bounty contract', enc: 'Enclave', mpc: 'MPC network', base: 'Base', arb: 'Arbitrum One' };
+  const titles = { wh: bounty.who, near: 'Bounty contract', enc: 'TEE', mpc: 'MPC network', base: 'Base', arb: 'Arbitrum One' };
   const subs = { wh: bounty.actor === 'agent' ? 'AI agent' : 'command-line tool', near: 'NEAR · ' + bounty.name, enc: 'OutLayer · Intel TDX', mpc: 'NEAR · signs pauses', base: 'covered vault', arb: 'covered vault' };
   const heights = { wh: bounty.actor === 'agent' ? 4.6 : 4.8, near: 3.9, enc: 3.8, mpc: 3.4, base: 3.0, arb: 3.0 };
   const T = {};
@@ -424,8 +420,7 @@ function buildStory(svg, bounty, opts = {}) {
     E('rect', { x: -6, y: -1.5, width: 12, height: 2.4, fill: 'rgb(24, 24, 25)' }, G);
     const t1 = E('text', { y: -27, 'font-size': 13, 'font-weight': 700, fill: '#eceeef' }, G); t1.textContent = titles[k];
     const t2 = E('text', { y: -11, 'font-size': 11, fill: '#919395', class: 'mono' }, G);
-    const dot = E('circle', { cy: -31, r: 3, fill: '#424345' }, G);
-    T[k] = { G, rect, t1, t2, dot, last: '' };
+    T[k] = { G, rect, t1, t2, last: '' };
   });
   function setTag(k, text, ok, hot) {
     const o = T[k];
@@ -438,10 +433,8 @@ function buildStory(svg, bounty, opts = {}) {
       const w = Math.max(w1 + 22, w2) + 24;
       o.rect.setAttribute('x', r2(-w / 2)); o.rect.setAttribute('width', r2(w));
       o.t1.setAttribute('x', r2(-w / 2 + 12)); o.t2.setAttribute('x', r2(-w / 2 + 12));
-      o.dot.setAttribute('cx', r2(w / 2 - 14));
       o.t2.setAttribute('fill', ok ? '#00ec97' : hot ? '#b9bbbc' : '#919395');
       o.rect.setAttribute('stroke', ok ? 'rgba(0, 236, 151, .55)' : hot ? '#727375' : '#424345');
-      o.dot.setAttribute('fill', ok ? '#00ec97' : hot ? '#b9bbbc' : '#424345');
     }
   }
   // packets and their labels
@@ -603,36 +596,20 @@ function buildClose() {
 const num = n => `${n + 1}.`;
 const chipHTML = s => (s.chips || []).map(([c, l]) => `<span class="chip ${c}">${esc(l)}</span>`).join('') +
   s.tx.map(x => x.hash
-    ? `<span class="tx"><span class="chip">${esc(x.chain)}</span><span class="chip link"><a href="${esc(x.href)}" target="_blank" rel="noopener" title="${esc(x.hash)}">${esc(short(x.hash))}${ext}</a><button type="button" class="cp" aria-label="Copy transaction hash" data-hash="${esc(x.hash)}">${copyIco}</button></span></span>`
+    ? `<span class="tx"><span class="chip">${esc(x.chain)}</span><span class="chip link"><a href="${esc(x.href)}" target="_blank" rel="noopener" title="${esc(x.hash)}">TX: ${esc(short(x.hash))}${ext}</a></span></span>`
     : `<span class="chip">${esc(x.chain)}</span><a class="chip" href="${esc(x.href)}" target="_blank" rel="noopener">${esc(x.label || 'tx pending')}${ext}</a>`).join('') +
   (s.pending ? `<span class="chip">NEAR</span><span class="chip mute">${s.pending}</span>` : '');
 
 // the story
-document.getElementById('storyName').textContent = BOUNTY.name;
 const panelsEl = document.getElementById('panels');
 panelsEl.innerHTML = stepsFor().map((s, i) => `<li class="panel${i ? '' : ' on'}" data-step="${i}"><h3><span class="n">${num(i)}</span>${STEPS[i]}</h3><p>${esc(s.d)}</p><div class="meta">${chipHTML(s)}</div></li>`).join('');
 // Live data swaps into the panels in place: their text and chips, never their order or state.
 function renderStory() {
-  document.getElementById('storyName').textContent = BOUNTY.name;
   stepsFor().forEach((s, i) => { const li = panelsEl.children[i]; li.querySelector('p').textContent = s.d; li.querySelector('.meta').innerHTML = chipHTML(s); });
-  document.getElementById('cmd').innerHTML = `<span class="p" aria-hidden="true">$</span>${esc(cmdFor())}`;
-  document.getElementById('termNote').textContent = `reading ${BOUNTY.name} from NEAR, ${chainList()}`;
   story.draw(Math.max(0, active), reduce ? 1 : 0.999);
 }
-// Copying a hash is announced, as the app's own tx chips do.
-const copied = Object.assign(document.createElement('span'), { className: 'sr-only' });
-copied.setAttribute('aria-live', 'polite');
-panelsEl.after(copied);
-panelsEl.addEventListener('click', async e => {
-  const b = e.target.closest('.cp'); if (!b) return;
-  try { await navigator.clipboard.writeText(b.dataset.hash); b.innerHTML = checkIco; copied.textContent = 'Copied'; setTimeout(() => { b.innerHTML = copyIco; copied.textContent = ''; }, 1600); } catch {}
-});
 const dock = document.getElementById('dock');
 dock.innerHTML = STEPS.map((n, i) => `<button type="button" data-go="${i}"><span class="k">${num(i)}</span><span class="lbl">${n}</span></button>`).join('');
-
-// verify
-document.getElementById('cmd').innerHTML = `<span class="p" aria-hidden="true">$</span>${esc(cmdFor())}`;
-document.getElementById('termNote').textContent = `reading ${BOUNTY.name} from NEAR, ${chainList()}`;
 
 // pictures
 const story = buildStory(document.getElementById('storyArt'), BOUNTY);
@@ -641,7 +618,6 @@ buildGlyphs(); buildFaq(); buildClose();
 // scroll-driven story + dock
 const track = document.getElementById('track');
 const storyArt = document.getElementById('storyArt');
-const storyNow = document.getElementById('storyNow');
 const panels = [...panelsEl.children];
 const dockBtns = [...dock.querySelectorAll('button')];
 let active = -1, st = 0;
@@ -650,7 +626,6 @@ function setStep(i) {
   active = i; st = 0;
   panels.forEach((p, k) => p.classList.toggle('on', k === i));
   dockBtns.forEach((b, k) => { b.classList.toggle('done', k < i); k === i ? b.setAttribute('aria-current', 'step') : b.removeAttribute('aria-current'); });
-  storyNow.textContent = num(i) + ' ' + STEPS[i];
   if (reduce) story.draw(i, 1);
 }
 function stepFromScroll() {
@@ -690,11 +665,6 @@ if (document.fonts) document.fonts.ready.then(() => story.draw(Math.max(0, activ
 // entrances
 const io = new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } }), { rootMargin: '0px 0px -8% 0px' });
 document.querySelectorAll('.rise').forEach(el => io.observe(el));
-
-// verify run plays once
-const term = document.getElementById('term');
-[...term.querySelectorAll('.run li, .sum')].forEach((l, i) => l.style.transitionDelay = (reduce ? 0 : 120 + i * 140) + 'ms');
-new IntersectionObserver(([en], o) => { if (en.isIntersecting) { term.classList.add('ran'); o.disconnect(); } }, { rootMargin: '0px 0px -20% 0px' }).observe(term);
 
 // copy buttons
 document.querySelectorAll('.copy').forEach(btn => btn.addEventListener('click', async () => {
@@ -798,9 +768,11 @@ return {
   // the covered chain: a wordmark dithers out, the next dithers in
   const roll = document.getElementById('roll'), chains = [...roll.querySelectorAll('.chain')];
   const ditherImg = (img, dir, dur) => new Promise(done => {
+    // The canvas is the logo's exact size, not rounded up: a canvas a pixel bigger than the logo
+    // made it look like it shrank when the real image took over.
     const r = img.getBoundingClientRect(), dpr = devicePixelRatio || 1, W = Math.ceil(r.width), H = Math.ceil(r.height);
-    const cv = document.createElement('canvas'); cv.width = W * dpr; cv.height = H * dpr;
-    cv.style.cssText = `position:absolute;left:${r.left + scrollX}px;top:${r.top + scrollY}px;width:${W}px;height:${H}px;pointer-events:none;z-index:5`;
+    const cv = document.createElement('canvas'); cv.width = Math.ceil(r.width * dpr); cv.height = Math.ceil(r.height * dpr);
+    cv.style.cssText = `position:absolute;left:${r.left + scrollX}px;top:${r.top + scrollY}px;width:${r.width}px;height:${r.height}px;pointer-events:none;z-index:5`;
     document.body.appendChild(cv); img.style.visibility = 'hidden';
     const ctx = cv.getContext('2d'), t0 = performance.now(), o = { W, H };
     ctx.imageSmoothingEnabled = false;

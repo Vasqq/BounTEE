@@ -99,9 +99,6 @@ h2 { font-size: clamp(36px, 4.4vw, 64px); }
 .stage-in { max-width: 1320px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); gap: clamp(24px, 3vw, 48px); align-items: center; }
 .world { position: relative; }
 .world svg { width: 100%; height: clamp(340px, calc(100svh - 250px), 640px); overflow: visible; }
-.world-bar { position: absolute; left: 0; top: 0; display: flex; gap: 10px; align-items: center; font: 400 var(--fs-sm)/1 var(--mono); color: var(--ink-3); }
-.world-bar b { font-weight: 500; color: var(--ink-2); }
-.world-bar .now { display: inline-flex; align-items: center; gap: 8px; font: 500 var(--fs-sm)/1 var(--text); color: var(--ink-2); padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: rgba(18, 18, 19, .8); }
 .panels { display: grid; gap: 40px; }
 .panel h3 { font-size: var(--fs-h3); display: flex; align-items: baseline; gap: 14px; }
 .panel h3 .n { font: 500 var(--fs-ui)/1 var(--text); letter-spacing: 0; color: var(--ink-3); transform: translateY(-0.5em); }
@@ -126,15 +123,15 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
 .js .panel.on { opacity: 1; transform: none; pointer-events: auto; }
 /* Every step's transactions, under the story: the FAQ's disclosure row, then the bounty list's
    rows (ground-2, 2px apart, no row lines: Principle 3) holding the panels' chips. */
-.all-tx { margin-top: 8px; padding-bottom: 40px; }
-.all-tx summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 20px;
-  padding: 22px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.all-tx { margin-top: 8px; padding-bottom: 24px; }
+.all-tx summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 10px; padding: 8px 0; color: var(--ink-3); font-size: var(--fs-sm); }
 .all-tx summary::-webkit-details-marker { display: none; }
 .all-tx summary:hover { color: var(--ink); }
+.all-tx summary .pm { width: 14px; height: 14px; background: none; }
 .all-tx[open] summary .pm svg { transform: rotate(45deg); }
-.all-tx ol { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 2px; }
-.all-tx li { display: grid; grid-template-columns: 28px 120px 1fr; gap: 12px; align-items: center; padding: 10px 14px; background: var(--ground-2); border-radius: var(--r-sm); }
-.all-tx li .n { color: var(--ink-3); font-size: var(--fs-sm); }
+.all-tx ol { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 2px; }
+.all-tx li { display: grid; grid-template-columns: 28px 120px 1fr; gap: 12px; align-items: center; padding: 8px 14px; background: var(--ground-2); border-radius: var(--r-sm); font-size: var(--fs-sm); }
+.all-tx li .n { color: var(--ink-3); }
 .all-tx li .name { color: var(--ink-2); }
 .all-tx li .meta { margin-top: 0; }
 .all-tx .verify-foot a { color: var(--ink-2); text-underline-offset: 3px; text-decoration-color: var(--line-2); }
@@ -158,8 +155,9 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
 /* you, or your agent */
 .who { padding-top: clamp(120px, 12vw, 180px); }
 .who-head { display: grid; grid-template-columns: 1.3fr 1fr; gap: 40px; align-items: end; }
-.who-cols { margin-top: 56px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.who-cols { margin-top: 56px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .who-cols > div { padding: clamp(28px, 3vw, 44px); background: var(--ground-2); border-radius: var(--r); display: grid; grid-template-rows: auto auto 1fr auto; }
+.card-act { margin-top: 24px; }
 .who .glyph { width: 104px; height: 104px; overflow: visible; }
 .who h3 { margin-top: 20px; font-size: var(--fs-4); }
 .who p { margin-top: 10px; color: var(--ink-2); max-width: 30em; text-wrap: pretty; }
@@ -175,7 +173,9 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
 .statement .w.lit.ok { color: var(--ok); }
 
 /* verify */
-.verify-head { display: grid; grid-template-columns: 1.25fr 1fr; gap: 40px; align-items: end; margin-bottom: 40px; }
+.verify-body { margin-top: 28px; display: flex; flex-direction: column; align-items: flex-start; gap: 24px; max-width: 64em; }
+.verify-body .lead a { color: var(--ink); text-underline-offset: 3px; }
+.verify-body .term-mini { margin-top: 0; align-self: stretch; }
 .term { border: 1px solid var(--line); border-radius: var(--r); background: #0e0f0f; font: 400 var(--fs-sm)/1.6 var(--mono); overflow: hidden; }
 .term-bar { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 20px; border-bottom: 1px solid var(--line); }
 .term-bar code { flex: 1; min-width: 0; font: inherit; color: var(--ink); overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
@@ -186,20 +186,6 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
 .copy:hover { background: var(--line); }
 .copy:active { transform: scale(0.97); }
 .term-body { padding: 18px 20px 22px; }
-.term .note { color: var(--ink-3); margin-bottom: 14px; }
-.run li { display: grid; grid-template-columns: 6ch minmax(0, 1.05fr) minmax(0, 1fr); gap: 16px; padding: 9px 0; border-top: 1px dashed var(--line); }
-.run li:first-child { border-top: 0; }
-.run .st { font-weight: 500; }
-.run .st.pass { color: var(--ok); }
-.run .st.wait { color: var(--ink-3); }
-.run .name { color: var(--ink); }
-.run .det { color: var(--ink-3); }
-.run .det a { color: var(--ink-2); text-underline-offset: 3px; text-decoration-color: var(--line-2); }
-.run .det a:hover { color: var(--ink); }
-.sum { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--ink-2); }
-.sum b { color: var(--ok); font-weight: 500; }
-.js .term .run li, .js .term .sum { opacity: 0; transform: translateY(4px); transition: opacity var(--t2) var(--ease), transform var(--t2) var(--ease); }
-.js .term.ran .run li, .js .term.ran .sum { opacity: 1; transform: none; }
 .verify-foot { margin-top: 16px; color: var(--ink-3); font-size: var(--fs-sm); }
 
 /* trust: a ledger with iso glyphs, as in the world above */
@@ -250,18 +236,15 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
   .nav ul { display: none; }
 }
 @media (max-width: 900px) {
-  .hero-grid, .close-grid, .who-head, .who-cols { grid-template-columns: 1fr; }
-  .story-head, .verify-head { grid-template-columns: 1fr; gap: 18px; }
+  .hero-grid, .close-grid, .who-head, .who-cols { grid-template-columns: minmax(0, 1fr); }
+  .story-head { grid-template-columns: 1fr; gap: 18px; }
   .stage-in { grid-template-columns: 1fr; gap: 16px; align-items: start; }
   .world svg { height: clamp(280px, 44svh, 520px); }
   .js .stage { padding-top: 76px; padding-bottom: 92px; align-items: flex-start; }
-  .panel h3 { font-size: 30px; }
-  .panel p { margin-top: 10px; font-size: 16.5px; }
+  .panel p { margin-top: 10px; font-size: var(--fs-ui); }
   .ledger { grid-template-columns: 1fr; }
   .faq { grid-template-columns: 1fr; }
   .faq-l { position: static; }
-  .run li { grid-template-columns: 6ch minmax(0, 1fr); gap: 2px 12px; }
-  .run .det { grid-column: 2; }
   .rail li { grid-template-columns: 3ch 1fr auto; }
   .rail .d { display: none; }
   .dock button:not([aria-current="step"]) .lbl { display: none; }
@@ -276,18 +259,18 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
   *, *::before, *::after { transition-duration: 1ms !important; animation-duration: 1ms !important; transition-delay: 0ms !important; }
   .pulse { animation: none; stroke-dasharray: none; opacity: 0; }
   .js .rise { opacity: 1; transform: none; }
-  .js .term .run li, .js .term .sum { opacity: 1; transform: none; }
 }
 /* locked: Graphite palette, Newsreader + Switzer + IBM Plex Mono */
 h1, h2, h3, .hero h1, .close h2, .mark, .statement p, .ledger b { font-weight: 360; font-optical-sizing: auto; letter-spacing: -0.03em; } .hero h1 { line-height: 0.98; font-size: clamp(52px, 5.3vw, 80px); max-width: none; } .mark { font-weight: 500; letter-spacing: -0.02em; font-size: 23px; } .ledger b { font-weight: 450; } h1 em, h2 em { font-style: italic; font-weight: 300; }
 /* hero: parts layout, poster words, decode load-in */
 .pw h1 .paid { color: var(--ok); }
-.pw .roll .chain { justify-self: start; align-self: center; transition: none; transform: none; opacity: 0; }
+.pw .roll .chain { position: absolute; left: 0; bottom: 0; transition: none; transform: none; opacity: 0; }
 .pw .roll .chain.on { opacity: 1; }
 .pw .roll { transition: none; }
 .js .pw .roll .wm { visibility: hidden; }
 .pw .roll .wm { width: auto; display: block; }
-.pw .roll { height: 1em; vertical-align: -0.12em; }
+/* An inline-block with hidden overflow sits its bottom edge on the line's text baseline, and the logos sit on that edge: both chains' bottoms line up with "Pause it on". */
+.pw .roll { display: inline-block; height: 1em; vertical-align: baseline; }
 .js .pw .ln.last { opacity: 0; transform: translateY(0.12em); transition: opacity 420ms var(--ease), transform 420ms var(--ease); }
 .js .pw .ln.last.in { opacity: 1; transform: none; }
 .hero-t { display: block; min-height: 100svh; padding: 0; position: relative; overflow: hidden; }
@@ -317,7 +300,7 @@ h1, h2, h3, .hero h1, .close h2, .mark, .statement p, .ledger b { font-weight: 3
   transition: transform 900ms cubic-bezier(0.23, 1, 0.32, 1); animation: drift 9s ease-in-out infinite alternate; }
 .fl:nth-of-type(2n) { animation-duration: 11s; }
 @keyframes drift { from { translate: 0 -8px; } to { translate: 0 8px; } }
-.cue { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); display: grid; justify-items: center; gap: 10px; font: 500 var(--fs-sm)/1 var(--text); color: var(--ink-3); text-decoration: none; z-index: 3; }
+.cue { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); display: grid; justify-items: center; z-index: 3; text-decoration: none; }
 .cue i { width: 1px; height: 34px; background: linear-gradient(var(--ok), transparent); animation: cue 2.2s cubic-bezier(0.23, 1, 0.32, 1) infinite; transform-origin: top; }
 @keyframes cue { 0% { transform: scaleY(0); } 60% { transform: scaleY(1); } 100% { transform: scaleY(1); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .fl, .cue i { animation: none; } }
@@ -331,3 +314,5 @@ h1, h2, h3, .hero h1, .close h2, .mark, .statement p, .ledger b { font-weight: 3
 .hero-melt { position: absolute; left: 0; right: 0; bottom: 0; height: 18%; z-index: 1; pointer-events: none;
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 55%); mask-image: linear-gradient(to bottom, transparent, #000 55%); }
+/* phone: the hero's three lines must fit the screen (after .pw h1, which sets the desktop size) */
+@media (max-width: 560px) { .pw h1 { font-size: 11.4vw; } }

@@ -245,9 +245,6 @@
 .fold > div > .panel-app { margin-top: 20px; }
 [data-open] > .fold { grid-template-rows: 1fr; }
 
-/* A zero proves nothing, so the Verify summary's count stays ink until a check passes (landing terminal too). */
-.sum b.zero { color: var(--ink); }
-
 /* Verify as a proof timeline: the count of proven checks, then R15.1's checks in the order a bounty's
    life proves them, each cell's segment filling once it passes, one after another (120 ms, then 140 ms apart). */
 .vsub h3 { font: 500 var(--fs-ui)/1.3 var(--text); letter-spacing: 0; color: var(--ink); }
@@ -349,10 +346,6 @@
 }
 .app .block h2.h-panel, .panel-app h2.h-panel { font-size: var(--fs-4); }
 .panel-app h2.h-panel + * { margin-top: 12px; }
-
-/* Verify: FAIL and its count (DESIGN.md, Verify check list: Extension) */
-.run .st.fail { color: var(--fail); }
-.sum b.fail { color: var(--fail); }
 
 /* forms (DESIGN.md, Forms): label above the field, 8px apart */
 .field { display: grid; gap: 8px; font: 500 var(--fs-sm)/1 var(--text); color: var(--ink-2); }

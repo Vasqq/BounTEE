@@ -1,6 +1,5 @@
 "use client";
-// The Verify check list (DESIGN.md, Terminal and Verify check list): R15.1's checks read live,
-// PASS, FAIL or WAIT, then a summary that counts failures first.
+// A bounty page's Verify section (DESIGN.md, Bounty page, Verify): R15.1's checks read live as a proof timeline.
 import { useEffect, useState } from "react";
 import type { BountyId, PublicState } from "@/lib/bounties.ts";
 import { useVerify } from "@/lib/live.ts";
@@ -11,16 +10,14 @@ import { CommandBlock } from "./CommandBlock.tsx";
 import { DitherHalo } from "./DitherHalo.tsx";
 import { ReadFailed } from "./ReadFailed.tsx";
 
-const MARK = { pass: "PASS", fail: "FAIL", wait: "WAIT" } as const;
-/** The same states in plain words, for the bounty page's proof timeline (the landing terminal keeps the marks). */
+/** The check states in plain words, for the bounty page's proof timeline. */
 const WORD = { pass: "Pass", fail: "Fail", wait: "Not yet run" } as const;
 
 /** The checks that rebuild code from source: only the command-line tool can run them. */
 const LOCAL = new Set(["Contract code matches source", "Judge build is the one that ran"]);
 
 /**
- * For a check that hasn't run, when it will, in plain words (the bounty page only; the landing terminal
- * keeps the command-line tool's details). A pause landed on some chains keeps its own detail.
+ * For a check that hasn't run, when it will, in plain words. A pause landed on some chains keeps its own detail.
  */
 function whenItRuns(r: VerifyRow): string {
   if (LOCAL.has(r.name)) return "Run it yourself, below.";
@@ -31,53 +28,6 @@ function whenItRuns(r: VerifyRow): string {
   }
   if (r.detail.startsWith("not yet on")) return r.detail;
   return "Once a claim wins.";
-}
-
-function Summary({ rows }: { rows: VerifyRow[] }) {
-  const n = (s: VerifyRow["status"]) => rows.filter((r) => r.status === s).length;
-  const fail = n("fail");
-  const parts = [`${n("pass")} passing`, `${n("wait")} not yet`];
-  return (
-    <p className="sum">
-      {fail > 0 ? (
-        <>
-          <b className="fail">{fail} failing</b>, {parts.join(", ")}.
-        </>
-      ) : (
-        <>
-          <b className={n("pass") === 0 ? "zero" : undefined}>{parts[0]}</b>, {parts[1]}.
-        </>
-      )}
-    </p>
-  );
-}
-
-/** The rows and summary, as the terminal body lists them. */
-export function VerifyRun({ rows }: { rows: VerifyRow[] }) {
-  return (
-    <>
-      <ul className="run" aria-label="Check results">
-        {rows.map((r) => (
-          <li key={r.name}>
-            <span className={`st ${r.status}`}>{MARK[r.status]}</span>
-            <span className="name">{r.name}</span>
-            <span className="det">
-              {r.detail}
-              {r.links.map((l) => (
-                <span key={l.href}>
-                  {" · "}
-                  <a href={l.href} target="_blank" rel="noopener">
-                    {l.label}
-                  </a>
-                </span>
-              ))}
-            </span>
-          </li>
-        ))}
-      </ul>
-      <Summary rows={rows} />
-    </>
-  );
 }
 
 /**
