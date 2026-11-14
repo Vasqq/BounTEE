@@ -185,6 +185,13 @@ bountee --version
 
 **Opened a new terminal window?** Run `cd bountee` and step 5 again.
 
+**Now pick what to do:**
+
+- [Check every claim yourself](#check-every-claim-yourself): re-run the proofs. No keys, no funds.
+- [As a Whitehat](#as-a-whitehat): find the bug in a testnet bounty and claim it.
+- [With your AI agent](#with-your-ai-agent): let your agent claim for you.
+- [As a Protocol](#as-a-protocol) needs no Setup: it runs in your browser, with a wallet.
+
 ## Check every claim yourself
 
 No keys or funds needed. Before you start, do the [Setup](#setup).
@@ -286,15 +293,58 @@ The [testnet site](https://testnet.bountee.dev) runs the same web app against `b
 
 ### As a Whitehat
 
-The testnet site's Live bounties cover a vault with a real bug. Find it, prove it and claim the bounty's test USDC. Each bounty pays only its first win.
+Find the bug in a Live bounty's vault, prove it, and claim the bounty's test USDC.
 
-Before you start: do the [Setup](#setup) and install [Foundry](https://getfoundry.sh).
+**Before you start:** do the [Setup](#setup) and install [Foundry](https://getfoundry.sh). Check it with `forge --version`.
 
-1. `bountee init` creates a testnet account and funds it from NEAR's faucet.
-2. Pick a Live bounty on the testnet site. Its page lists each covered contract and its chain. The vault's source is [`demo/src/PositionVault.sol`](demo/src/PositionVault.sol).
-3. Write your exploit as a Foundry script. Its `run()` broadcasts the attack and sends the stolen tokens to `msg.sender`, from a fresh account with no role on any contract ([details](docs/agent-instructions.md#steps), step 3).
-4. `bountee test <script> --bounty <protocol>/<name> --chain <chain> --contract bounty3.bountee.testnet --network testnet` runs the judge on your machine, so you know the result before you spend anything. `--chain` is needed when a bounty covers more than one chain. The first run can take a few minutes.
-5. When it says PAYS, `bountee claim <script> --bounty <protocol>/<name> --chain <chain> --contract bounty3.bountee.testnet --as <your account> --network testnet` seals the exploit, files it and shows each step live until the pauses are verified, which can take up to half an hour. Each claim costs about 0.3 testnet NEAR, whatever the result. You get a receipt with every transaction.
+**1. Make your testnet account.**
+
+```sh
+bountee init
+```
+
+You should see `Created bountee-….testnet with 10 testnet NEAR from NEAR's faucet`. Note that account name: step 5 needs it.
+
+**2. Pick a Live bounty.** On the [testnet site](https://testnet.bountee.dev), open a bounty marked **Live**. Its name is at the top, like `harrowgate-lend.testnet/money-market`. Print its details:
+
+```sh
+bountee show <bounty name> --contract bounty3.bountee.testnet --network testnet
+```
+
+You should see `live`, the minimum theft, and under `covered contracts` each chain with the vault's full address. The vault's source is [`demo/src/PositionVault.sol`](demo/src/PositionVault.sol).
+
+**3. Write your exploit** as a Foundry script, in a project beside the repo:
+
+```sh
+forge init ../my-exploit
+```
+
+Its `run()` wraps the attack in `vm.startBroadcast()` and `vm.stopBroadcast()`, and sends the stolen tokens to `msg.sender`. Write the vault's address as `cast to-check-sum-address <address>` prints it. Running `forge build` in `../my-exploit` should show `Compiler run successful!`
+
+**4. Test it on your machine.** It's free and sends nothing. The first run can take a few minutes.
+
+```sh
+bountee test ../my-exploit/script/Exploit.s.sol --bounty <bounty name> --chain base-sepolia --contract bounty3.bountee.testnet --network testnet
+```
+
+You should see `verdict: PAYS (minimum_theft_reached)`. A note that your judge is "not the bounty's pinned build" is expected. `ZERO` means your exploit took less than the bounty's minimum theft (shown on its page), or one of its transactions failed: fix the script and test again.
+
+**5. Claim it.** It costs about 0.3 testnet NEAR, whatever the result.
+
+```sh
+bountee claim ../my-exploit/script/Exploit.s.sol --bounty <bounty name> --chain base-sepolia --contract bounty3.bountee.testnet --as <your account> --network testnet
+```
+
+Within about a minute you should see:
+
+```text
+claim 5: verdict PAYS (minimum_theft_reached)
+claim 5: paid 2000000 to <your account>
+claim 5: pause landed on chain 84532 (success, …)
+claim 5: pause landed on chain 421614 (success, …)
+```
+
+Keep it running. About 10 minutes later you'll see `pause verified on NEAR` for each chain, then a receipt listing every transaction. The bounty page now shows **Paid**.
 
 ### With your AI agent
 
