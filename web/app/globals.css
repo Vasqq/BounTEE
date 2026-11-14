@@ -157,6 +157,7 @@ a.chip.net-badge:hover { background: rgba(0, 236, 151, 0.2); color: var(--ink); 
 .who-head { display: grid; grid-template-columns: 1.3fr 1fr; gap: 40px; align-items: end; }
 .who-cols { margin-top: 56px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .who-cols > div { padding: clamp(28px, 3vw, 44px); background: var(--ground-2); border-radius: var(--r); display: grid; grid-template-rows: auto auto 1fr auto; }
+.card-act { margin-top: 24px; }
 .who .glyph { width: 104px; height: 104px; overflow: visible; }
 .who h3 { margin-top: 20px; font-size: var(--fs-4); }
 .who p { margin-top: 10px; color: var(--ink-2); max-width: 30em; text-wrap: pretty; }

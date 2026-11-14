@@ -72,6 +72,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
           <ul>
             <li><a href="#story">The demo</a></li>
             <li><a href="#who">Whitehats</a></li>
+            <li><a href="#protocols">Protocols</a></li>
             <li><a href="#verify">Verify</a></li>
             <li><a href="#trust">Trust</a></li>
             <li><a href="#faq">Questions</a></li>
@@ -143,6 +144,27 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
                 <h3>Your agent, with a claim key.</h3>
                 <p>A key on your own account that can file claims and nothing else. It can't move funds, withdraw your balance or add keys, and you can revoke it any time.</p>
                 <div className="term-mini"><code id="cmdAgent"><span className="p" aria-hidden="true">$</span>bountee key add --contract &lt;contract&gt; --as &lt;you&gt;</code><button className="copy" type="button" data-copy="cmdAgent">Copy</button></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="who protocols" id="protocols" aria-labelledby="protocolsH">
+          <div className="wrap">
+            <div className="who-head">
+              <h2 id="protocolsH" className="rise">Pay only for a proven theft.</h2>
+            </div>
+            <div className="who-cols rise" style={delay("120ms")}>
+              <div>
+                <svg className="glyph iso" data-glyph="vault" aria-hidden="true"></svg>
+                <h3>Set it up once.</h3>
+                <p>Give BounTEE the pause role on your vault on each chain, add a few cents of pause gas, and lock the bounty in USDC. The rules are fixed when you post.</p>
+                <div className="card-act"><a className="btn btn-ink" href={`${appSite}/post`}>Post a bounty</a></div>
+              </div>
+              <div>
+                <svg className="glyph iso" data-glyph="mpc" aria-hidden="true"></svg>
+                <h3>Then do nothing.</h3>
+                <p>When a Whitehat proves a theft, the pause is signed and sent for every covered contract. You don&apos;t approve it. The bounty is paid once. After the payout you can open the exploit to fix the bug.</p>
               </div>
             </div>
           </div>
