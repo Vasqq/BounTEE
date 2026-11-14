@@ -14,7 +14,7 @@ Bug bounties that pay themselves. A Whitehat, or their AI agent, seals an exploi
 [![OutLayer TDX](https://img.shields.io/badge/OutLayer-TDX%20attested-5B5BD6)](https://api.outlayer.ai/attestations/by-tx/6xbAxbuABt1i2f37YQobnCpot1iuSfUfKKRSih5nV5DL)
 [![Paused on Base and Arbitrum One](https://img.shields.io/badge/Paused-Base%20%C2%B7%20Arbitrum%20One-0052FF)](#mainnet-proof)
 
-[Demo video](<!-- PENDING: demo video URL -->) · [Live site](https://bountee.dev) · [Try it on testnet](https://testnet.bountee.dev) · [Mainnet proof](#mainnet-proof) · [Setup](#setup) · [Check every claim](#check-every-claim-yourself)
+[Launch post](https://x.com/itzbanknotez/status/2121741236587675799) · [Live site](https://bountee.dev) · [Try it on testnet](https://testnet.bountee.dev) · [Mainnet proof](#mainnet-proof) · [Setup](#setup) · [Check every claim](#check-every-claim-yourself)
 
 <br>
 
