@@ -97,6 +97,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
               <div className="cta"><a className="btn btn-ink" href="#story">See it run</a></div>
             </div>
           </div>
+          <a className="cue" href="#story" aria-label="See it run"><i /></a>
         </section>
 
         <section className="story" id="story" aria-labelledby="storyH">
@@ -122,7 +123,6 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
               </div>
             </div>
           </div>
-          <div className="wrap story-cta"><a className="btn btn-ink" href="#verify">Verify it yourself</a></div>
           {demo && <AllTransactions demo={demo} nearExplorer={nearExplorer} />}
         </section>
 
@@ -158,7 +158,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
           <div className="wrap">
             <div className="verify-head">
               <h2 id="verifyH" className="rise">Don't take our word. Run the checks.</h2>
-              <p className="lead rise" style={delay("80ms")}>The command-line tool reads the demo bounty from the chains and rebuilds the code from source. It needs no keys and no funds. This is what it reports.</p>
+              <p className="lead rise" style={delay("80ms")}>Check the mainnet demo above yourself. The command-line tool reads that bounty from the chains and rebuilds the code from source. It needs no keys and no funds. This is what it reports.</p>
             </div>
             <div className="term" id="term">
               <div className="term-bar">
