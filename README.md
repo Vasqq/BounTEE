@@ -589,6 +589,7 @@ Built for the NEAR hackathon (October to November 2026), for two tracks:
 - **Damn Vulnerable DeFi** v4 (MIT): three of its levels are used as judge tests and, with a pause added, as offline demo contracts. See [`demo/dvd/NOTICE`](demo/dvd/NOTICE).
 - **DeFiHackLabs** (Apache-2.0): the historical replay reproduces its DEPUSDT/LEVUSDC exploit.
 - **AI coding agents** wrote much of the code and documentation, under my review.
+- **My other entry in this hackathon** is [Sats Jar](https://github.com/koukikouks/sats-jar), an independent project with its own code.
 - **Feasibility tests:** six throwaway tests ran on testnets before the build (Oct 31 to Nov 2). None of their code is in this repo.
 
 MIT licensed. See [LICENSE](LICENSE).
