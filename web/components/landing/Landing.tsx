@@ -97,7 +97,7 @@ export function Landing({ nearExplorer, initialDemo, footerLinks, appSite = "" }
               <div className="cta"><a className="btn btn-ink" href="#story">See it run</a></div>
             </div>
           </div>
-          <a className="cue" href="#story" aria-label="See it run"><i /></a>
+          <a className="cue" href="#story" aria-label="See it run"></a>
         </section>
 
         <section className="story" id="story" aria-labelledby="storyH">

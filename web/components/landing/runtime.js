@@ -941,8 +941,39 @@ return {
     ctx.imageSmoothingEnabled = false; ctx.drawImage(small, 0, 0, map.w * CELL, map.h * CELL);
   };
   addEventListener('resize', size); size();
-  const loop = now => { if (visible) draw(now); if (!reduce) requestAnimationFrame(loop); };
-  if (reduce) draw(0); else requestAnimationFrame(loop);
+
+  // The scroll cue, in the circuit's own language: a plain grey line and arrowhead that stay on the
+  // page, and a green Bayer-dither pulse that scans down them. It has its own small canvas because the
+  // hero's canvas is masked away at the bottom, where the cue sits.
+  const CUE = { len: 56, arm: 9, trail: 24, travel: 1700, cycle: 3400, w: 80, h: 84, tipY: 76 };
+  const cc = document.createElement('canvas'), cctx = cc.getContext('2d');
+  cc.setAttribute('aria-hidden', 'true');
+  cc.style.cssText = `position:absolute;left:50%;bottom:44px;width:${CUE.w}px;height:${CUE.h}px;margin-left:${-CUE.w / 2}px;pointer-events:none;z-index:1`;
+  hero.appendChild(cc);
+  const cueDpr = devicePixelRatio || 1; cc.width = CUE.w * cueDpr; cc.height = CUE.h * cueDpr; cctx.setTransform(cueDpr, 0, 0, cueDpr, 0, 0);
+  // the stroke as [cell x, cell y, distance along it]: down the line, then back up each arm of the head
+  const cueCells = (() => {
+    const seen = new Map(), x0 = CUE.w / 2, tip = CUE.tipY, arm = CUE.arm * Math.SQRT2;
+    const add = (x, y, u) => { const cx = Math.floor(x / CELL), cy = Math.floor(y / CELL), k = cy * 4096 + cx; if (!seen.has(k)) seen.set(k, [cx, cy, u]); };
+    for (let d = 0; d <= CUE.len; d += 0.5) add(x0, tip - CUE.len + d, d);
+    for (let d = 0; d <= arm; d += 0.5) { add(x0 - d / Math.SQRT2, tip - d / Math.SQRT2, CUE.len + d); add(x0 + d / Math.SQRT2, tip - d / Math.SQRT2, CUE.len + d); }
+    return [...seen.values()];
+  })();
+  const cueMax = CUE.len + CUE.arm * Math.SQRT2;
+  const drawCue = now => {
+    const x0 = CUE.w / 2, tip = CUE.tipY;
+    cctx.clearRect(0, 0, CUE.w, CUE.h);
+    cctx.strokeStyle = 'rgba(122, 124, 128, 0.75)'; cctx.lineWidth = 1;
+    cctx.beginPath(); cctx.moveTo(x0, tip - CUE.len); cctx.lineTo(x0, tip);
+    cctx.moveTo(x0 - CUE.arm, tip - CUE.arm); cctx.lineTo(x0, tip); cctx.lineTo(x0 + CUE.arm, tip - CUE.arm); cctx.stroke();
+    const front = (reduce ? 1 : Math.min(1, (now % CUE.cycle) / CUE.travel)) * (cueMax + CUE.trail);
+    for (const [x, y, u] of cueCells) {
+      const lead = front - u, b = lead >= 0 && lead < CUE.trail ? Math.max(0.34, 1 - lead / CUE.trail) : 0.34;
+      if (b * 1.3 > BAYER[(y & 3) * 4 + (x & 3)]) { cctx.fillStyle = `rgba(0, 236, 151, ${((120 + b * 130) / 255).toFixed(2)})`; cctx.fillRect(x * CELL, y * CELL, CELL, CELL); }
+    }
+  };
+  const loop = now => { if (visible) { draw(now); drawCue(now); } if (!reduce) requestAnimationFrame(loop); };
+  if (reduce) { draw(0); drawCue(0); } else requestAnimationFrame(loop);
 })();
   started = api;
   return api;
