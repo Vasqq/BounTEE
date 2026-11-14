@@ -172,7 +172,7 @@ export function VerifyTerminal({ id, state }: { id: BountyId; state?: PublicStat
                 <h3>On your machine</h3>
                 <p>
                   These rebuild the code from source, so they run only with the command below.{" "}
-                  <a href="https://github.com/Vasqq/bountee#check-every-claim-yourself" target="_blank" rel="noopener">
+                  <a href="https://github.com/Vasqq/bountee#setup" target="_blank" rel="noopener">
                     Set it up from the README
                   </a>{" "}
                   first.

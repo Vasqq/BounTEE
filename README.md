@@ -18,7 +18,7 @@ Bug bounties that pay themselves. A Whitehat, or their AI agent, seals an exploi
 [![TypeScript](https://img.shields.io/badge/TypeScript-CLI%20%26%20web-3178C6?logo=typescript&logoColor=white)](cli/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-[Demo video](<!-- PENDING: demo video URL -->) · [Live site](https://bountee.dev) · [Try it on testnet](https://testnet.bountee.dev) · [How it works](#how-it-works) · [Mainnet proof](#mainnet-proof) · [Hackathon tracks](#hackathon-tracks) · [Check every claim](#check-every-claim-yourself) · [Architecture](#architecture) · [Roadmap](#roadmap)
+[Demo video](<!-- PENDING: demo video URL -->) · [Live site](https://bountee.dev) · [Try it on testnet](https://testnet.bountee.dev) · [How it works](#how-it-works) · [Mainnet proof](#mainnet-proof) · [Hackathon tracks](#hackathon-tracks) · [Setup](#setup) · [Check every claim](#check-every-claim-yourself) · [Architecture](#architecture) · [Roadmap](#roadmap)
 
 <br>
 
@@ -141,27 +141,63 @@ In this demo, the Whitehat's AI agent filed the winning claim, the Sealed-to-Pai
 
 A Whitehat can also claim themselves; both paths are under [As a Whitehat](#as-a-whitehat).
 
-## Check every claim yourself
+## Setup
 
-No keys or funds needed: every claim above can be checked from a clean checkout.
+Do this once. Every section below starts from here.
 
-You need:
+**1. Install these tools.**
 
-- [Node](https://nodejs.org) 22.18 or later, and [pnpm](https://pnpm.io/installation)
-- [Rust](https://rustup.rs), installed with rustup. The first build fetches the exact version this repo pins.
+- [Node](https://nodejs.org) 22.18 or later
+- [pnpm](https://pnpm.io/installation)
+- [Rust](https://rustup.rs)
 - [wasmtime](https://wasmtime.dev)
-- For step 6 only: [Docker](https://docs.docker.com/get-docker/), running
+- [Docker](https://docs.docker.com/get-docker/), only for step 6 of [Check every claim yourself](#check-every-claim-yourself). Open it so it's running.
+
+**2. Get the code.** Copy each box, paste it into your terminal and press Enter.
 
 ```sh
 git clone https://github.com/Vasqq/bountee && cd bountee
-pnpm install
-cargo build --release -p bountee-judge --target wasm32-wasip2   # the judge the TEE runs
-alias bountee='node cli/src/main.ts'                           # run again in each new terminal
 ```
 
-Then one command runs every step below and checks its output: `node scripts/check-readme-steps.ts`. Steps 1 to 3 need no network.
+**3. Install the packages.**
 
-**1. A real exploit pays, and a cheat pays nothing.** These replay recorded claims through the judge you just built, against an earlier demo vault, [`demo/src/DemoVault.sol`](demo/src/DemoVault.sol). In the cheat, a depositor withdraws its own money: funds leave the vault, but nothing is stolen.
+```sh
+pnpm install
+```
+
+**4. Build the judge.** The first time takes a few minutes.
+
+```sh
+cargo build --release -p bountee-judge --target wasm32-wasip2
+```
+
+**5. Make the `bountee` command.**
+
+```sh
+alias bountee='node cli/src/main.ts'
+```
+
+**6. Check it works.** You should see `bountee 0.1.0`.
+
+```sh
+bountee --version
+```
+
+**Opened a new terminal window?** Run `cd bountee` and step 5 again.
+
+## Check every claim yourself
+
+No keys or funds needed. Before you start, do the [Setup](#setup).
+
+To run every step below at once and check each one's output:
+
+```sh
+node scripts/check-readme-steps.ts
+```
+
+Steps 1 to 3 need no network.
+
+**1. A real exploit pays, and a cheat pays nothing.** These replay recorded claims through the judge you built in Setup, against an earlier demo vault, [`demo/src/DemoVault.sol`](demo/src/DemoVault.sol). In the cheat, a depositor withdraws its own money: funds leave the vault, but nothing is stolen.
 
 ```console
 $ bountee test --job demo/fixtures/exploit.json
@@ -252,7 +288,7 @@ The [testnet site](https://testnet.bountee.dev) runs the same web app against `b
 
 The testnet site's Live bounties cover a vault with a real bug. Find it, prove it and claim the bounty's test USDC. Each bounty pays only its first win.
 
-You need the setup from [Check every claim yourself](#check-every-claim-yourself) and [Foundry](https://getfoundry.sh).
+Before you start: do the [Setup](#setup) and install [Foundry](https://getfoundry.sh).
 
 1. `bountee init` creates a testnet account and funds it from NEAR's faucet.
 2. Pick a Live bounty on the testnet site. Its page lists each covered contract and its chain. The vault's source is [`demo/src/PositionVault.sol`](demo/src/PositionVault.sol).
@@ -264,7 +300,7 @@ You need the setup from [Check every claim yourself](#check-every-claim-yourself
 
 Your AI agent can find the bug and claim for you with claim-only access: it can call only `submit_claim` and `retry_claim`, can't move your money, and every win is paid to your account.
 
-Before it starts, follow [For the Whitehat: before you hand over](docs/agent-instructions.md#for-the-whitehat-before-you-hand-over): put `bountee` on the agent's PATH, top up your claim balance (the agent can't), and grant claim-only access with `bountee key add`. Then give the agent that folder and [docs/agent-instructions.md](docs/agent-instructions.md). `bountee key revoke` withdraws the access afterwards.
+Before you start, do the [Setup](#setup). Then, before the agent starts, follow [For the Whitehat: before you hand over](docs/agent-instructions.md#for-the-whitehat-before-you-hand-over): put `bountee` on the agent's PATH, top up your claim balance (the agent can't), and grant claim-only access with `bountee key add`. Then give the agent that folder and [docs/agent-instructions.md](docs/agent-instructions.md). `bountee key revoke` withdraws the access afterwards.
 
 ### As a Protocol
 
