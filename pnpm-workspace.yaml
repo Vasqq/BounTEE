@@ -2,3 +2,10 @@ packages:
   - formats/ts
   - cli
   - web
+
+# Install scripts are off unless named here. wagmi's dependencies bring three native add-ons
+# that each have a pure-JavaScript fallback, so their builds stay off.
+allowBuilds:
+  bufferutil: false
+  keccak: false
+  utf-8-validate: false

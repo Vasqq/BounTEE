@@ -2,12 +2,13 @@
 pragma solidity 0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
-import {DemoVault} from "../src/DemoVault.sol";
+import {PositionVault} from "../src/PositionVault.sol";
 import {MockUSDC} from "../src/MockUSDC.sol";
 
 /// The ERC-20 call the honest user makes on the vault's USDC, Circle's or the mock.
 interface IERC20 {
     function approve(address spender, uint256 amount) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
 }
 
 /// Uniswap V2's router (UniswapV2Router02), the two functions the honest user needs.
@@ -20,9 +21,9 @@ interface IUniswapV2Router {
         returns (uint256[] memory);
 }
 
-/// The honest-user path, as a script: a depositor gets USDC, deposits it, then withdraws no
-/// more than they deposited. #16's cheat claim (R4.11) and #8/#10's scenarios run this as the
-/// ZERO-verdict case (R4.10 row 1).
+/// The honest-user path, as a script: a depositor gets USDC, deposits it for shares, then
+/// redeems the shares. A redeem returns no more than the deposit put in. The cheat claim (R4.11)
+/// and the ZERO-verdict scenarios run this.
 ///
 /// How the depositor gets its USDC depends on the token. A claim's fresh account starts with
 /// only the bounty's native seed (the contract allows no token seed), so:
@@ -34,7 +35,7 @@ interface IUniswapV2Router {
 ///     MockUSDC, whose `mint` is open: the depositor mints it.
 ///
 /// Env:
-///   VAULT   (address, required) — the deployed DemoVault.
+///   VAULT   (address, required) — the deployed PositionVault.
 ///   AMOUNT  (uint,  optional) — USDC (6dp, smallest unit) to deposit; defaults to 500e6.
 /// Broadcast key: any account holding the seed (on mainnet, enough ETH to buy AMOUNT).
 contract HonestUser is Script {
@@ -47,7 +48,7 @@ contract HonestUser is Script {
     }
 
     function run() external {
-        DemoVault vault = DemoVault(vm.envAddress("VAULT"));
+        PositionVault vault = PositionVault(vm.envAddress("VAULT"));
         address usdc = address(vault.token());
         uint256 amount = vm.envOr("AMOUNT", uint256(500e6));
 
@@ -65,11 +66,12 @@ contract HonestUser is Script {
             MockUSDC(usdc).mint(msg.sender, amount);
         }
         IERC20(usdc).approve(address(vault), amount);
-        vault.deposit(amount);
-        vault.withdraw(amount); // never more than deposited
+        uint256 minted = vault.deposit(amount);
+        uint256 returned = vault.redeem(minted); // never more than deposited
         vm.stopBroadcast();
 
-        console.log("deposited then withdrew (USDC smallest unit):", amount);
-        console.log("remaining deposit credit:", vault.deposits(msg.sender));
+        console.log("deposited (USDC smallest unit):", amount);
+        console.log("shares minted:", minted);
+        console.log("redeemed (USDC smallest unit):", returned);
     }
 }

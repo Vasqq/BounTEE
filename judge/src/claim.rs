@@ -13,7 +13,9 @@ use revm::primitives::B256;
 
 use crate::confirm::{self, Unconfirmed};
 use crate::header;
+use crate::profile::Profile;
 use crate::replay::{self, hex};
+use crate::score;
 
 /// Why a claim job ended with no verdict (R2.6). Every cause ends the job the same way
 /// and none is printed in the enclave; the cause is kept for readers of the code.
@@ -58,6 +60,10 @@ fn run(
     job: &JudgeClaim,
     sealed_exploit: impl FnOnce() -> Option<Result<Exploit, Reason>>,
 ) -> Result<Verdict, Ended> {
+    // D1: the block's chain must be a covered contract's chain, before anything else and
+    // before any RPC is asked.
+    score::on_proof_chain(&job.rules, job.block.chain_id.get())?;
+
     // The header must hash to the claim's block hash and carry its number, as in a
     // local replay (R2.9); its timestamp is the block's.
     let hash: B256 = job
@@ -66,16 +72,19 @@ fn run(
         .as_str()
         .parse()
         .map_err(|_| Reason::UnprovenState)?;
+    // D29: as many header fields as the proof chain's profile needs.
+    let profile = Profile::of(job.block.chain_id.get());
     let header = hex(job.header.as_str())
-        .and_then(|rlp| header::verified(&rlp, hash))
+        .and_then(|rlp| header::verified(&rlp, hash, profile))
         .filter(|h| h.number == job.block.number.get())
         .ok_or(Reason::UnprovenState)?;
 
     // R2.8: recent against the submission time the bounty contract recorded.
     confirm::recent(header.timestamp, job.submitted_at_ns.get())?;
 
-    // R2.8: the pinned RPCs confirm the hash, so the header's state root is the chain's.
-    confirm::confirm(job.rules.proof_chain.get(), header.number, hash)
+    // R2.8: the block's chain's pinned RPCs confirm the hash, so the header's state root
+    // is that chain's.
+    confirm::confirm(job.block.chain_id.get(), header.number, hash)
         .map_err(|why| Ended::NoVerdict(NoVerdict::Unconfirmed(why)))??;
 
     // R4.5: proofs that don't parse prove nothing.

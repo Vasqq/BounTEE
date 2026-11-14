@@ -10,8 +10,14 @@
 //      records the pause verified, from the hash of the pause it stored (R7.3, R7.10)
 //   -> the payout happened before any of it (R7.11)
 //
+// Seams (#53): T only, on a PositionVault instance (ADR-0019). Catches the pause landing on the
+// new vault and its verification by the MPC network; misses mainnet (#35). A testnet run is a
+// rehearsal, never evidence (requirements.md, ADR-0017).
+//
 // Runs only with BOUNTEE_T21_RUN=1 (it spends testnet NEAR and Base Sepolia ETH, and waits
-// for Base Sepolia's safe head: 11-27 minutes). Needs BOUNTEE_DAY3 naming a deployment of this
+// for Base Sepolia's safe head: 11-27 minutes). Needs SEALED_EXPLOIT, the absolute path of the
+// sealed exploit script (never in this repo); without it the run stops with "sealed exploit not
+// present" before deploying or spending. Needs BOUNTEE_DAY3 naming a deployment of this
 // contract (`testnet/deploy-system.ts`), WHITEHAT=<account with ~1.2 NEAR>, the Protocol's key,
 // and the Base Sepolia deployer in ~/.bountee-testnet/base-sepolia-deployer.env. VERIFIER is
 // the "anyone" account (default bountee-spike3.testnet). INSTANCE=<file> reuses an unclaimed
@@ -25,11 +31,11 @@ import { actions } from "near-api-js";
 import { beforeAll, describe, expect, test } from "vitest";
 import { Near, events, tgas } from "../src/near.ts";
 import { defaultRpc } from "../src/chains.ts";
+import { sealedExploit } from "./testnet/sealed-exploit.ts";
 
 const RUN = process.env.BOUNTEE_T21_RUN === "1";
 const home = homedir();
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
-const repo = fileURLToPath(new URL("../../", import.meta.url));
 const freshInstance = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
 const RPC = defaultRpc(84532)!;
 const VERIFIER = process.env.VERIFIER ?? "bountee-spike3.testnet";
@@ -64,6 +70,7 @@ describe.runIf(RUN)("#21: a pause verified on NEAR by the MPC network", () => {
 
   // Setup, not a requirement: a fresh demo instance and its bounty, on this contract (D21).
   beforeAll(async () => {
+    sealedExploit();
     expect(whitehat, "set WHITEHAT").not.toBe("");
     if (process.env.INSTANCE) {
       instance = JSON.parse(readFileSync(process.env.INSTANCE, "utf8"));
@@ -84,8 +91,9 @@ describe.runIf(RUN)("#21: a pause verified on NEAR by the MPC network", () => {
   }, 600_000);
 
   test("R7.3, R7.10, R7.11: claim pays, broadcasts, waits for the safe head and has the pause verified; an early request is not", async () => {
+    const exploit = sealedExploit();
     const id = { protocol: instance.protocol, name: instance.name };
-    const claiming = run(process.execPath, [entry, "claim", join(repo, "demo/script/Exploit.s.sol"), "--bounty", instance.bounty, "--contract", contract, "--as", whitehat, "--verify-wait", "3600", "--timeout", "3600", "--json"], { VAULT: instance.vault });
+    const claiming = run(process.execPath, [entry, "claim", exploit, "--bounty", instance.bounty, "--contract", contract, "--as", whitehat, "--verify-wait", "3600", "--timeout", "3600", "--json"], { VAULT: instance.vault });
 
     // R7.11: the bounty is paid while no chain's pause is verified, or even asked about.
     let bounty: any;
@@ -101,7 +109,8 @@ describe.runIf(RUN)("#21: a pause verified on NEAR by the MPC network", () => {
     const pause = bounty.signed_pauses[0];
 
     // The pause lands (claim broadcasts it); then, before the safe head reaches its block,
-    // anyone asks for verification: the MPC network doesn't vouch for it.
+    // anyone asks for verification: the MPC network doesn't vouch for it. Anyone but the
+    // winning Whitehat and the Protocol pays for the attempt: the prepaid ones are theirs.
     let receipt: any = null;
     for (let i = 0; i < 100 && !receipt; i++) {
       try {
@@ -118,7 +127,7 @@ describe.runIf(RUN)("#21: a pause verified on NEAR by the MPC network", () => {
     const fees = await near.view(contract, "fees");
     const early = await near.account(VERIFIER).signAndSendTransaction({
       receiverId: contract,
-      actions: [actions.functionCall("verify_pause", { id, chain_id: 84532 }, BigInt(fees.min_verify_pause_gas_base) + BigInt(fees.min_verify_pause_gas_per_pause) + tgas(20), 0n)],
+      actions: [actions.functionCall("verify_pause", { id, chain_id: 84532 }, BigInt(fees.min_verify_pause_gas_base) + BigInt(fees.min_verify_pause_gas_per_pause) + tgas(20), BigInt(fees.verify_pause_fee_per_pause))],
       waitUntil: "INCLUDED_FINAL",
     });
     const earlyStatus = await near.txStatus(early.transaction.hash, VERIFIER, 400);
@@ -133,6 +142,7 @@ describe.runIf(RUN)("#21: a pause verified on NEAR by the MPC network", () => {
     // claim waits for the safe head, then requests: verified.
     const r = await claiming;
     expect(r.code, r.stderr || r.stdout).toBe(0);
+    expect(cast("call", instance.vault, "paused()(bool)", "--rpc-url", RPC)).toBe("true");
     const out = JSON.parse(r.stdout);
     record("claim", { claim_id: out.claim_id, tx: out.tx_hash, paid: out.paid, pause: out.broadcast?.pauses?.[0]?.tx_hash });
     expect(out.paid).toBe(true);
@@ -142,7 +152,8 @@ describe.runIf(RUN)("#21: a pause verified on NEAR by the MPC network", () => {
     expect(chain.safe_block).toBeGreaterThanOrEqual(landed);
     const done = await near.view(contract, "pause_verifications", { id });
     record("verifications at the end", done);
-    expect(done).toStrictEqual([{ chain_id: 84532, verified: true, verified_pauses: [pause.tx_hash], attempts: 2, prepaid_attempts_left: 1, verifying: false }]);
+    // Two attempts; only claim's, the Whitehat's, drew on the prepaid ones.
+    expect(done).toStrictEqual([{ chain_id: 84532, verified: true, verified_pauses: [pause.tx_hash], attempts: 2, prepaid_attempts_left: 2, verifying: false }]);
     const verifiedStatus = await near.txStatus(chain.near_tx, whitehat);
     expect(events(verifiedStatus).map((e) => e.event)).toContain("pause_verified");
     // The payout is as it was.

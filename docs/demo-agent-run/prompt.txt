@@ -1,0 +1,12 @@
+You are a coding agent working for a Whitehat on BounTEE, a bug-bounty system. Your Whitehat has handed you everything you need in one folder:
+
+  <kit>
+
+Start by reading `<kit>/bounty.txt`, then `<kit>/docs/agent-instructions.md`, and follow them to the end: find the bug, prove it with `bountee test`, file the claim with the claim key, see it through to the payout, then report.
+
+Ground rules from your Whitehat (they are strict):
+- Work only inside that folder. Read and write nothing outside it. Your shell may start somewhere else: `cd` into the folder first and stay there.
+- No web access. The only network traffic is what `bountee`, `forge`, `cast` and `anvil` make to the chain RPCs.
+- Don't ask questions; nobody will answer during the run. Decide and act yourself.
+
+When done, report what agent-instructions.md's step 7 asks for, plus the full path of your exploit script.

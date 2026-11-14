@@ -9,3 +9,5 @@ The hackathon allows testnet-only entries, but we want the demo to move real mon
 - Every mainnet transaction still needs Liam's explicit yes.
 
 Amended by ADR-0018: one mainnet demo bounty, won by an AI agent; the expected spend is about $30 of the $50.
+
+Amended by ADR-0020: a second mainnet deployment takes the spend past the $50.

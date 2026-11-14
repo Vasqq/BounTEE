@@ -27,24 +27,19 @@
 //
 // Provenance: the exploit reproduces SunWeb3Sec/DeFiHackLabs
 // src/test/2023-06/DEPUSDT_LEVUSDC_exp.sol (Apache-2.0).
-import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
-import { bounteeOffline } from "./offline.ts";
+import { judgeWasm } from "../src/test.ts";
+import { bounteeOffline, RUN_MS } from "./offline.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
-const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
 const JOB = fileURLToPath(new URL("./fixtures/historical/depusdt-levusdc.json", import.meta.url));
 
 
 beforeAll(() => {
   // Build the judge before networking is cut, as a Verifier's checkout would have it.
-  const res = spawnSync("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], {
-    cwd: repo,
-    encoding: "utf8",
-  });
-  if (res.status !== 0) throw new Error(res.stderr);
+  judgeWasm();
 }, 600_000);
 
 // Criterion 1: the historical exploit, with committed proofs, returns PAYS offline.
@@ -56,7 +51,7 @@ test("ticket #28, D19, R2.9, R3.8: the DEPUSDT/LEVUSDC hack replays to PAYS offl
   expect(out.block.number).toBe(17_484_161);
   expect(out.block.hash).toBe(JSON.parse(readFileSync(JOB, "utf8")).replay.block.hash);
   expect(out.transactions).toBe(4); // approveToken + transferFrom for each of the two proxies
-});
+}, RUN_MS);
 
 // Criterion 2 (D11): the judge needs no change for it. The same build that scores the demo
 // scores this real hack, and nothing in judge/src names the hack.

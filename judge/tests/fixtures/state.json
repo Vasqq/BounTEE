@@ -10,6 +10,7 @@
   "treasury": "0x70997970c51812dc3a224c62b88e8f8de8b57a35"
  },
  "block": {
+  "chain_id": 31337,
   "number": 8,
   "hash": "0x99d540967203ad70200c741305ddcb2a1e5a0fc7c9c5bc979a1c951587503b60"
  },

@@ -39,12 +39,11 @@ pub struct BountyId {
 pub struct Rules {
     /// Every contract the bounty covers, on every chain; each one is paused on a win.
     pub covered_contracts: Vec<CoveredContract>,
-    /// The EVM chain ID whose state claims are judged against (D1).
-    pub proof_chain: SafeU64,
     /// Seconds a claim's block may be older than its submission; BounTEE sets
     /// [`RECENCY_LIMIT_SECS`], not the Protocol.
     pub recency_limit_secs: u32,
-    /// Tokens on the proof chain that count as value, with their posting prices.
+    /// Tokens that count as value, each on its chain, with their posting prices. A claim is
+    /// valued only in the listed tokens on its proof chain (R3.8, ADR-0020).
     pub listed_tokens: Vec<ListedToken>,
     /// What each fresh account starts the replay holding; set by BounTEE (R4.7).
     pub seed: Seed,
@@ -79,7 +78,8 @@ pub struct CoveredContract {
     pub address: EvmAddress,
 }
 
-/// A listed token and its posting price, in value units per smallest unit of the token.
+/// A listed token: its chain, the token on it, and its posting price, in value units per
+/// smallest unit of the token (ADR-0020).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(
@@ -92,11 +92,13 @@ pub struct CoveredContract {
     )
 )]
 pub struct ListedToken {
+    /// The EVM chain ID the token is on.
+    pub chain_id: SafeU64,
     pub token: Token,
     pub price: Uint,
 }
 
-/// A token on the proof chain: the chain's native coin (valued by account balance,
+/// A token on a chain: the chain's native coin (valued by account balance,
 /// R3.8), or an ERC-20 at an address. JSON: `"native"` or `"0x…"`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]

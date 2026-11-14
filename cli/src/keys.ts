@@ -29,7 +29,11 @@ import { formatNear, loadKey, Near, saveKey } from "./near.ts";
  * key skips them and names the command for the Whitehat's own key.
  */
 export const CLAIM_KEY_METHODS = ["submit_claim", "retry_claim"];
-/** The gas a new claim key may spend, by default: about 30 claims' worth at 300 Tgas each. */
+/**
+ * The gas a new claim key may spend, by default. A claim attaches the gas the contract names
+ * for its size (`claimGas`, 268 Tgas for a small one, about 450 for a 300 KB one), which its
+ * allowance pays up front; at NEAR's usual 0.1 Ggas price that is a few claims' worth.
+ */
 export const DEFAULT_ALLOWANCE_NEAR = "1";
 
 export function claimKeysDir(network: string): string {

@@ -9,7 +9,13 @@
 //      key in its credentials folder: judged by the enclave and paid to the Whitehat (R14.2)
 //   -> `bountee key revoke`: the key is gone and a claim signed with it is refused (R14.4)
 //
+// Seams (#53): T only, on a PositionVault instance (ADR-0019). Catches the claim key's limits
+// and its claim judged and paid on the new vault; misses mainnet (#35). A testnet run is a
+// rehearsal, never evidence (requirements.md, ADR-0017).
+//
 // Runs only with BOUNTEE_T25_RUN=1 (it spends testnet NEAR and Base Sepolia ETH). Needs
+// SEALED_EXPLOIT, the absolute path of the sealed exploit script (never in this repo); without
+// it the run stops with "sealed exploit not present" before deploying or spending. Needs
 // BOUNTEE_DAY3 naming a deployment of this checkout's contract (`testnet/deploy-system.ts`;
 // `withdraw_claim_balance` must exist on it), WHITEHAT=<account with ~1.3 NEAR, its full-access
 // key in ~/.near-credentials/testnet>, the Protocol's key and the Base Sepolia deployer, as
@@ -24,6 +30,7 @@ import { beforeAll, describe, expect, test } from "vitest";
 import { actions, baseDecode, createTransaction, KeyPair, KeyPairSigner, type KeyPairString } from "near-api-js";
 import { defaultRpc } from "../src/chains.ts";
 import { Near, loadKey, milliNear, tgas } from "../src/near.ts";
+import { sealedExploit } from "./testnet/sealed-exploit.ts";
 
 /** R14.1, spelled out here rather than imported: the bounty contract's claim actions, and nothing else. */
 const CLAIM_ACTIONS = ["submit_claim", "retry_claim"];
@@ -32,7 +39,6 @@ const RUN = process.env.BOUNTEE_T25_RUN === "1";
 const BASE = 84532;
 const home = homedir();
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
-const repo = fileURLToPath(new URL("../../", import.meta.url));
 const freshInstance = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
 const evidenceFile = join(home, ".bountee-testnet", "t25-evidence.json");
 const evidence: Record<string, unknown> = {};
@@ -101,6 +107,7 @@ describe.runIf(RUN)("#25: a claim key files claims and does nothing else", () =>
 
   // Setup, not a requirement: a fresh demo instance, posted and live (D21).
   beforeAll(async () => {
+    sealedExploit();
     expect(whitehat, "set WHITEHAT").not.toBe("");
     if (process.env.INSTANCE) {
       instance = JSON.parse(readFileSync(process.env.INSTANCE, "utf8"));
@@ -189,6 +196,7 @@ describe.runIf(RUN)("#25: a claim key files claims and does nothing else", () =>
   }, 300_000);
 
   test("R14.2: a claim the agent files with the claim key is judged like any other and paid to the Whitehat", async () => {
+    const exploit = sealedExploit();
     // The claim key can't top the claim balance up (no deposit): the Whitehat does, once.
     const need = milliNear(1200);
     const have = BigInt(await near.view<string>(contract, "claim_balance", { account_id: whitehat }));
@@ -200,7 +208,7 @@ describe.runIf(RUN)("#25: a claim key files claims and does nothing else", () =>
 
     // The agent runs `bountee claim` exactly as a person does; its only key is the claim key.
     const r = await bountee(
-      ["claim", join(repo, "demo/script/Exploit.s.sol"), "--bounty", instance.bounty, "--contract", contract, "--as", whitehat, "--no-verify", "--timeout", "900", "--json"],
+      ["claim", exploit, "--bounty", instance.bounty, "--contract", contract, "--as", whitehat, "--no-verify", "--timeout", "900", "--json"],
       { VAULT: vault, BOUNTEE_CREDENTIALS_DIR: agentDir },
     );
     const out = JSON.parse(r.stdout || "{}");

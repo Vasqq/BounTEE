@@ -9,7 +9,7 @@
 // exactly what the judge reads, including the balance reads it scores with.
 //
 // As a script:
-//   node cli/src/proofs.ts --rpc <url> --block <n> --rules <rules.json> --exploit <exploit.json> \
+//   node cli/src/proofs.ts --rpc <url> --chain <chain id> --block <n> --rules <rules.json> --exploit <exploit.json> \
 //     --wasm <bountee-judge.wasm> --out <replay.json>
 // The broadcast log of a Foundry script converts to an exploit with exploitFromBroadcast().
 import { spawnSync } from "node:child_process";
@@ -208,6 +208,8 @@ export function unprovenReads(stderr: string): { accounts: string[]; slots: [str
 
 export interface CollectOptions {
   rpc: string;
+  /** The chain `rpc` serves: the claim's proof chain, which its block names (D1). */
+  chain: number;
   block: number;
   rules: Rules;
   exploit: Exploit;
@@ -240,7 +242,7 @@ export async function collectReplay(o: CollectOptions): Promise<{ replay: Replay
     }
     const replay = parseReplay({
       rules: o.rules,
-      block: { number: o.block, hash },
+      block: { chain_id: o.chain, number: o.block, hash },
       header,
       proofs: [...proofs.values()].sort((a, b) => a.address.localeCompare(b.address)),
       exploit: o.exploit,
@@ -269,6 +271,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const read = (p: string) => JSON.parse(readFileSync(p, "utf8"));
   const { replay, verdict } = await collectReplay({
     rpc: arg("rpc"),
+    chain: Number(arg("chain")),
     block: Number(arg("block")),
     rules: read(arg("rules")),
     exploit: parseExploit(read(arg("exploit"))),

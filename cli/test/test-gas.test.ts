@@ -69,9 +69,8 @@ beforeAll(async () => {
     rules,
     JSON.stringify({
       covered_contracts: [{ chain_id: CHAIN, address: POT }],
-      proof_chain: CHAIN,
       recency_limit_secs: 300,
-      listed_tokens: [{ token: "native", price: "1" }],
+      listed_tokens: [{ chain_id: CHAIN, token: "native", price: "1" }],
       seed: { native: "1000000000000000000", tokens: [] },
       bounty_amount: "1000000",
       minimum_theft: "500000000000000000",

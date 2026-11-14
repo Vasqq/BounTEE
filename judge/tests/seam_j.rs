@@ -139,17 +139,20 @@ fn proof_of<'a>(job: &'a mut Value, address: &str) -> &'a mut Value {
         .unwrap_or_else(|| panic!("a proof of {address}"))
 }
 
+/// The fixture chain, anvil's: the chain the fixture block is on (`state.json`).
+const ANVIL: u64 = 31337;
+
 fn set_prices(job: &mut Value, token: &str, native: &str) {
     rules(job)["listed_tokens"] = json!([
-        { "token": address("token"), "price": token },
-        { "token": "native", "price": native },
+        { "chain_id": ANVIL, "token": address("token"), "price": token },
+        { "chain_id": ANVIL, "token": "native", "price": native },
     ]);
 }
 
 fn cover(job: &mut Value, vaults: &[&str]) {
     rules(job)["covered_contracts"] = vaults
         .iter()
-        .map(|v| json!({ "chain_id": 31337, "address": address(v) }))
+        .map(|v| json!({ "chain_id": ANVIL, "address": address(v) }))
         .collect();
 }
 
@@ -230,13 +233,60 @@ fn r3_8_score_is_the_smaller_of_gain_and_loss() {
     assert_verdict(&gain_smaller, Reason::BelowMinimumTheft);
 }
 
-/// R3.8: no covered contract on the proof chain means no loss, so the score is zero.
+/// R3.8: a covered contract on the claim's chain that loses nothing means no loss, so the
+/// score is zero, however much the attacker gains: `viaContract` takes 400 tokens from vault
+/// 1, and only vault 2 is covered. (Before ADR-0020 this case covered only a contract on
+/// another chain, which D1 now makes INVALID `chain_not_covered`.)
 #[test]
 fn r3_8_no_loss_scores_zero() {
-    let mut j = job("drain");
-    rules(&mut j)["covered_contracts"] =
-        json!([{ "chain_id": 421614, "address": address("vault1") }]);
+    let mut j = job("viaContract");
+    cover(&mut j, &["vault2"]);
     rules(&mut j)["minimum_theft"] = json!("1");
+    assert_verdict(&j, Reason::BelowMinimumTheft);
+}
+
+// ---- D1, R3.8: the claim's chain ----------------------------------------------------------
+
+/// The other chain of a two-chain bounty: Arbitrum Sepolia. The fixture's block is on
+/// [`ANVIL`], the claim's proof chain.
+const OTHER_CHAIN: u64 = 421614;
+
+/// D1: a replay job whose block is on a chain no covered contract is on is INVALID
+/// `chain_not_covered`, before anything else: here the header doesn't even hash to the
+/// block, which would otherwise be `unproven_state`.
+#[test]
+fn d1_a_replay_on_a_chain_no_covered_contract_is_on_is_invalid() {
+    let mut j = job("drain");
+    j["replay"]["block"]["chain_id"] = json!(OTHER_CHAIN);
+    assert_verdict(&j, Reason::ChainNotCovered);
+    j["replay"]["header"] = json!("0x00");
+    assert_verdict(&j, Reason::ChainNotCovered);
+}
+
+/// R3.8, D1: on a two-chain bounty, loss counts only the covered contracts on the claim's
+/// chain, and value only the listed tokens on it. Vault 2 is covered only on the other
+/// chain, though it is in the claim chain's state and loses 500 tokens there; the other
+/// chain's tokens are listed between the claim chain's, at their own non-zero prices, so a
+/// price paired with the wrong token, or the other chain's token or vault counted, moves
+/// the score off its boundary. Counted right: gain 800 tokens + 2 ether, loss (vault 1
+/// only) 500 tokens + 2 ether, so the score is 500·1000 + 2e18.
+#[test]
+fn r3_8_d1_loss_and_value_count_only_the_claims_chain() {
+    let mut j = job("drain");
+    rules(&mut j)["covered_contracts"] = json!([
+        { "chain_id": OTHER_CHAIN, "address": address("vault2") },
+        { "chain_id": ANVIL, "address": address("vault1") },
+    ]);
+    rules(&mut j)["listed_tokens"] = json!([
+        { "chain_id": ANVIL, "token": address("token"), "price": "1000" },
+        { "chain_id": OTHER_CHAIN, "token": address("token"), "price": "7" },
+        { "chain_id": OTHER_CHAIN, "token": "native", "price": "13" },
+        { "chain_id": ANVIL, "token": "native", "price": "1" },
+    ]);
+    let score = 500 * 1000 + 2 * ETHER;
+    rules(&mut j)["minimum_theft"] = json!(score.to_string());
+    assert_verdict(&j, Reason::MinimumTheftReached);
+    rules(&mut j)["minimum_theft"] = json!((score + 1).to_string());
     assert_verdict(&j, Reason::BelowMinimumTheft);
 }
 
@@ -267,14 +317,16 @@ proptest! {
         native_price in u256(),
         minimum in u256(),
         near_score in 0u8..3,
-        covered in 0usize..4,
+        covered in 0usize..3,
     ) {
-        let vaults: &[&[&str]] = &[&[], &["vault1"], &["vault2"], &["vault1", "vault2"]];
+        // Always at least one vault: a bounty covering nothing on the claim's chain is INVALID
+        // `chain_not_covered` (D1); the no-loss case is `r3_8_no_loss_scores_zero`.
+        let vaults: &[&[&str]] = &[&["vault1"], &["vault2"], &["vault1", "vault2"]];
         let ether = Wide::from(2 * ETHER);
         let gain = Wide::from(800u64) * token_price + ether * native_price;
         let loss_1 = Wide::from(500u64) * token_price + ether * native_price;
         let loss_2 = Wide::from(500u64) * token_price;
-        let loss = match covered { 0 => Wide::ZERO, 1 => loss_1, 2 => loss_2, _ => loss_1 + loss_2 };
+        let loss = match covered { 0 => loss_1, 1 => loss_2, _ => loss_1 + loss_2 };
         let score = gain.min(loss);
         // Most cases put the minimum at the score or just above, where an off-by-one, or a
         // seed counted as gain, would show.
@@ -438,7 +490,7 @@ fn r4_5_r4_8_contract_a_covered_contract_creates_needs_no_proof_and_is_not_gain(
     let child = address("child");
     proofs(&mut j).retain(|p| p["address"] != child.as_str());
     cover(&mut j, &["factory"]);
-    rules(&mut j)["listed_tokens"] = json!([{ "token": "native", "price": "1" }]);
+    rules(&mut j)["listed_tokens"] = json!([{ "chain_id": ANVIL, "token": "native", "price": "1" }]);
     rules(&mut j)["minimum_theft"] = json!("1");
     assert_verdict(&j, Reason::BelowMinimumTheft);
 }
@@ -450,7 +502,7 @@ fn r4_5_r4_8_contract_a_covered_contract_creates_needs_no_proof_and_is_not_gain(
 fn r4_5_create2_by_an_existing_contract_needs_a_proof_of_absence() {
     let mut j = job("spawnChild2");
     cover(&mut j, &["factory"]);
-    rules(&mut j)["listed_tokens"] = json!([{ "token": "native", "price": "1" }]);
+    rules(&mut j)["listed_tokens"] = json!([{ "chain_id": ANVIL, "token": "native", "price": "1" }]);
     rules(&mut j)["minimum_theft"] = json!("1");
     assert_verdict(&j, Reason::BelowMinimumTheft);
     let child = address("child2");
@@ -507,7 +559,7 @@ fn r4_7_seed_is_subtracted_from_gain() {
 #[test]
 fn r4_9_unlisted_token_is_worth_nothing() {
     let mut j = job("viaContract");
-    rules(&mut j)["listed_tokens"] = json!([{ "token": "native", "price": "1000000" }]);
+    rules(&mut j)["listed_tokens"] = json!([{ "chain_id": ANVIL, "token": "native", "price": "1000000" }]);
     rules(&mut j)["minimum_theft"] = json!("1");
     assert_verdict(&j, Reason::BelowMinimumTheft);
 }

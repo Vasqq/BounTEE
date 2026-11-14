@@ -10,7 +10,8 @@
 // formats' `Rules`; the fields BounTEE sets (`recency_limit_secs`, `seed`,
 // `judge_build_hash`) are taken from the bounty contract when the file leaves them out.
 //
-// 1. Preflight, before anything is spent: the name is unused, and each covered chain's
+// 1. Preflight, before anything is spent: the name is unused, the Protocol holds the NEAR the
+//    posting needs in hand (`postingNeed`: the fee and the gas both calls attach, #57), and each covered chain's
 //    pause-role address (the contract's `pause_role` view, D25) holds the pause gas the
 //    posting check will ask for (R7.6: per pause, gas limit at fee limit plus the L1 data
 //    fee, the formats' `PAUSE_GAS_PER_PAUSE`, which the judge checks and `fees()` shows). `--no-preflight` skips the pause-gas part and lets the enclave's
@@ -27,7 +28,7 @@ import { PAUSE_GAS_PER_PAUSE, parseRules, type BountyId, type PostingFailure, ty
 import { parseBountyId } from "./bounties.ts";
 import { defaultRpc } from "./chains.ts";
 import { NEAR_RPC, type Network } from "./endpoints.ts";
-import { events, formatNear, Near, tgas } from "./near.ts";
+import { events, formatNear, Near, roundUpNear, tgas, type PricedCall } from "./near.ts";
 import { rpc } from "./proofs.ts";
 
 /** NEAR's Ethereum-wallet relayer caps a transaction at 270 Tgas, so the web app attaches that; so does the tool. */
@@ -69,10 +70,34 @@ export interface PostResult {
   failures?: (PostingFailure & { contract: Rules["covered_contracts"][number] })[] | null;
 }
 
+/** A posting's calls: the fee's top-up when the prepaid balance is short of one fee, then the bounty amount carrying the rules. */
+export interface Posting {
+  prepay?: PricedCall;
+  transfer: PricedCall & { args: { receiver_id: string; amount: string; msg: string } };
+  /** The NEAR the Protocol must hold for both, free of its storage stake, rounded up to what `formatNear` shows. */
+  need: bigint;
+}
+
+/** How `id` is posted with `rules` on `contract`, and the NEAR its Protocol must hold first. */
+export async function postingNeed(near: Near, contract: string, id: BountyId, rules: Rules): Promise<Posting> {
+  const [fees, prepaid] = await Promise.all([
+    near.view(contract, "fees"),
+    near.view<string>(contract, "posting_fee_balance", { account_id: id.protocol }).then(BigInt),
+  ]);
+  const postingFee = BigInt(fees.posting_fee);
+  const prepay: PricedCall | undefined =
+    prepaid < postingFee
+      ? { method: "prepay_posting_fee", gas: tgas(30), deposit: postingFee - prepaid + (prepaid === 0n ? ENTRY_STORAGE : 0n), argsBytes: 2 }
+      : undefined;
+  const args = { receiver_id: contract, amount: rules.bounty_amount, msg: JSON.stringify({ name: id.name, rules }) };
+  const transfer = { method: "ft_transfer_call", gas: POSTING_GAS, deposit: 1n, argsBytes: JSON.stringify(args).length, args };
+  return { prepay, transfer, need: roundUpNear(await near.upfrontNear(prepay ? [prepay, transfer] : [transfer])) };
+}
+
 export async function post(o: PostOptions): Promise<PostResult> {
   const near = new Near(o.network, o.nearRpc ?? NEAR_RPC[o.network]);
   const id = parseBountyId(o.bounty);
-  const [config, fees] = await Promise.all([near.view(o.contract, "config"), near.view(o.contract, "fees")]);
+  const config = await near.view(o.contract, "config");
   const given = JSON.parse(readFileSync(o.rules, "utf8"));
   const rules = parseRules({
     ...given,
@@ -84,6 +109,14 @@ export async function post(o: PostOptions): Promise<PostResult> {
   // ---- 1. Preflight ----
   if (await near.view(o.contract, "bounty", { id })) {
     throw new Error(`${id.protocol}/${id.name} exists already: a bounty name is never reused (D25)`);
+  }
+  const { prepay, transfer, need: needNear } = await postingNeed(near, o.contract, id, rules);
+  const freeNear = (await near.freeNear(id.protocol)) ?? 0n;
+  if (freeNear < needNear) {
+    throw new Error(
+      `${id.protocol} holds ${formatNear(freeNear)} NEAR free of its storage stake and the posting needs ${formatNear(needNear)} in hand ` +
+        `(the posting fee and the gas both calls attach, refunded once unused): add ${formatNear(roundUpNear(needNear - freeNear))} NEAR (nothing was spent)`,
+    );
   }
   const role = await near.view<{ address: string }>(o.contract, "pause_role", { id });
   const pauses = new Map<number, number>();
@@ -108,31 +141,21 @@ export async function post(o: PostOptions): Promise<PostResult> {
 
   // ---- 2. Posting fee ----
   const protocol = near.account(id.protocol);
-  const postingFee = BigInt(fees.posting_fee);
-  const have = BigInt(await near.view<string>(o.contract, "posting_fee_balance", { account_id: id.protocol }));
   const out: Partial<PostResult> = {};
-  if (have < postingFee) {
-    const deposit = postingFee - have + (have === 0n ? ENTRY_STORAGE : 0n);
+  if (prepay) {
     const r = await protocol.signAndSendTransaction({
       receiverId: o.contract,
-      actions: [actions.functionCall("prepay_posting_fee", {}, tgas(30), deposit)],
+      actions: [actions.functionCall(prepay.method, {}, prepay.gas, prepay.deposit)],
       waitUntil: "FINAL",
     });
-    out.prepaid_near = formatNear(deposit);
+    out.prepaid_near = formatNear(prepay.deposit);
     out.prepay_tx = r.transaction.hash;
   }
 
   // ---- 3. The bounty amount, carrying the rules ----
   const sent = await protocol.signAndSendTransaction({
     receiverId: config.usdc,
-    actions: [
-      actions.functionCall(
-        "ft_transfer_call",
-        { receiver_id: o.contract, amount: rules.bounty_amount, msg: JSON.stringify({ name: id.name, rules }) },
-        POSTING_GAS,
-        1n,
-      ),
-    ],
+    actions: [actions.functionCall(transfer.method, transfer.args, transfer.gas, transfer.deposit)],
     waitUntil: "FINAL",
     throwOnFailure: false,
   });

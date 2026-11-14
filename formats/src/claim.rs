@@ -20,7 +20,7 @@ pub struct Claim {
     pub bounty: BountyId,
     /// The NEAR account claiming; must match the account sealed inside the exploit (R5.4).
     pub whitehat: AccountId,
-    /// The proof-chain block the exploit is judged against.
+    /// The block the exploit is judged against, naming its chain: the claim's proof chain.
     pub block: BlockRef,
     /// That block's RLP-encoded header; its keccak256 must equal `block.hash`.
     pub header: Bytes,
@@ -43,6 +43,9 @@ pub struct Claim {
     )
 )]
 pub struct BlockRef {
+    /// The block's EVM chain ID: the claim's proof chain, which may be any covered chain
+    /// (D1, ADR-0020).
+    pub chain_id: SafeU64,
     pub number: SafeU64,
     pub hash: B256,
 }

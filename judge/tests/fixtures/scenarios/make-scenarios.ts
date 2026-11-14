@@ -73,14 +73,14 @@ try {
     usdcPool: one("Pool", 0), cheapPool: one("Pool", 1), ptPool: one("Pool", 2), lender: one("Lender"),
     flash: one("FlashLender"), bank: one("EtherBank"), swapVault: one("SwapVault"), router: one("Router"),
     shareVault: one("ShareVault"), early: one("PatchableVault", 0), late: one("PatchableVault", 1),
-    treasury, owner: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", fresh,
+    positionVault: one("PositionVault"), treasury, owner: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", fresh,
   };
   const env = {
     DEPLOYER_KEY: deployerKey, FRESH: fresh, USDC: addresses.usdc, DEMO: addresses.demo, PT: addresses.pt,
     GUARDED: addresses.guarded, USDC_POOL: addresses.usdcPool, CHEAP_POOL: addresses.cheapPool,
     PT_POOL: addresses.ptPool, LENDER: addresses.lender, FLASH: addresses.flash, BANK: addresses.bank,
     SWAP_VAULT: addresses.swapVault, ROUTER: addresses.router, SHARE_VAULT: addresses.shareVault,
-    EARLY: addresses.early, LATE: addresses.late,
+    EARLY: addresses.early, LATE: addresses.late, POSITION_VAULT: addresses.positionVault,
   };
 
   // forge checks a dry run's value against the chain, not the script's `vm.deal`: give
@@ -114,12 +114,12 @@ try {
     ...base,
     covered_contracts: [
       addr.demo, addr.guarded, addr.usdcPool, addr.cheapPool, addr.ptPool, addr.lender, addr.flash,
-      addr.bank, addr.swapVault, addr.router, addr.shareVault, addr.early, addr.late,
+      addr.bank, addr.swapVault, addr.router, addr.shareVault, addr.early, addr.late, addr.positionVault,
     ].map((address) => ({ chain_id: 31337, address })),
     listed_tokens: [
-      { token: addr.usdc, price: "1" },
-      { token: addr.pt, price: "1" },
-      { token: "native", price: "1" },
+      { chain_id: 31337, token: addr.usdc, price: "1" },
+      { chain_id: 31337, token: addr.pt, price: "1" },
+      { chain_id: 31337, token: "native", price: "1" },
     ],
   });
   const rules = everything(addresses);
@@ -128,7 +128,7 @@ try {
     const proofs = new Map<string, AccountProof>();
     let replay;
     for (const name of names) {
-      const r = await collectReplay({ rpc: url, block: at, rules, exploit: exploits[name]!, wasm });
+      const r = await collectReplay({ rpc: url, chain: 31337, block: at, rules, exploit: exploits[name]!, wasm });
       replay = r.replay;
       if (r.stderr) console.log(r.stderr.trim());
       console.log(name, JSON.stringify(r.verdict), `${r.replay.proofs.length} proofs`);

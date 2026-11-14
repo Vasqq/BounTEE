@@ -101,8 +101,6 @@ pub mod gas {
     /// `ft_on_transfer` refuses a posting with less left than this, so the token refunds the
     /// USDC instead of keeping it with no check running (spike #4: OutLayer needs ~55 Tgas).
     pub const MIN_POSTING: Gas = Gas::from_tgas(100);
-    /// `submit_claim` refuses a claim attached less than this.
-    pub const MIN_CLAIM: Gas = Gas::from_tgas(200);
     /// For `store_secrets` on OutLayer.
     pub const STORE_SECRET: Gas = Gas::from_tgas(30);
     /// For the posting check's callback.
@@ -129,8 +127,6 @@ pub mod gas {
     pub const REQUEST_JOB: Gas = Gas::from_tgas(60);
     /// For checking and storing the signed pauses, then the payout's steps.
     pub const ON_PAUSES_SIGNED: Gas = Gas::from_tgas(50);
-    /// What the claim's job is left at least, before gas is kept back to sign pauses.
-    pub const MIN_JOB: Gas = Gas::from_tgas(60);
     /// For each pause's `verify_foreign_transaction` on the MPC contract, which asks for at
     /// least 15 Tgas (testnet config, Nov 4; about 13.4 Tgas burnt in all, spike #3).
     pub const VERIFY_PAUSE: Gas = Gas::from_tgas(20);
@@ -157,6 +153,51 @@ pub mod gas {
     /// Gas to verify `n` pauses on one chain, from the call that starts it.
     pub const fn pause_verifying(n: usize) -> Gas {
         Gas::from_gas(VERIFY_PAUSE.as_gas() * n as u64 + ON_PAUSE_VERIFIED.as_gas() + TAIL.as_gas())
+    }
+
+    /// What building OutLayer's request costs here per byte of job input: a call to another
+    /// account's per-byte send and execution fees (47.7 + 2.2 Mgas) and reading the bytes
+    /// from memory (3.8 Mgas), from NEAR's fee schedule (protocol 88, both networks), with
+    /// half again for margin.
+    pub const RECEIPT_BYTE: Gas = Gas::from_gas(80_000_000);
+
+    /// What OutLayer's `request_execution` spends per byte of job input beyond
+    /// [`REQUEST_JOB`]: writing the input to its state (31 Mgas) and the gas it keeps for
+    /// its yield callback, which deletes it (25 Mgas), with half again for margin.
+    pub const JOB_BYTE: Gas = Gas::from_gas(90_000_000);
+
+    /// Kept back to build a claim job's request and callback, whose arguments carry
+    /// `bytes` of input: their fixed costs (`TAIL`) and their per-byte costs.
+    pub const fn receipt_bytes(bytes: usize) -> Gas {
+        Gas::from_gas(TAIL.as_gas() + RECEIPT_BYTE.as_gas().saturating_mul(bytes as u64))
+    }
+
+    /// The least a claim job on `bytes` of input gets.
+    pub const fn job(bytes: usize) -> Gas {
+        Gas::from_gas(REQUEST_JOB.as_gas() + JOB_BYTE.as_gas().saturating_mul(bytes as u64))
+    }
+
+    /// The fixed part of [`claim`] before its verdict callback: filing (about 9 Tgas burnt in
+    /// seam C), storing the secret ([`STORE_SECRET`]), its callback (about 4), building the
+    /// job (`TAIL`), the job ([`REQUEST_JOB`]) and margin.
+    pub const CLAIM_BASE: Gas = Gas::from_tgas(140);
+
+    /// The per-byte part of [`claim`]: parsing and recording the claim (0.18 Mgas a byte
+    /// burnt in seam C), passing the input to and parsing it in the callback (0.14),
+    /// [`RECEIPT_BYTE`] and [`JOB_BYTE`], with margin.
+    pub const CLAIM_BYTE: Gas = Gas::from_gas(600_000_000);
+
+    /// What a claim (or a retry) whose job input is `bytes` long, on a bounty covering
+    /// `covered` contracts, must attach, so its job is requested and a PAYS signs every
+    /// pause in the same transaction (R11.2, R7.1). Claims attached less are refused before
+    /// anything is drawn.
+    pub const fn claim(bytes: usize, covered: usize) -> Gas {
+        Gas::from_gas(
+            CLAIM_BASE.as_gas()
+                + ON_CLAIM_JUDGED.as_gas()
+                + pause_signing(covered).as_gas()
+                + CLAIM_BYTE.as_gas().saturating_mul(bytes as u64),
+        )
     }
 
     /// Gas to sign the pauses of `n` covered contracts and pay, from the call that starts it.
@@ -421,7 +462,12 @@ impl Contract {
             "storage_price_per_byte": U128(fees::STORAGE_PRICE_PER_BYTE),
             "secret_row_overhead_bytes": fees::SECRET_ROW_OVERHEAD_BYTES,
             "min_posting_gas": gas::MIN_POSTING,
-            "min_claim_gas": gas::MIN_CLAIM,
+            // A claim (or retry) whose job input is n bytes, on a bounty covering c contracts,
+            // must attach claim_gas_base + c * claim_gas_per_covered_contract
+            // + n * claim_gas_per_input_byte.
+            "claim_gas_base": gas::claim(0, 0),
+            "claim_gas_per_covered_contract": gas::SIGN_PAUSE,
+            "claim_gas_per_input_byte": gas::CLAIM_BYTE,
             "min_sign_pauses_gas_per_contract": gas::SIGN_PAUSE,
             "min_sign_pauses_gas_base": gas::pause_signing(0),
             "min_retry_payout_gas": gas::payout(),

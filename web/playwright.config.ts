@@ -1,18 +1,73 @@
 import { defineConfig, devices } from "@playwright/test";
+import { APPS, DUMMY_PROJECT_ID, nearEndpoints, PORTS, SITES } from "./e2e/stand-ins/sites.ts";
 
-const port = Number(process.env.WEB_PORT ?? 3100);
+const standIn = Number(process.env.STAND_IN_PORT ?? 3199);
+const chains = `http://localhost:${standIn}`;
+/** The testnet specs: they run on the testnet build alone, and every other spec on the mainnet build alone. */
+const TESTNET_SPECS = /testnet\.spec\.ts$/;
+// The mainnet build is built with the network setting unset, as a mainnet deployment is (D30):
+// a setting in the shell must not reach it. The testnet build sets its own. Each build is told
+// the other site's address (D31) here alone.
+for (const v of ["NEXT_PUBLIC_NETWORK", "NEXT_PUBLIC_MAINNET_SITE", "NEXT_PUBLIC_TESTNET_SITE"]) delete process.env[v];
 
-// Seam W: the web app driven in a browser. Specs live in web/e2e/.
+/**
+ * One build of the app, its endpoints pointed at the stand-in (a real build takes the network
+ * table's, lib/config.ts): the server's at request time, the browser wallet's (lib/wagmi.ts) at
+ * build time. DEMO_BOUNTY is set on both, so the testnet build shows it never tells it.
+ */
+function appServer(on: number, distDir: string, chain: { covered: number[]; nearEvm: number }, env: Record<string, string> = {}) {
+  const evm = (id: number) => `${chains}/evm/${id}`;
+  return {
+    command: `pnpm exec next build && pnpm exec next start -p ${on}`,
+    url: `http://localhost:${on}`,
+    reuseExistingServer: !process.env.CI,
+    timeout: 180_000,
+    env: {
+      NEXT_DIST_DIR: distDir,
+      // Set explicitly: see DUMMY_PROJECT_ID.
+      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: DUMMY_PROJECT_ID,
+      ...nearEndpoints(chains),
+      DEMO_BOUNTY: "0x9f2c3e1a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e/mainnet-demo",
+      // Each spec puts the chains in a new state, so the landing page's server read isn't reused.
+      DEMO_CACHE_SECS: "0",
+      NEAR_ETH_RPC: evm(chain.nearEvm),
+      NEXT_PUBLIC_NEAR_ETH_RPC: evm(chain.nearEvm),
+      ...Object.fromEntries(chain.covered.flatMap((id) => [[`EVM_RPC_${id}`, evm(id)], [`NEXT_PUBLIC_EVM_RPC_${id}`, evm(id)]])),
+      ...env,
+    },
+  };
+}
+
+// Seam W: the web app driven in a browser. Specs live in web/e2e/. The app reads every
+// chain through the test stand-in (e2e/stand-ins/chains.ts), which each spec puts in the
+// state it needs, so specs share it and run one at a time. Two builds run side by side, a
+// mainnet one and a testnet one (D30), each in its own build folder and on its own port, both
+// pointed at the one stand-in.
 export default defineConfig({
   testDir: "./e2e",
   forbidOnly: !!process.env.CI,
+  workers: 1,
+  fullyParallel: false,
   reporter: "list",
-  use: { baseURL: `http://localhost:${port}` },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: `pnpm exec next build && pnpm exec next start -p ${port}`,
-    url: `http://localhost:${port}`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
-  },
+  projects: [
+    { name: "desktop", testIgnore: TESTNET_SPECS, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 }, baseURL: APPS.mainnet } },
+    {
+      name: "phone",
+      testIgnore: TESTNET_SPECS,
+      use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL: APPS.mainnet },
+      grep: /@phone/,
+    },
+    { name: "testnet", testMatch: TESTNET_SPECS, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 }, baseURL: APPS.testnet } },
+  ],
+  webServer: [
+    {
+      command: `node e2e/stand-ins/chains.ts`,
+      url: `${chains}/health`,
+      env: { STAND_IN_PORT: String(standIn) },
+      reuseExistingServer: !process.env.CI,
+    },
+    // The mainnet build, with the setting unset.
+    appServer(PORTS.mainnet, ".next", { covered: [8453, 42161], nearEvm: 397 }, { NEXT_PUBLIC_TESTNET_SITE: SITES.testnet }),
+    appServer(PORTS.testnet, ".next-testnet", { covered: [84532, 421614], nearEvm: 398 }, { NEXT_PUBLIC_NETWORK: "testnet", NEXT_PUBLIC_MAINNET_SITE: SITES.mainnet }),
+  ],
 });

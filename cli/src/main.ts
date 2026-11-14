@@ -10,10 +10,12 @@
 // as one JSON document on stdout, an error as `{"error": …}` on stderr, and a claim's live
 // stages as one JSON line each on stderr.
 import { readFileSync } from "node:fs";
+import { describeError, retryNetworkErrors } from "./transport.ts";
 import { balanceCommand, formatBalanceResult } from "./balance.ts";
 import { formatBounty, formatList, listBounties, parseBountyId, showBounty } from "./bounties.ts";
 import { formatBuildResult, reproducibleBuild } from "./build.ts";
 import { broadcastCommand, formatBroadcastResult, parseRpcFlags } from "./broadcast.ts";
+import { parseChain } from "./chains.ts";
 import { claim, formatClaimResult } from "./claim.ts";
 import { initCommand } from "./init.ts";
 import { formatKeyAdd, formatKeyRevoke, keyAdd, keyRevoke } from "./keys.ts";
@@ -29,6 +31,9 @@ import { formatReplayResult, formatTestResult, replayJob, testCommand } from "./
 import { formatVerifyResult as formatVerifyPauses, verifyPauses } from "./verify-pause.ts";
 import { formatVerifyResult, verify } from "./verify.ts";
 import { BARE_FLAGS, USAGES } from "./usage.ts";
+
+// A request that gets no HTTP answer is sent again before any command can fail on it (#35).
+retryNetworkErrors();
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const args = process.argv.slice(2);
@@ -116,7 +121,8 @@ try {
     const { positional, flags } = params;
     if (flags.job !== undefined) {
       // A saved job (e.g. the demo's demo/fixtures/exploit.json), replayed offline (D19).
-      if (positional.length > 0 || flags.bounty !== undefined) fail(`test --job takes no script or --bounty\n${usage(command)}`, 2);
+      // A saved job is proven on the chain its block names (D1), so it takes no --chain either.
+      if (positional.length > 0 || flags.bounty !== undefined || flags.chain !== undefined) fail(`test --job takes no script, --bounty or --chain\n${usage(command)}`, 2);
       const result = replayJob({ job: flags.job, judge: flags.judge });
       print(result, formatReplayResult(result));
       process.exit(0);
@@ -132,6 +138,7 @@ try {
       block: flags.block === undefined ? undefined : Number(flags.block),
       judge: flags.judge,
       contract: flags.contract,
+      chain: parseChain(flags.chain),
       near: nearConnection(flags),
     });
     print(result, formatTestResult(result));
@@ -153,13 +160,14 @@ try {
     if (!positional[0] || !flags.as) fail(`verify-pause needs a bounty id and --as\n${usage(command)}`, 2);
     const bounty = parseBountyId(positional[0]);
     const { near, contract } = nearFor(command, flags);
+    const chain = parseChain(flags.chain);
     const result = await verifyPauses({
       near,
       contract,
       bounty,
       signer: flags.as,
       rpcs: flags.rpc === undefined ? undefined : parseRpcFlags(flags.rpc.split(",")),
-      chains: flags.chain === undefined ? undefined : [Number(flags.chain)],
+      chains: chain === undefined ? undefined : [chain],
       waitSecs: flags.wait === undefined ? undefined : Number(flags.wait),
     });
     print(result, formatVerifyPauses(result));
@@ -309,5 +317,5 @@ try {
     fail(`unknown command: ${args.join(" ")}\n${Object.values(USAGES).join("\n")}`, 2);
   }
 } catch (e) {
-  fail((e as Error).message);
+  fail(describeError(e));
 }

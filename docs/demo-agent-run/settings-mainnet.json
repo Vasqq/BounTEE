@@ -1,0 +1,97 @@
+{
+ "permissions": {
+  "allow": [
+   "Bash",
+   "Read(~/bountee-agent-35/mainnet/**)",
+   "Edit(~/bountee-agent-35/mainnet/**)",
+   "Glob",
+   "Grep"
+  ],
+  "deny": [
+   "WebFetch",
+   "WebSearch",
+   "Read(~/Documents/**)",
+   "Read(~/.claude/**)",
+   "Read(~/.bountee-testnet/**)",
+   "Read(~/.bountee-mainnet/**)",
+   "Read(~/.near-credentials/**)",
+   "Read(~/bountee-agent-48/**)",
+   "Read(~/bountee-agent-run/**)",
+   "Read(~/.local/share/bountee-dff6c06/**)",
+   "Read(~/.local/share/bountee-462cc1c/**)",
+   "Read(~/bountee-agent-35/config-mainnet/**)",
+   "Read(~/Library/Application Support/Claude/**)",
+   "Read(~/Library/Keychains/**)",
+   "Read(~/Library/Cookies/**)",
+   "Read(~/Library/Mail/**)",
+   "Read(~/Library/Messages/**)",
+   "Read(~/Library/Mobile Documents/**)",
+   "Read(~/Library/Safari/**)",
+   "Read(~/Library/Application Support/Google/**)",
+   "Read(~/Library/Application Support/Code/**)",
+   "Read(~/Library/Application Support/Cursor/**)",
+   "Read(~/Library/Containers/**)",
+   "Read(~/Library/Group Containers/**)",
+   "Read(~/bountee-agent-35/run-1/**)"
+  ]
+ },
+ "sandbox": {
+  "enabled": true,
+  "autoAllowBashIfSandboxed": true,
+  "allowUnsandboxedCommands": false,
+  "network": {
+   "allowLocalBinding": true,
+   "allowedDomains": [
+    "mainnet.base.org",
+    "8453.rpc.thirdweb.com",
+    "base.drpc.org",
+    "base-rpc.publicnode.com",
+    "base.gateway.tenderly.co",
+    "arb1.arbitrum.io",
+    "42161.rpc.thirdweb.com",
+    "arbitrum-one-rpc.publicnode.com",
+    "arbitrum.gateway.tenderly.co",
+    "free.rpc.fastnear.com",
+    "archival-rpc.mainnet.fastnear.com",
+    "tx.main.fastnear.com",
+    "api.outlayer.ai",
+    "main.fastfs.io",
+    "binaries.soliditylang.org"
+   ]
+  },
+  "filesystem": {
+   "denyRead": [
+    "~/Documents",
+    "~/.claude",
+    "~/.bountee-testnet",
+    "~/.bountee-mainnet",
+    "~/.near-credentials",
+    "~/bountee-agent-48",
+    "~/bountee-agent-run",
+    "~/.local/share/bountee-dff6c06",
+    "~/.local/share/bountee-462cc1c",
+    "~/bountee-agent-35/config-mainnet",
+    "~/.ssh",
+    "~/.config",
+    "~/Library/Application Support/Claude",
+    "~/Library/Keychains",
+    "~/Library/Cookies",
+    "~/Library/Mail",
+    "~/Library/Messages",
+    "~/Library/Mobile Documents",
+    "~/Library/Safari",
+    "~/Library/Application Support/Google",
+    "~/Library/Application Support/Code",
+    "~/Library/Application Support/Cursor",
+    "~/Library/Containers",
+    "~/Library/Group Containers",
+    "~/bountee-agent-35/run-1",
+    "~/bountee-agent-35/config-run-1",
+    "~/bountee-agent-35/config-mainnet",
+    "~/bountee-agent-35/run-1",
+    "~/bountee-agent-35/run-2",
+    "~/.local/share/bountee-e472404/.git"
+   ]
+  }
+ }
+}

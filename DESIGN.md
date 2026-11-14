@@ -1,0 +1,558 @@
+---
+version: alpha
+name: BounTEE Graphite
+description: Dark, true-neutral graphite with NEAR green as the only colour for "proven". Taken from the locked landing page (landing C3, Nov 6 2026) and extended to the web app's working screens.
+colors:
+  primary: "#eceeef"
+  ground: "#121213"
+  ground-2: "#181819"
+  surface: "#1f2021"
+  line: "#2e2f30"
+  line-2: "#424345"
+  ink: "#eceeef"
+  ink-2: "#b9bbbc"
+  ink-3: "#919395"
+  ok: "#00ec97"
+  ok-ink: "#222425"
+  ok-wash: "rgba(0, 236, 151, 0.12)"
+  fail: "#ff6b6b"
+  fail-wash: "rgba(255, 107, 107, 0.12)"
+  warn: "#f5b83d"
+  warn-wash: "rgba(245, 184, 61, 0.12)"
+  term: "#0e0f0f"
+  nav-solid: "rgba(18, 18, 19, 0.84)"
+  float-fill: "rgba(31, 32, 33, 0.92)"
+  base-blue: "#0000ff"
+  arbitrum-navy: "#213147"
+  arbitrum-blue-shift: "#1b4add"
+typography:
+  display-hero:
+    fontFamily: Newsreader
+    fontSize: 112.32px
+    fontWeight: 360
+    lineHeight: 0.98
+    letterSpacing: -0.045em
+  display-close:
+    fontFamily: Newsreader
+    fontSize: 92.16px
+    fontWeight: 360
+    lineHeight: 0.9
+    letterSpacing: -0.03em
+  headline-lg:
+    fontFamily: Newsreader
+    fontSize: 63.36px
+    fontWeight: 360
+    lineHeight: 1
+    letterSpacing: -0.03em
+  headline-md:
+    fontFamily: Newsreader
+    fontSize: 46px
+    fontWeight: 360
+    lineHeight: 1
+    letterSpacing: -0.03em
+  statement:
+    fontFamily: Newsreader
+    fontSize: 46px
+    fontWeight: 360
+    lineHeight: 1.14
+    letterSpacing: -0.03em
+  title:
+    fontFamily: Newsreader
+    fontSize: 26px
+    fontWeight: 360
+    lineHeight: 1
+    letterSpacing: -0.03em
+  title-ledger:
+    fontFamily: Newsreader
+    fontSize: 26px
+    fontWeight: 450
+    lineHeight: 1.15
+    letterSpacing: -0.03em
+  wordmark:
+    fontFamily: Newsreader
+    fontSize: 23px
+    fontWeight: 500
+    lineHeight: 1
+    letterSpacing: -0.02em
+  body-lg:
+    fontFamily: Switzer
+    fontSize: 20px
+    fontWeight: 400
+    lineHeight: 1.5
+  question:
+    fontFamily: Switzer
+    fontSize: 20px
+    fontWeight: 500
+    lineHeight: 1.3
+  body-md:
+    fontFamily: Switzer
+    fontSize: 18px
+    fontWeight: 400
+    lineHeight: 1.5
+    fontFeature: '"tnum"'
+  label-md:
+    fontFamily: Switzer
+    fontSize: 16px
+    fontWeight: 500
+    lineHeight: 1
+  body-sm:
+    fontFamily: Switzer
+    fontSize: 14px
+    fontWeight: 400
+    lineHeight: 1.5
+  label-sm:
+    fontFamily: Switzer
+    fontSize: 14px
+    fontWeight: 500
+    lineHeight: 1
+  data:
+    fontFamily: IBM Plex Mono
+    fontSize: 14px
+    fontWeight: 400
+    lineHeight: 1
+  data-block:
+    fontFamily: IBM Plex Mono
+    fontSize: 14px
+    fontWeight: 400
+    lineHeight: 1.6
+  data-strong:
+    fontFamily: IBM Plex Mono
+    fontSize: 14px
+    fontWeight: 500
+    lineHeight: 1.6
+  diagram-title:
+    fontFamily: Switzer
+    fontSize: 13px
+    fontWeight: 700
+    lineHeight: 1
+  diagram-data:
+    fontFamily: IBM Plex Mono
+    fontSize: 11px
+    fontWeight: 400
+    lineHeight: 1
+rounded:
+  chip: 7px
+  sm: 8px
+  mini: 10px
+  float: 12px
+  md: 14px
+  full: 999px
+spacing:
+  gutter: 56px
+  wrap: 1320px
+  nav: 68px
+  section: 172.8px
+  section-rest: 200px
+  head-to-body: 56px
+  panel-pad: 43.2px
+  card-gap: 16px
+  cta-gap: 12px
+  chip-gap: 8px
+components:
+  button-primary:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.ground}"
+    typography: "{typography.label-md}"
+    rounded: "{rounded.sm}"
+    height: 48px
+    padding: 0 20px
+  button-primary-hover:
+    backgroundColor: "#ffffff"
+  button-secondary:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    typography: "{typography.label-md}"
+    rounded: "{rounded.sm}"
+    height: 48px
+    padding: 0 20px
+  button-secondary-hover:
+    backgroundColor: "{colors.line}"
+  button-nav:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.ground}"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.sm}"
+    height: 38px
+    padding: 0 14px
+  copy:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.chip}"
+    height: 34px
+    width: 76px
+    padding: 0 14px
+  chip:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink-2}"
+    typography: "{typography.data}"
+    rounded: "{rounded.chip}"
+    height: 30px
+    padding: 0 11px
+  chip-hover:
+    backgroundColor: "{colors.line}"
+    textColor: "{colors.ink}"
+  chip-proven:
+    backgroundColor: "{colors.ok-wash}"
+    textColor: "{colors.ok}"
+  chip-mute:
+    backgroundColor: "{colors.ground-2}"
+    textColor: "{colors.ink-3}"
+  chip-fail:
+    backgroundColor: "{colors.fail-wash}"
+    textColor: "{colors.fail}"
+  chip-warn:
+    backgroundColor: "{colors.warn-wash}"
+    textColor: "{colors.warn}"
+  badge:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink-2}"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.full}"
+    height: 32px
+    padding: 0 14px 0 11px
+  terminal:
+    backgroundColor: "{colors.term}"
+    textColor: "{colors.ink}"
+    typography: "{typography.data-block}"
+    rounded: "{rounded.md}"
+    padding: 18px 20px 22px
+  terminal-mini:
+    backgroundColor: "{colors.term}"
+    textColor: "{colors.ink}"
+    typography: "{typography.data}"
+    rounded: "{rounded.mini}"
+    padding: 10px 10px 10px 16px
+  panel:
+    backgroundColor: "{colors.ground-2}"
+    rounded: "{rounded.md}"
+    padding: "{spacing.panel-pad}"
+  dock:
+    backgroundColor: "{colors.float-fill}"
+    rounded: "{rounded.float}"
+    padding: 5px
+  dock-step:
+    textColor: "{colors.ink-3}"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.sm}"
+    height: 36px
+    padding: 0 12px
+  dock-step-current:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.ground}"
+  faq-toggle:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.chip}"
+    size: 28px
+  nav:
+    backgroundColor: "{colors.nav-solid}"
+    height: "{spacing.nav}"
+---
+
+# BounTEE design system
+
+The locked landing page (landing C3, Nov 6 2026) is the source. Every value below is measured from its CSS at 1440 × 900. Anything marked **Extension** is for app screens the page doesn't have. It is built from the page's own parts and adds no new values unless it says so. Where the `design-taste-frontend` skill disagrees with a locked decision, the locked decision wins, and a line marked **Skill conflict** says so.
+
+## Overview
+
+BounTEE pays a Whitehat once an enclave proves an exploit, and pauses the covered contracts on Base and Arbitrum One. The UI exists to show that this happened, and to let anyone check it.
+
+**Principles.** Each one decides something.
+
+1. **Green means proven.** `ok` `#00ec97` appears only on something a chain or the Enclave has confirmed: a PAYS verdict, a payout, a landed or verified pause, a passing check, a completed step. If it isn't proven yet, it's grey. Green is never decoration, never a brand fill, and never on a button. The one exception is the testnet badge's wash (Nov 10): a 12% tint behind grey text, never the green itself. Red (`fail`) means a check failed or a read failed. Amber (`warn`) means the Protocol must act before it matters (low pause gas). Each hue keeps its one meaning, and an object carries at most one hue.
+2. **Data is shown as data.** A transaction, command, address, hash or bounty id is set in IBM Plex Mono inside a chip, terminal or diagram tag, and links to its explorer. Everything else uses the text face. A value the page can't read from a chain isn't shown (R15.6).
+3. **Tone and space separate things, not lines.** Surfaces step from `ground` to `ground-2` to `surface`. The only lines are inside the terminal and between FAQ items.
+4. **Sober and exact.** One ink action per view, no glow, no emoji, no adjectives that a number could replace. The serif display carries the voice. The UI chrome stays quiet.
+5. **Mainnet only.** Every proof is a mainnet transaction (ADR-0017). Only chains BounTEE can pause are named: NEAR, Base, Arbitrum One.
+
+**Scope.** Dark only (`color-scheme: dark`). Desktop and phone are both supported. Review at 1440 × 900 first, then 390 × 844. Phone rules are under Layout.
+
+## Colors
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `ground` | `#121213` | Page background. |
+| `ground-2` | `#181819` | Panels on the ground (the "You, or your agent." columns), muted chips. |
+| `surface` | `#1f2021` | Secondary buttons, chips, Copy, the FAQ +, badge. |
+| `line` | `#2e2f30` | Hover fill of `surface` controls. As a line: only the terminal frame and FAQ rules. |
+| `line-2` | `#424345` | The badge's inset ring, the dock's 1px edge, diagram tag outlines, hairline link underlines. |
+| `ink` | `#eceeef` | Headings, body text, the primary button fill. `primary` in the front matter is `ink`. |
+| `ink-2` | `#b9bbbc` | Leads, paragraphs under headings, nav links, chip text. |
+| `ink-3` | `#919395` | Meta, labels, step numbers, WAIT, footer. |
+| `ok` | `#00ec97` | Proven, and nothing else (Principle 1). Also the 2px focus ring and the text selection, as on the page. |
+| `ok-ink` | `#222425` | Text on an `ok` fill (selection). |
+| `ok-wash` | `rgba(0, 236, 151, 0.12)` | Fill of a proven chip or tile. |
+| `fail` | `#ff6b6b` | **Extension.** FAIL in Verify, a failed read. Contrast 6.75:1 on `ground`, 5.77:1 on its wash. |
+| `fail-wash` | `rgba(255, 107, 107, 0.12)` | **Extension.** Fill of a fail chip. |
+| `warn` | `#f5b83d` | **Extension.** The low pause-gas warning only. Contrast 10.5:1 on `ground`, 8.42:1 on its wash. |
+| `warn-wash` | `rgba(245, 184, 61, 0.12)` | **Extension.** Fill of the warn chip and the warning block. |
+| `term` | `#0e0f0f` | Terminal and command-block background. It is a literal on the page, not a variable. |
+| `nav-solid` | `rgba(18, 18, 19, 0.84)` | Nav bar once scrolled more than 8 px, with a 12px backdrop blur. |
+| `float-fill` | `rgba(31, 32, 33, 0.92)` | The dock, with a 12px backdrop blur. |
+| `base-blue` | `#0000ff` | The Base block and the Base Square only. |
+| `arbitrum-navy` / `arbitrum-blue-shift` | `#213147` / `#1b4add` | The Arbitrum One block, its ledger lines and the wordmark hexagon only. |
+
+Rules:
+- Chain colours belong to the chains' own marks and blocks. They are never UI colours.
+- Literals the page uses once: `#ffffff` (primary button hover), `#58595b` (unlit words in the landing statement), and the diagram materials (see The isometric world).
+- `fail` and `warn` copy `ok`'s pattern: the hue for the text, the same hue at 12% for the fill. They go on the word or the chip that states the problem, never on a whole panel's text, a button, or a border.
+
+## Typography
+
+Three faces, locked: **Newsreader** (display, Google Fonts, `opsz` 6–72, `font-optical-sizing: auto`), **Switzer** (text, Fontshare 400/500/600/700), **IBM Plex Mono** (data only, 400/500). The body sets `font-variant-numeric: tabular-nums` everywhere. **Skill conflict:** the skill allows two typefaces and no monospace. Three faces and mono-for-data are locked.
+
+| Token | Face / weight | Size at 1440 (CSS) | Leading | Tracking | Where |
+| --- | --- | --- | --- | --- | --- |
+| `display-hero` | Newsreader 360 | 112.32 (`clamp(80px, 7.8vw, 120px)`) | 0.98 | -0.045em | Landing hero only |
+| `display-close` | Newsreader 360 | 92.16 (`clamp(48px, 6.4vw, 104px)`) | 0.9 | -0.03em | Landing close only |
+| `headline-lg` | Newsreader 360 | 63.36 (`clamp(36px, 4.4vw, 64px)`) | 1 | -0.03em | Section `h2` |
+| `headline-md` | Newsreader 360 | 46 (`--fs-h3: clamp(32px, 3.2vw, 46px)`) | 1 | -0.03em | Step panel `h3` |
+| `statement` | Newsreader 360 | 46 (`--fs-h3`) | 1.14 | -0.03em | Landing statement only |
+| `title` | Newsreader 360 | 26 (`--fs-4`) | 1 | -0.03em | Panel `h3` |
+| `title-ledger` | Newsreader 450 | 26 (`--fs-4`) | 1.15 | -0.03em | Ledger item titles |
+| `wordmark` | Newsreader 500 | 23 | 1 | -0.02em | "BounTEE" in the nav |
+| `body-lg` | Switzer 400 | 20 (`--fs-lead`) | 1.5 | 0 | `.lead`, hero subtext; `ink-2`, max 36em |
+| `question` | Switzer 500 | 20 (`--fs-lead`) | 1.3 | 0 | FAQ question |
+| `body-md` | Switzer 400 | 18 | 1.5 | 0 | Body |
+| `label-md` | Switzer 500 | 16 (`--fs-ui`) | 1 | 0 | Buttons, nav links, step numbers in panels |
+| `body-sm` | Switzer 400 | 14 (`--fs-sm`) | 1.5 | 0 | Proof list, fine print, footer |
+| `label-sm` | Switzer 500 | 14 (`--fs-sm`) | 1 | 0 | Small buttons, Copy, dock, badge, ledger group heads |
+| `data` | Plex Mono 400 | 14 (`--fs-sm`) | 1 | 0 | Chips, command blocks |
+| `data-block` / `data-strong` | Plex Mono 400 / 500 | 14 (`--fs-sm`) | 1.6 | 0 | Terminal body / PASS, WAIT |
+| `diagram-title` / `diagram-data` | Switzer 700 / Plex Mono 400 | 13 / 11 | | | Inside isometric tags only (SVG units) |
+
+Rules:
+- Headings: `text-wrap: balance`. Paragraphs: `text-wrap: pretty`, max 32–36em.
+- **App screens (Extension):** the page title is `headline-md` (46px). `display-*`, `headline-lg` and `statement` are for the landing page only. The largest figure on a working screen is `title` (26px).
+- Italic: the CSS keeps `h1 em, h2 em { italic, 300 }`, but the locked page uses no italic. Don't add any.
+- Mono is for strings a machine reads: commands, tx hashes, addresses, account ids, code hashes, the bounty id, terminal output, diagram states. Amounts and dates in running text use Switzer with tabular figures ("10 USDC", "1 USDC minimum theft").
+
+## Layout
+
+| Token | Value at 1440 | CSS |
+| --- | --- | --- |
+| `wrap` | 1320px max | `.wrap` centred, padded by `gutter` |
+| `gutter` | 56px | `clamp(16px, 4vw, 56px)` |
+| `nav` | 68px | fixed, z 30; anchors offset by 80px `scroll-padding-top` |
+| `section` | 172.8px | `clamp(120px, 12vw, 180px)` top padding (`clamp(112px, …)` on trust and FAQ) |
+| `section-rest` | 200px | `clamp(120px, 14vw, 200px)`: statement padding, close margin |
+| `head-to-body` | 56px | heading block to its content; 48 (ledger), 40 (verify) are also used |
+| `panel-pad` | 43.2px | `clamp(28px, 3vw, 44px)` |
+| `card-gap` | 16px | between peer panels |
+| `cta-gap` / `chip-gap` | 12px / 8px | button rows / chip rows |
+
+- Section heads are a two-column grid, about `1.3fr 1fr` with a 40px gap: the `h2` on the left, the lead on the right, aligned to the bottom (`align-items: end`).
+- Every section uses a different composition. None is a card grid.
+- **App screens (Extension):** same `wrap` and `gutter`, under the same 68px nav. No sidebar: the app has five pages, so it uses the skill's "no sidebar" shell. The page title starts 56px below the nav (`head-to-body`). Blocks inside a screen are separated by 40px. On the posting flow, the form column and the "what you're risking" panel sit side by side as `1.3fr 1fr`, the same split as the section heads.
+
+**Phone.** The page's breakpoints hold everywhere:
+- **Below 1080px:** the nav links hide.
+- **Below 900px:** every two-column grid becomes one column, and the right-hand column stacks under the left. Step-panel `h3` drops to 30px. The terminal's result rows become `6ch 1fr`, with the detail moving under the name. The dock keeps only the current step's label.
+- **Below 560px:** the nav spreads its items across the bar (`space-between`).
+- `gutter` bottoms out at 16px, and the display clamps reach their minimums.
+
+**Extension** (app screens on a phone):
+- The app bar keeps the wordmark, "Bounties" and the action at every width. "Verify" hides below 560px.
+- Bounty list rows become two lines up to 900px (below).
+- Chips wrap in their row and are never squeezed.
+- Every tap target is at least 44px tall, using padding or a hit area if the drawn control is smaller.
+- Pages that show the dock add bottom padding equal to the dock's height plus 20px, so the dock never covers the last control.
+
+## Elevation & Depth
+
+- Flat. Depth comes from tone steps: `ground`, then `ground-2`, then `surface`, then `line` on hover.
+- **Float** shadow, used only on things that truly float: the dock and the hero's tiles.
+  `0 1px 0 rgba(255,255,255,.04) inset, 0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.35), 0 24px 60px rgba(0,0,0,.3)`.
+- Backdrop blur (12px) only on the solid nav and the dock. **Skill conflict:** the skill bans glass and shadows. The floating dock and the nav blur are kept by Liam.
+- **Extension:** the posting flow's dock is the app's only floating element. Nothing else gets a shadow or blur.
+
+## Shapes
+
+| Token | Value | Used on |
+| --- | --- | --- |
+| `chip` | 7px | chips, Copy, FAQ + |
+| `sm` | 8px | buttons, dock steps |
+| `mini` | 10px | inline command block |
+| `float` | 12px | dock |
+| `md` | 14px | panels, terminal |
+| `full` | 999px | the hero badge and the story's step pill only |
+
+Focus: a 2px `ok` outline with a 3px offset and a 6px radius. **Skill conflict:** the skill wants buttons square or fully round. The page's 8px is locked.
+
+## Motion
+
+| Name | Value | Used for |
+| --- | --- | --- |
+| `--ease` | `cubic-bezier(0.23, 1, 0.32, 1)` | every transition (one curve) |
+| `--t1` | 160ms | press scale, link colour, FAQ + press |
+| `--t2` | 240ms | fills, panel swap, dock show, FAQ open (`grid-template-rows` 0fr to 1fr), terminal lines |
+| 420ms | | isometric parts moving, the hero's third line |
+| 600ms | | `.rise` reveal: 14px up plus fade, staggered by `--d` (80, 120, 140ms) |
+| 700ms | | chain block tint to muted on pause |
+
+- Press: `transform: scale(0.97)` on buttons, Copy and dock steps; 0.9 on the FAQ +.
+- Terminal results reveal one line at a time: a 120ms start, then 140ms between lines.
+- Copy shows "Copied" for 1600ms.
+- `prefers-reduced-motion`: every duration drops to 1ms, the pulses stop, and everything is shown at once.
+- **Extension:** live data never animates in. A value that changes swaps in place, with a 240ms colour change when it becomes proven.
+
+## Components
+
+### From the page
+
+**Buttons.** `button-primary` is the ink fill; one per view. `button-secondary` is a `surface` fill. Both are 48px tall with 20px side padding. `button-nav` is the 38px version. No outlines, no icons, no arrows. Labels are verbs: "Verify it yourself", "Post a bounty", "Open the app".
+
+**Nav bar.** Fixed, 68px, transparent over the hero, then `nav-solid` with blur after 8px of scroll. It holds the wordmark (a 24px hex-and-bars mark plus "BounTEE" in `wordmark`), links in `ink-2` 16px spaced 26px apart (`ink` on hover), and one `button-nav` on the right. No divider line. **Extension:** on app screens the links are "Bounties" (the list) and "Verify" (the landing page's Verify section), and the action is "Post a bounty". The current page's link turns `ink`. The landing page keeps its own links and "Open the app", which goes to Bounties.
+
+**Testnet badge (Extension, D31).** On the testnet site only, "Testnet" sits 12px (`cta-gap`) right of the wordmark: the `chip`'s shape (`chip` radius, 30px tall, 0 11px) on `ok-wash`, NEAR green at 12%, with `label-sm` in `ink-2`, since it is a word, not data. It links to the mainnet site; on hover the wash rises to 20% and the word turns `ink`. With no mainnet address set it is plain text. It is the only mark of the testnet site, and the testnet nav's Verify goes to the mainnet site's Verify section. The mainnet site links back with a quiet "Try it on testnet" (`body-sm`, `ink-2`), under the bounty list and among the landing footer's links.
+
+**Chips** (30px tall, `data`, `chip` radius, `flex: none; white-space: nowrap`):
+- Transaction: two chips side by side, the chain name (`chip`) and the link (`a.chip`, hover `chip-hover`), with an 11px external-link glyph. Until the transaction exists the link reads "tx pending" and points at the explorer root (nearblocks.io, basescan.org, arbiscan.io).
+- **Extension:** once the transaction exists, the link chip shows its shortened hash (the first 6 characters, "…", the last 4: `0x8f3a…9b2c`, `8Fq3Zk…9xKp`) and links to that transaction on the chain's explorer. The full hash is the link's `title`. After the external glyph, inside the same chip, sits a 12px copy glyph as its own `button` (accessible name "Copy transaction hash", `ink-3`, `ink` on hover). It copies the full hash. For 1600ms it swaps to a check in `ink` and announces "Copied" through an `aria-live` region. The copy action is never green, because copying proves nothing.
+- Verdict or amount: `chip-proven`, e.g. "Verdict PAYS", "10 USDC", "2 of 2 verified".
+- Not yet / not counted: `chip-mute`, e.g. "pending · after 1 day", "Cheat claim: ZERO".
+
+**Terminal.** `term` background, a 1px `line` frame, `md` radius. A bar on top holds `$ command` (the prompt in `ink-3`, not selectable) and Copy, over a 1px `line` rule. The body holds the output in `ink`.
+
+**Command block** (`terminal-mini`): a single line of `$ command` plus Copy, on `term`, used inside panels.
+
+**Landing Verify section (D4, D6).** Text and a command, with no check rows: the heading, a line linking the demo bounty's page (where four checks are read live), a line saying the other three run on your machine, the `bountee verify` command in a command block, and a link to the README's Setup. The check list lives on the bounty page (Verify, below).
+
+**Step panels and the dock.** Steps are numbered "1." to "8.". In a panel the number is `label-md` in `ink-3`, raised 0.5em before the `headline-md` title. The dock floats 20px from the bottom and shows only while its track is in view. Each step is number + label. Done steps turn their number `ok` and their label `ink-2`. The current step is inverted (`ink` fill, `ground` text, number at 60% opacity). Below 900px only the current step keeps its label.
+
+**Proof list.** A `dl` in a two-column grid (`auto 1fr`, 6px × 18px gaps), `body-sm`. Terms in `ink-3`, values in `ink-2`, proven values in `ok`.
+
+**Ledger.** Two columns. Group heads are `label-sm` in `ink-3`. Items are a 52px isometric glyph plus a `title-ledger` title and an `ink-2` sentence, with 18px padding and no dividers.
+
+**FAQ disclosure.** A 1px `line` rule above and below each item. The question is `question` with 22px vertical padding. On the right, a 28px `surface` square holding a 10px +, which turns 45° when open. Answers are `ink-2`, max 36em.
+
+**Badge.** The hero's "Built on NEAR" pill: NEAR mark in `ok`, `label-sm`. It is the only eyebrow (locked). **Skill conflict:** the skill bans eyebrows.
+
+### For the app (Extension)
+
+**Status chip** (one per bounty, from the chip variants): "Live" is `chip`, its word led by a 14px dot of faint NEAR-green Bayer dither in 1px cells that breathes over 2.4s (the Verify halo's, components/DitherHalo.tsx). Like the testnet badge's wash, it is a deliberate exception to green-means-proven (Liam, Nov 11), kept faint so it never reads as a proof; "Paid" is `chip-proven`; "Ended, unclaimed", "Withdrawn" and "Not posted" are `chip-mute`. "Not posted" is a bounty whose posting check failed, so it never took a claim; it is not a red "Check failed" (Nov 10, 2026). A claim in progress has no state and is never shown (R7.7).
+
+**Bounty list.** A plain `<table>` in `wrap`, with no filters or pagination (settled with Liam on Nov 10, 2026). Under the title sit two tabs, "Live" and "Past", each with its count in `ink-3`: a segmented pair on a `ground-2` track, the open one on `surface` in `ink` (never an ink fill: the nav's "Post a bounty" is the view's one ink action). Live holds Live, Checking and Paying ("Current" until Nov 11); Past holds Paid, Ended, unclaimed, Withdrawn and Not posted. Under the tabs, one `body-sm` line in `ink-2` names the contract the list was read from, linked to the NEAR explorer: "Read live from bounty.bountee.near" (R15.6). Each column but Chains sorts the tab: its header is a link, the active one in `ink` with a 12px arrow, and clicking it again flips the order. A column's first click puts the likelier end on top: Bounty A to Z, Pays and Minimum theft highest first, Ends soonest first on Live and latest first on Past. Live opens on Pays, highest first; Past on Ends, latest first. Ties fall back to A to Z. The tab and sort are in the URL (`?tab=past&sort=pays&dir=asc`, defaults left out), so a view can be linked, and all of it works without JavaScript. Switching tab or sort is instant: the page reads the chain once and re-sorts those rows in place, with no new read, no fade on the rows and no shift in the value columns, which keep fixed widths; a tab gives only a press (`scale(0.97)`, 160ms ease-out). The list stays current while open: it re-reads every 15 seconds while the tab is visible and on window focus, updating rows in place with no spinner, so a bounty that ends or pays moves tabs and changes the counts on its own. A failed re-read keeps the rows and shows the error block above them, with the time of the last good read. Past's Ends is the end date the bounty was posted with, so a Withdrawn or Not posted bounty sorts by that date, not by when it stopped. Header row is `label-sm` in `ink-3`, sentence case, no rule, no fill. Each row is a `ground-2` fill with `sm` radius, 56px tall, 2px apart, hover `surface`. There are no row lines (Principle 3). Columns:
+- Bounty: `protocol/name` in `data` `ink`, then the status chip 12px after it, on the title row. It is the widest column, takes whatever width the others leave, ends in an ellipsis rather than widening the table, and links to the bounty page.
+- Chains: 16px chain marks, each naming its chain on hover.
+- Pays and Minimum theft: right-aligned, tabular, "10 USDC". "Minimum theft" in the header is a hint phrase: "Pays only for an exploit that could steal at least this much."
+- Ends: ISO date, right-aligned.
+
+Up to 900px wide (tablets and phones) the headers are hidden, so a "Sort by" select beside the tabs offers the same sorts ("Pays, highest first"), and each row becomes two lines, 72px tall: the bounty and its status chip on line 1; amount · ends · chain marks on line 2, in `body-sm` `ink-2`. The page never scrolls sideways at any width.
+
+**Bounty page** (Nov 11, 2026). A details page for anyone: a Whitehat sizing it up, the Protocol that posted it, a curious reader checking it. All three first ask whether it is real and what is at stake, so the top answers that the same way for everyone; every block below has a plain one-to-three-word heading and shows only in the states it applies to, so the headings alone are the page's outline. Values swap in place; nothing animates in.
+- **Header.** `headline-md` `protocol/name` (breaking after the "/" on a phone), the status chip, then the source line, "Read live from bounty.bountee.near" (R15.6), led by a 6px `ink-3` dot that flashes once (900ms, a fading ring) each time a fresh read lands, every 15 s. Never green: a read proves nothing by itself. No status sentence under the title: the chip is the state (GLOSSARY: Live means the posting check passed), and a line restating it is redundant (Liam, Nov 11).
+- **Summary.** Under an `h2` "Summary", like every block on the page, one `ground-2` band of labelled figures, type, never tiles: Pays (Paid once paid, Bounty when Withdrawn or Not posted) and Minimum theft in `title` Newsreader, the largest figures on the screen; Covers ("2 contracts"; "Covered" once Withdrawn, "Named" when Not posted; the chains are named in the rows below); Ends (Ended once past; gone once a claim has won, Paying or Paid); Claims judged (D22). Not posted keeps only the first three. Labels `label-sm` `ink-3`; Minimum theft and Claims judged are Hint phrases with their dotted underline at every width. No green in the band. Two columns up to 900px.
+- **Low pause gas** (Live only): the warning below stands under the figures, the one thing the Protocol must act on.
+- **Winning claim** (Paid): a ticket and its stub, built from the Summary band's parts: two `ground-2` parts 3px apart, torn by two 11px notches cut into their facing edges (cut-outs, never a drawn line; on a phone the stub sits under the ticket and the notches move to its top). The ticket holds three labelled fields: Paid ("3 USDC on NEAR" on one line, all in `title` Newsreader, "on NEAR" in `ink-2`, with NEAR's N mark as the landing badge draws it, in `ink`, at the capitals' height; under it the payout's hash as one link chip in `ok`, with no copy button), To (the Whitehat's account chip) and Proven on (chain chip and block chip, D28). The stub, no taller than the ticket, holds Exploit: one `body-sm` line, "Anyone can make it public from <date>." ("…now." with a `bountee publish` command block; "It is public." with its tx), then "Open the winning exploit" at `button-nav` size. **Payout** (Paying): only "tx pending", since until the payout an earlier claim can still take the win, and naming why it waits would show a claim in progress (R7.7).
+- **Why it wasn't posted** (Not posted): "The check failed on 2 of 2 contracts." (or "The check couldn't run."), what came back to the Protocol once the USDC transfer is read, "The posting fee paid for the check.", and `button-secondary` "Post again under a new name". Each contract's reason sits on its own row below.
+- **Covered contracts** ("Named at posting" when Not posted or Withdrawn): a table built like the bounty list, `label-sm` `ink-3` column headers (Chain, Contract address, and Posting check when it failed) over `ground-2` rows 56px tall and 2px apart, no lines. Rows lift to `surface` on hover, as on the list. One row per contract: its chain mark and full name, its address as a link chip to the explorer, and, Not posted only, the check's reason ("The pause can't be sent") or "Passed".
+- **Pauses** (Paying and Paid, once a pause is signed): the per-chain pause rows (below).
+- **Rules** (all but Not posted): under the heading, outside the panel, a one-line summary in `ink-2`, "Locked at posting. Nobody can change these rules or upgrade the contract.", which stays in view when the rules are folded. Then one `panel` holding a ledger without glyphs, three columns (one up to 900px): a `label-md` title over one `ink-2` sentence in everyday words, never repeating the figures: What wins, What counts (each listed token priced above zero, by the symbol its chain reports, as a link chip), What doesn't, Freshness, Payout, No winner (Checking, Live and Ended, unclaimed: "Nobody won, so the Protocol can take the reward back." once ended), Disclosure, Trusted (the README's parties in one sentence, linked to its table, two columns wide). Folded under its heading once Paid or Withdrawn, opening as the FAQ does.
+- **Verify** (always, D6): R15.1's seven checks split by where they can run. Under the heading, the summary "Seven checks show this bounty ran by its rules." Then one `panel` in two labelled parts, each a `label-md` title over one `body-sm` `ink-2` line. "On chain" ("Read live from each chain, in the order they happen."): the five checks that are a bounty's events in the order they happen (Enclave attestation, Payout on NEAR, Pauses landed, Pauses verified on NEAR, Re-run of the published exploit) as a timeline: "4 of 5 proven" in `title` Newsreader (the count `ok` only above zero, failures after it in `fail`), one connected line with a 12px node per check. A node fills `ok` (or `fail`) once read, one after another, 120ms then 140ms apart; the line between two passed checks turns `ok`; the furthest proven node wears a halo of the landing hero's 4×4 Bayer dither in 2px cells that breathes out and back over 2.4s and never fades to nothing (grey on the first node until a check passes, so green never marks what isn't proven; one still frame under reduced motion; paused off screen). Under each node: its number and name, its state in plain words (Pass in `ok`, Fail in `fail`, Not yet run in `ink-3`), then for a passed or failed check its detail and links, and for one not yet run when it will run ("Once a claim wins.", "30 days after the payout."). On a Withdrawn or Not posted bounty these checks can never pass: they read "Won't run" with the reason ("The bounty was withdrawn with no winner.", "The bounty never opened.") and no node wears the halo. Up to 900px the line runs down the left. Then "On your machine" ("These rebuild the code from source, so they run only with the command below."): the two (Contract code matches source, Judge build is the one that ran) as `ground` rows with their state, and the `bountee verify` command block with Copy.
+
+**Per-chain pause state.** In the Pauses block, one `panel` row per covered chain: chain mark and full name, then three steps, "1. Signed", "2. Landed", "3. Verified", drawn as a small timeline like Verify's: a 12px node per step that fills `ok` only once that fact is on chain (R7.7), and the line between two done steps turned `ok`; the numbers stay `ink-3`. Up to 900px the line runs down the left. Each finished step carries its transaction chip pair, with no copy button: the link and its full-hash title are enough (Liam, Nov 11). When a pause is signed but hasn't landed, the row shows `button-primary` "Send pause" (R7.9; no wallet). While it sends, the label reads "Sending" and the button is disabled. Once sent, the tx chip appears under "2. Landed", which waits for the receipt.
+
+**Low pause-gas warning** (D8). A `warn-wash` block with `sm` radius and 16px padding: under the figures on a Live bounty with nothing signed, or inside the affected chain's pause row once a pause is signed. Nowhere else: on an ended or closed bounty pause gas no longer matters. It opens with a `chip-warn` "Low pause gas". Under it, one `body-sm` sentence in `ink` gives both numbers, read live, in the form "Pause gas on Base: <held> ETH. A pause needs <needed> ETH. The Protocol can top up the address that sends the pause. The payout doesn't depend on it." ("The signed pause needs" once one is signed.) The address follows as a command block with Copy.
+
+**Forms** (posting flow, open-exploit). Label above the field, `label-sm` in `ink-2`, 8px gap. The field is a `surface` fill with no border, `sm` radius, 48px tall to match the buttons, `body-md` text in `ink`, and the 2px `ok` focus ring. Fields are 16px apart. Help text is `body-sm` in `ink-3` under the field. Addresses and ids are typed in `data`. Disabled controls stay legible and say why in a line beneath.
+
+**Posting flow** (#31). The flow's steps are the dock's steps: the dock floats at the bottom and moves between them, with done steps' numbers turning `ok` only once their transaction lands. The steps, settled with Liam on Nov 10, 2026: **Set rules**, **Set up pause**, **Add funds**, **Post bounty**. Each label starts with a verb, so the dock reads as a to-do list, and the step's heading uses the same words. Set up pause holds both the grants and the pause gas, since both act on the one pause-role address; Add funds asks for everything the posting costs (the bounty's USDC and the NEAR fees) in one place, right before posting. Continue never waits on a chain: Post bounty checks everything anyway. The coverage limit (R4.12) is one `body-sm` sentence above the covered-contracts rows: "Each needs a pause() you can grant. Only contracts that pay callers nothing can be covered, so no liquidations."
+
+**Posting checklist** (D5, D14, D17, D20). Numbered items "1." onward, laid out like the per-chain pause rows. Each item has:
+- Its number, which turns `ok` once the item lands on chain.
+- A `title`, with the item's state at the right of the same row ("not granted", "ready", "received"), `ok` only once proven on chain.
+- At most one short line in `ink-2`; the longer why sits in a hover tooltip on its key phrase. The pause-gas tooltip is D5's, word for word in meaning.
+- A primary action, e.g. "Grant". Only the next thing to do on the page is `ink`.
+- "Copy for multisig" as `button-secondary`, only where there is a grant transaction to copy.
+- The tx chip once it lands.
+
+Set up pause has one card per chain, holding a row per covered contract's grant and a row for that chain's pause gas, split by a `line` hairline. Add funds shows the Protocol's `0x…` account in a command block with Copy, then the bounty's USDC and the NEAR fees as items. Post bounty's first item is the exploit key, whose action is "Sign with your wallet". If the two signatures differ, the item shows one `ink` sentence saying so and offers a key-file field in its place (D20).
+
+**Wallet picker** (D34, ADR-0022). "Connect wallet" in Set up pause and "Open with your wallet" on the open-exploit page open RainbowKit's connect modal; the app draws no other wallet UI and no account chip in the nav. The modal is RainbowKit's compact one, in its dark theme set to our tokens: `surface` background, `ink` text, `ink` accent with `ground` text on it, `line` borders, the body font, `rounded.sm` corners. It lists only the wallets ADR-0022 names (Brave Wallet only in Brave), with one line beneath: "Only wallets that can sign on NEAR are shown."
+
+**"What you're risking" panel** (D15). A `panel` in the right column, built as the ledger without glyphs: `title-ledger` items, each with one sentence, listing D15's points and the R15.5 trusted parties. It stays in view beside the final two prompts. On a phone it sits directly above the two prompts.
+
+**Open-exploit page** (#32). Before payout, one sentence: "This exploit opens once the Whitehat is paid." After payout, one sentence, "Only the Protocol that posted this bounty can open it, with the wallet it posted from.", then `button-primary` "Open with your wallet". The opened exploit shows in a terminal with Copy, followed by the line: "Unpausing is up to your own governance."
+
+**Empty, loading, error.**
+- Empty keeps the block's frame and heading and adds one `ink-2` sentence ("No bounties are live.").
+- Loading keeps the final layout, with each value replaced by a flat `surface` bar of its real height. No shimmer, and no layout shift when the data lands. On the bounty page the bars breathe (opacity 0.45 to 1 over 1.6s), staggered 110ms left to right, and every block that most states show keeps its frame and heading while it waits, Rules included (Liam, Nov 11: an animated loader, never a gradient).
+- Error appears inside the block that failed: a `chip-fail` naming what failed ("Couldn't read Base"), one `ink-2` sentence saying when the data was last good, and a `button-secondary` "Retry". Never a full-page banner.
+- A real zero is printed ("0 claims judged"). A missing value is an `ink-3` en dash.
+
+## The isometric world
+
+**When.** On the landing page only: the story, the trust glyphs, the "You, or your agent." glyphs, and the close. The app's own screens (list, bounty page, posting flow, open-exploit) don't draw it. Whether the bounty page should is still open (see Open questions).
+
+**Projection.** `K = cos 30°`, `S = 20` px per unit. A point `(x, y, z)` maps to `[(x − y)·K·S, ((x + y)/2 − z)·S]`. SVG only, sized with `viewBox` and fit to the bounding box plus 12px (2px for glyphs). Text on a face uses the face's matrix (`onTop`, `onLeft`, `onRight`).
+
+**Primitives.**
+- `box`: three faces, plus a highlight on the near edge at `rgba(255,255,255,.2)`, 0.8px wide.
+- `cyl`, `sphere`, and `pad`: a 1px floor outline, `#444547`, which turns `#00ec97` when that object is proven.
+- `bus`: 2–3 parallel 1px traces, `#333435`, `#858688` when active, with via dots.
+- `field`: a seeded circuit of `#262728` traces, fading out radially, with `#858688` pulses at 55% opacity, 5–10s each.
+- `lock`, `packet` (sealed, coin, pause, ok, plain), and `groundText` (Switzer 13/500 `ink-3`).
+
+**Materials** (top / left / right faces):
+
+| Material | Top | Left | Right | Is |
+| --- | --- | --- | --- | --- |
+| bone | `#dfe1e3` | `#b6b7b9` | `#8d8f90` | the Enclave, sealed things |
+| stone | `#414244` | `#303132` | `#252627` | bases, the bounty vault |
+| graph | `#5b5c5e` | `#444547` | `#343536` | machines, the MPC nodes, the agent |
+| clay | `#afb0b2` | `#8f9092` | `#6d6f71` | the person |
+| ok | `#4cf0a3` | `#25bd7b` | `#03965f` | proven things only: coins, the pause lid, signatures |
+
+Screens and panels on objects are `#19191a`.
+
+**Tags.** A rounded rect (radius 7) with a 6px pointer, fill `rgba(24,24,25,.94)`, 1px `#424345` outline. The title is `diagram-title` in `ink`. The state below it is `diagram-data`: `ink-3` normally, `ink-2` while acting (outline `#727375`), `ok` once proven (outline `rgba(0,236,151,.55)`). A 3px dot at the right repeats the colour. States are lowercase data: "10 USDC locked", "verdict PAYS", "paused · verified".
+
+**Chains and the pause.**
+- A live chain block wears its brand colours. Base faces are `#0000ff`, `#0000d0`, `#0000a2`, with `#3c8aff` ledger lines. Arbitrum One faces are `#213147`, `#1a2739`, `#131d2b`, with `#1b4add` lines.
+- When its pause lands, the faces and lines mute to grey over 700ms: `mute(c) = (c·0.08 + L·0.92)·0.42 + 30·0.58` per channel, where `L` is the Rec. 709 luma.
+- Then a green `ok` lid drops 26px onto the block, carrying two `#00653e` pause bars, and the pad turns green.
+- A block shows paused only once the pause has landed. "Verified" is a tag state, set only once NEAR records it (R7.7).
+
+**Brand marks.**
+- **Base:** the official Square, unaltered: white on the Base Blue block, and in blue, white or black only. No effects, no transparency.
+- **Arbitrum One:** the official all-white logomark on Navy, unaltered, with no drop shadow.
+- **NEAR:** the N mark in white, as near.org draws it, on the bounty contract and the MPC slab. NEAR green marks proofs.
+- **Wordmarks on dark:** `Base_lockup_blue_dark.svg` and `Arbitrum_One_horizontal_blue_dark.svg`. These are Liam's colour versions; neither kit ships them. The compliant alternative is the full-colour primaries on a light tile.
+- Sources and caveats are recorded in `BRAND-SOURCES.md` beside the landing page. Never draw or name a chain BounTEE can't pause.
+
+## Voice and copy
+
+- Sentence case everywhere, buttons included. No eyebrows, except the locked hero badge "Built on NEAR".
+- No emoji. No "!" in UI text. No marketing adjectives.
+- Roles are capitalised as in `GLOSSARY.md`: Protocol, Whitehat, Verifier, Enclave, MPC network. The Whitehat is the role, and the AI agent is how one acted: "a Whitehat's AI agent, with a claim key". Payouts go to the Whitehat, never to a key.
+- Step numbers are written "1." "2." "3.", never "01", never "Step 2".
+- Transactions are written as a chain chip plus a link. Once the transaction exists, the link shows the shortened hash and has a copy button. Before then, it says "tx pending" and points at the explorer root: nearblocks.io for NEAR, basescan.org for Base, arbiscan.io for Arbitrum One. Pending states give their reason after a middle dot: "pending · after 1 day".
+- Chain names are written in full: "Arbitrum One", never "Arbitrum" or "Arb". Amounts are written "10 USDC". Chains are listed as "NEAR, Base and Arbitrum One".
+- "Paused" means the pause transaction succeeded on that chain. Use "verified" only for what NEAR's MPC network confirmed. Never imply anything about the contract's code.
+- Mainnet only. No "testnet", "Sepolia", "rehearsal" or network toggle in any mainnet build (RainbowKit's own chain metadata table aside, ADR-0022). The network is a build setting, not a control. D17's faucet link exists only in the testnet build, the second site for trying BounTEE (ADR-0021).
+- Wallets: "Posting connects your wallet. Reading and verifying never do." Name no wallet brand in copy; say "your wallet". No wallet prompt on public pages.
+
+## Do's and Don'ts
+
+| Don't | Do instead |
+| --- | --- |
+| Hairline dividers between sections, rows, nav, footer or columns | A tone step (`ground-2` panel) or space. Lines only inside the terminal and the FAQ list. |
+| Outlined or dashed chips and buttons | Filled: `surface`, `ok-wash`, `ground-2`. |
+| Arrows or icons in buttons | The verb alone. The only glyphs are inside tx chips: the 11px external link and the 12px copy. |
+| Red or amber on anything but the failing or low fact | `fail` and `warn` on that one word or chip; the rest of the block stays ink. |
+| Mono for labels, step numbers, cues, headings | Switzer. Mono only for machine-readable data. |
+| Green on a button, a link, a heading accent or anything not yet proven | `ink` for actions; green only once proven. The hero's "paid." is the one locked exception. |
+| Glows, neon, coloured shadows | Tone steps. The float shadow only on what floats. |
+| Gradients | Flat fills. Locked exceptions: the hero background's fade and the hero cue line. |
+| New font sizes | The scale above. |
+| "01", "Step 2", "(001)" | "1." |
+| Showing a claim in progress, or "landed" or "verified" before the chain says so | The R7.7 states, read live. |
+| Typed or hard-coded values shown as fact | Read from the chain (R15.6). |
+| Solana or any chain BounTEE can't pause | NEAR, Base, Arbitrum One. |
+| Skeleton shimmer, full-screen error banners, emoji in empty states | Flat bars at real size; one sentence in the failed block. |
+
+## Open questions
+
+1. **Isometric world on the bounty page.** Liam is open to it but undecided. Until then the bounty page doesn't draw it. If it's wanted, try A/B/C variations as a throwaway prototype first, not in the app.
+2. **Posting flow steps.** The dock moves between them (decided). The exact steps and their order get settled when #31 starts.

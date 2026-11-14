@@ -12,13 +12,13 @@
 //   as is a payout left waiting (`retry_payout`) or a claim with no verdict (`retry_claim`):
 //   each as the command the Whitehat runs.
 import { readFileSync } from "node:fs";
-import { parseReplay, RECENCY_LIMIT_SECS, type Replay, type Verdict } from "@bountee/formats";
+import { parseReplay, RECENCY_LIMIT_SECS, type BlockRef, type BountyId, type Replay, type Verdict } from "@bountee/formats";
 import { broadcastCommand, type BroadcastResult } from "./broadcast.ts";
 import { rpc } from "./proofs.ts";
-import { proofRpcs } from "./chains.ts";
+import { chainLabel, proofRpcs } from "./chains.ts";
 import { testCommand, type TestOptions, type TestResult } from "./test.ts";
 import { verifyPauses, type VerifyResult } from "./verify-pause.ts";
-import { Near, events, formatNear, milliNear, tgas } from "./near.ts";
+import { Near, events, formatNear, milliNear, roundUpNear, tgas, type PricedCall } from "./near.ts";
 import { signPauses } from "./payout.ts";
 
 /** Time a claim needs from here to `submit_claim` recording its submission time. */
@@ -34,44 +34,127 @@ export interface PreparedClaim {
   test?: TestResult;
 }
 
-async function blockTimestamp(chainId: number, number: number, rpcUrl?: string): Promise<number> {
-  const urls = rpcUrl ? [rpcUrl] : proofRpcs(chainId);
+/**
+ * The claim's block's timestamp, from its chain's RPCs (or `rpcUrl`). Only an RPC that holds that
+ * very block (its hash) answers, so an RPC of another chain, given with --proof-rpc, can't
+ * pass a block off as recent (R2.8).
+ */
+async function blockTimestamp(block: BlockRef, rpcUrl?: string): Promise<number> {
+  const urls = rpcUrl ? [rpcUrl] : proofRpcs(block.chain_id);
+  const errors: string[] = [];
   for (const url of urls) {
     try {
-      const b = await rpc<{ timestamp: string }>(url, "eth_getBlockByNumber", [`0x${number.toString(16)}`, false]);
+      const b = await rpc<{ hash: string; timestamp: string }>(url, "eth_getBlockByNumber", [`0x${block.number.toString(16)}`, false]);
+      if (b.hash !== block.hash) throw new Error(`its block ${block.number} is ${b.hash}, not the claim's (is it ${chainLabel(block.chain_id)}'s RPC?)`);
       return Number(BigInt(b.timestamp));
-    } catch {
-      // next RPC
+    } catch (e) {
+      errors.push(`${url}: ${(e as Error).message}`);
     }
   }
-  throw new Error(`no RPC answered for block ${number} of chain ${chainId}`);
+  throw new Error(`no RPC holds block ${block.number} of ${chainLabel(block.chain_id)}:\n${errors.join("\n")}`);
+}
+
+/** A job `bountee test` saved (`--out`), read from `path`. */
+export interface SavedJob {
+  path: string;
+  replay: Replay;
+}
+
+/** The job saved at `path`, parsed: the claim's block, header, proofs and exploit, and the rules it was judged under. */
+export function readJob(path: string): SavedJob {
+  return { path, replay: parseReplay(JSON.parse(readFileSync(path, "utf8")).replay) };
 }
 
 /**
  * The inputs to claim with: those `test` saved in `job` if still recent enough, else a fresh
  * `test` run of `script`. What is submitted is exactly the saved job's block, header and proofs.
  */
-export async function prepareClaim(o: { job?: string; test?: TestOptions; rpc?: string }): Promise<PreparedClaim> {
+export async function prepareClaim(o: { job?: SavedJob; test?: TestOptions; rpc?: string }): Promise<PreparedClaim> {
   const usable = (age: number) => age + SUBMIT_MARGIN_SECS < RECENCY_LIMIT_SECS;
   if (o.job) {
-    const replay = parseReplay(JSON.parse(readFileSync(o.job, "utf8")).replay);
-    const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.rules.proof_chain, replay.block.number, o.rpc));
+    const { replay, path } = o.job;
+    const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.block, o.rpc));
     if (usable(age) || !o.test) {
-      if (!usable(age)) throw new Error(`${o.job} is ${age} s old: re-run \`bountee test\` (claims must be under ${RECENCY_LIMIT_SECS} s)`);
-      return { replay, local: null, saved: o.job, block_age_secs: age, reran: false };
+      if (!usable(age)) throw new Error(`${path} is ${age} s old: re-run \`bountee test\` (claims must be under ${RECENCY_LIMIT_SECS} s)`);
+      return { replay, local: null, saved: path, block_age_secs: age, reran: false };
     }
   }
   if (!o.test) throw new Error("claim needs a Foundry script or a saved job (--job)");
   const result = await testCommand(o.test);
-  const replay = parseReplay(JSON.parse(readFileSync(result.saved, "utf8")).replay);
-  const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.rules.proof_chain, replay.block.number, result.rpc));
+  const { replay } = readJob(result.saved);
+  const age = Math.floor(Date.now() / 1000) - (await blockTimestamp(replay.block, result.rpc));
   if (!usable(age)) throw new Error(`the test took too long: its block is already ${age} s old`);
   return { replay, local: result.verdict, saved: result.saved, block_age_secs: age, reran: o.job !== undefined, test: result };
 }
 
-/** The size of a claim's job input (contract `claims.rs` `judge_input`): its proofs, header and block, with room for the rules and the rest. */
-export function claimInputBytes(proofsJsonBytes: number, headerBytes: number, blockJsonBytes: number): number {
-  return proofsJsonBytes + headerBytes + blockJsonBytes + 4096;
+/**
+ * The size of a claim's job input, built as the contract builds it (contract `claims.rs`
+ * `judge_input`): the bounty's rules, the claim's bounty, Whitehat, block and header, and its
+ * proofs embedded as a JSON string, so every quote in them is escaped. The job's deposit and the
+ * gas the claim attaches follow it (R11.2), so it is measured, not estimated; 64 bytes of margin
+ * cover number formats. `rules` and `block` are as the contract's views return them.
+ */
+export function claimInputBytes(o: { rules: unknown; bounty: BountyId; whitehat: string; block: unknown; header: string; proofsJson: string }): number {
+  const input = {
+    judge_claim: {
+      rules: o.rules,
+      bounty: o.bounty,
+      whitehat: o.whitehat,
+      block: o.block,
+      header: o.header,
+      proofs_json: o.proofsJson,
+      submitted_at_ns: "0".repeat(19),
+    },
+  };
+  return Buffer.byteLength(JSON.stringify(input)) + 64;
+}
+
+/**
+ * An upper bound on a claim's job input before its proofs exist (a run's budget): the proofs'
+ * size with a tenth more for their escaped quotes, the header and block, and 8 KiB for the rules
+ * and the rest.
+ */
+export function claimInputBound(proofsJsonBytes: number, headerBytes: number, blockJsonBytes: number): number {
+  return Math.ceil(proofsJsonBytes * 1.1) + headerBytes + blockJsonBytes + 8192;
+}
+
+/** The most gas one NEAR transaction may attach (protocol 88, mainnet and testnet). */
+export const MAX_TX_GAS = 1_000_000_000_000_000n;
+
+/**
+ * The gas a claim attaches to a contract built before it named a claim's gas by size (#35):
+ * such a contract (bounty3.bountee.testnet, 7b59e73) names only `min_claim_gas` (200 Tgas), and
+ * its claims were filed and rehearsed at this. It passes what is left on to the claim's job, and
+ * signs the pauses in the same transaction only when enough remains (about 170 Tgas plus 20 per
+ * covered contract): a two-contract bounty does, a much wider one's PAYS waits for `sign_pauses`,
+ * which `claim` then sends.
+ */
+const CLAIM_GAS_BEFORE_SIZE_RULE = 300_000_000_000_000n;
+
+/**
+ * The gas a claim (or a retry) attaches: what `contract`'s `fees()` names for a job input of
+ * `inputBytes` (an upper bound, `claimInputBytes`) on a bounty covering `covered` contracts, so
+ * its job is requested and a PAYS signs every pause in the same transaction (R11.2). A contract
+ * keeps the rule it was built with (none can be upgraded), so the tool reads whichever one its
+ * `fees()` publishes: the size rule, or a contract from before it the gas its claims were
+ * rehearsed at. Refused, before any fee, when it names neither or no transaction can carry it.
+ */
+export function claimGas(fees: any, inputBytes: number, covered: number, contract: string): bigint {
+  let gas: bigint;
+  if (fees.claim_gas_base !== undefined) {
+    gas =
+      BigInt(fees.claim_gas_base) +
+      BigInt(covered) * BigInt(fees.claim_gas_per_covered_contract) +
+      BigInt(inputBytes) * BigInt(fees.claim_gas_per_input_byte);
+  } else if (fees.min_claim_gas !== undefined) {
+    gas = CLAIM_GAS_BEFORE_SIZE_RULE;
+  } else {
+    throw new Error(`${contract}'s fees() names no claim gas (neither claim_gas_base nor min_claim_gas), so the tool can't tell what a claim must attach (nothing was spent)`);
+  }
+  if (gas > MAX_TX_GAS) {
+    throw new Error(`this claim's proofs are too large to file: it needs ${gas / 1_000_000_000_000n} Tgas, more than a transaction's ${MAX_TX_GAS / 1_000_000_000_000n}`);
+  }
+  return gas;
 }
 
 /** What `submit_claim` will draw from the claim balance (contract `claims.rs`), with slack. */
@@ -82,11 +165,47 @@ export function claimCost(fees: any, inputBytes: number, sealedBytes: number): b
   return BigInt(fees.job_deposit) + (hold + secret + 2048n) * perByte + milliNear(10);
 }
 
+/** The gas `ensureClaimBalance`'s top-up attaches, which `checkClaimNear` prices. */
+const TOP_UP_GAS = tgas(30);
+
+/** What `whitehat`'s claim balance lacks of `cost` on `contract`. */
+async function claimBalanceShort(near: Near, contract: string, whitehat: string, cost: bigint): Promise<{ have: bigint; add: bigint }> {
+  const have = BigInt(await near.view<string>(contract, "claim_balance", { account_id: whitehat }));
+  return { have, add: have >= cost ? 0n : cost - have };
+}
+
+/**
+ * Before a claim spends anything (#57): the Whitehat holds, free of its storage stake, what its
+ * claim balance lacks of `cost` and the gas both calls attach (the top-up's and `call`'s, which
+ * NEAR takes up front and refunds once unused); and a claim key's allowance covers `call`'s gas.
+ * A claim key can't top up, so for one only `call` is priced: `ensureClaimBalance` refuses a short
+ * claim balance with its own message.
+ */
+export async function checkClaimNear(near: Near, contract: string, whitehat: string, cost: bigint, call: PricedCall): Promise<void> {
+  const claimKey = await near.signsWithFunctionCallKey(whitehat);
+  const add = claimKey ? 0n : (await claimBalanceShort(near, contract, whitehat, cost)).add;
+  const callNear = await near.upfrontNear([call]);
+  const need = roundUpNear(add > 0n ? await near.upfrontNear([{ method: "top_up_claim_balance", gas: TOP_UP_GAS, deposit: add, argsBytes: 2 }, call]) : callNear);
+  const free = (await near.freeNear(whitehat)) ?? 0n;
+  if (free < need) {
+    throw new Error(
+      `${whitehat} holds ${formatNear(free)} NEAR free of its storage stake and this claim needs ${formatNear(need)} in hand ` +
+        `(what the claim balance lacks, and the gas its calls attach, refunded once unused): add ${formatNear(roundUpNear(need - free))} NEAR (nothing was spent)`,
+    );
+  }
+  const allowance = claimKey ? await near.keyAllowance(whitehat) : null;
+  if (allowance !== null && allowance < callNear) {
+    throw new Error(
+      `the claim key's allowance holds ${formatNear(allowance)} NEAR and ${call.method} takes ${formatNear(roundUpNear(callNear))} of it up front: ` +
+        `add a claim key with a larger --allowance (nothing was spent)`,
+    );
+  }
+}
+
 /** Top the Whitehat's claim balance up to `cost` if it's short. Returns the amount added. */
 export async function ensureClaimBalance(near: Near, contract: string, whitehat: string, cost: bigint): Promise<bigint> {
-  const have = BigInt(await near.view<string>(contract, "claim_balance", { account_id: whitehat }));
-  if (have >= cost) return 0n;
-  const add = cost - have;
+  const { have, add } = await claimBalanceShort(near, contract, whitehat, cost);
+  if (add === 0n) return 0n;
   // A claim key (#25) can't attach a deposit: the Whitehat tops up from their own key.
   if (await near.signsWithFunctionCallKey(whitehat)) {
     throw new Error(
@@ -94,7 +213,7 @@ export async function ensureClaimBalance(near: Near, contract: string, whitehat:
         `Ask the Whitehat to add ${formatNear(add)} NEAR or more (top_up_claim_balance on ${contract}, signed with their own key).`,
     );
   }
-  await near.account(whitehat).callFunction({ contractId: contract, methodName: "top_up_claim_balance", args: {}, deposit: add, gas: tgas(30) });
+  await near.account(whitehat).callFunction({ contractId: contract, methodName: "top_up_claim_balance", args: {}, deposit: add, gas: TOP_UP_GAS });
   return add;
 }
 

@@ -1,7 +1,8 @@
 // `bountee test`: judge a Whitehat's Foundry script locally against the proof chain as it is
 // now (ticket #11; D2, D3, R2.9, R4.5).
 //
-// 1. Pick a recent block of the proof chain from an ordinary public RPC.
+// 1. Pick a recent block of the proof chain, the covered chain `--chain` names (D26), from an
+//    ordinary public RPC.
 // 2. Fork the chain at that block with anvil, give a fresh account the bounty's seed, and
 //    dry-run the script as that account; its broadcast log becomes the shared Exploit.
 // 3. Prove every account and slot the replay reads, from the same public RPC (proofs.ts).
@@ -14,19 +15,19 @@
 // offline.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { parseReplay, parseRules, toJson, type Exploit, type Rules, type Verdict } from "@bountee/formats";
-import { parseBountyId } from "./bounties.ts";
-import { proofRpcs } from "./chains.ts";
+import { parseReplay, parseRules, toJson, type BlockRef, type Exploit, type Rules, type Verdict } from "@bountee/formats";
+import { parseBountyId, proofChain } from "./bounties.ts";
+import { chainLabel, proofRpcs } from "./chains.ts";
 import type { Near } from "./near.ts";
 import { collectReplay, exploitFromBroadcast, rpc, runJudge } from "./proofs.ts";
 
 /** How far behind the head the claim's block is: a few seconds, since a public RPC can fail on the very latest. */
-const BLOCKS_BEHIND = 3;
+export const BLOCKS_BEHIND = 3;
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -39,18 +40,21 @@ export interface TestOptions {
   block?: number;
   judge?: string;
   contract?: string;
+  /** The covered chain to prove on (`--chain`, through `parseChain`); optional on a one-chain bounty (D26). */
+  chain?: number;
   /** The NEAR network a bounty id is read from. */
   near: Near;
 }
 
 export interface TestResult {
   verdict: Verdict;
-  block: { number: number; hash: string };
+  block: BlockRef;
   attacker: string;
   rpc: string;
   transactions: number;
   proofs: number;
   saved: string;
+  judge: JudgeUsed;
   diagnostics: string[];
 }
 
@@ -77,8 +81,11 @@ async function loadRules(o: TestOptions): Promise<Rules> {
 
 // ---- Local processes ---------------------------------------------------------------------------------
 
-function run(cmd: string, args: string[], cwd: string, env: Record<string, string> = {}) {
-  const res = spawnSync(cmd, args, { cwd, encoding: "utf8", env: { ...process.env, ...env }, maxBuffer: 64 << 20 });
+/** Run `cmd`; `env` adds variables, and an `undefined` one is removed from the environment. */
+function run(cmd: string, args: string[], cwd: string, env: Record<string, string | undefined> = {}) {
+  const merged: Record<string, string | undefined> = { ...process.env, ...env };
+  for (const k of Object.keys(merged)) if (merged[k] === undefined) delete merged[k];
+  const res = spawnSync(cmd, args, { cwd, encoding: "utf8", env: merged, maxBuffer: 64 << 20 });
   if (res.error) throw new Error(`${cmd}: ${res.error.message}`);
   if (res.status !== 0) throw new Error(`${cmd} ${args[0]} failed:\n${res.stdout}\n${res.stderr}`.trim());
   return res.stdout;
@@ -95,12 +102,71 @@ function freePort(): Promise<number> {
   });
 }
 
-export function judgeWasm(o: { judge?: string }): string {
+/**
+ * The judge a local replay runs: `--judge`, else the checkout's default build. That build is
+ * rebuilt on every use (a no-op when nothing changed), so it never lags the sources, and it is
+ * pinned to the default contract whatever the caller exported, since the judge reads
+ * BOUNTEE_BOUNTY_CONTRACT at build time. It is never a bounty's pinned build: only `bountee build`
+ * reproduces that one (#80).
+ */
+export function judgeWasm(o: { judge?: string } = {}): string {
   if (o.judge) return resolve(o.judge);
   const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
-  const wasm = `${repo}target/${target}/release/bountee-judge.wasm`;
-  if (!existsSync(wasm)) run("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], repo);
+  run("cargo", ["build", "--release", "-p", "bountee-judge", "--target", target], repo, { BOUNTEE_BOUNTY_CONTRACT: undefined });
+  // Cargo replaces its output by unlinking and linking it again on every build, even one that
+  // changed nothing, so a build running alongside (another test, another command) can leave it
+  // missing for an instant. The tool therefore runs a copy named by its sha256, written whole
+  // and renamed into place, which no build touches; the bytes read are always whole.
+  const bytes = readWhole(`${repo}target/${target}/release/bountee-judge.wasm`);
+  const dir = `${repo}target/judges`;
+  const wasm = `${dir}/${createHash("sha256").update(bytes).digest("hex")}.wasm`;
+  if (!existsSync(wasm)) {
+    mkdirSync(dir, { recursive: true });
+    const part = `${wasm}.${randomBytes(8).toString("hex")}.part`;
+    writeFileSync(part, bytes);
+    renameSync(part, wasm);
+  }
   return wasm;
+}
+
+/** A file cargo may be relinking: absent for an instant, never partial. */
+function readWhole(path: string): Buffer {
+  for (let tries = 0; ; tries++) {
+    try {
+      return readFileSync(path);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT" || tries >= 200) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+}
+
+/** The compiled judge a replay ran, and whether it is the very build the bounty pins (the one the enclave runs). */
+export interface JudgeUsed {
+  wasm: string;
+  sha256: string;
+  bounty_build: string;
+  same_as_bounty: boolean;
+}
+
+export function judgeUsed(wasm: string, bountyBuild: string): JudgeUsed {
+  const sha256 = createHash("sha256").update(readFileSync(wasm)).digest("hex");
+  return { wasm, sha256, bounty_build: bountyBuild, same_as_bounty: `0x${sha256}` === bountyBuild };
+}
+
+/** The judge lines `test` and `rerun` print: which build ran, and whether a verdict from it speaks for the enclave. */
+export function formatJudge(j: JudgeUsed): string[] {
+  return [
+    `judge:   ${j.wasm} (sha256 ${j.sha256})`,
+    ...(j.same_as_bounty
+      ? ["         the bounty's pinned build: the program the enclave runs"]
+      : [
+          `         not the bounty's pinned build ${j.bounty_build}, so this verdict doesn't speak for the enclave's`,
+          "         program (a checkout's default build never is one: it answers to the default contract and records",
+          "         where it was built); bountee verify rebuilds the pinned build and re-runs under it, or build it with",
+          "         bountee build --contract <contract> --rev <the commit its metadata names> and pass it with --judge",
+        ]),
+  ];
 }
 
 /** The Foundry project holding the script: the nearest directory with a foundry.toml. */
@@ -120,21 +186,21 @@ function freshAccount(root: string): { key: string; address: string } {
 
 // ---- Steps ---------------------------------------------------------------------------------------------
 
-async function pickRpc(rules: Rules, o: TestOptions): Promise<{ urls: string[]; block: number }> {
-  const urls = o.rpc ? [o.rpc] : proofRpcs(rules.proof_chain);
-  if (urls.length === 0) throw new Error(`no public RPC known for chain ${rules.proof_chain}: pass --rpc`);
+async function pickRpc(chainId: number, o: TestOptions): Promise<{ urls: string[]; block: number }> {
+  const urls = o.rpc ? [o.rpc] : proofRpcs(chainId);
+  if (urls.length === 0) throw new Error(`no public RPC known for ${chainLabel(chainId)}: pass --rpc`);
   const errors: string[] = [];
   for (const [i, url] of urls.entries()) {
     try {
       const chain = Number(BigInt(await rpc<string>(url, "eth_chainId", [])));
-      if (chain !== rules.proof_chain) throw new Error(`serves chain ${chain}, not ${rules.proof_chain}`);
+      if (chain !== chainId) throw new Error(`serves ${chainLabel(chain)}, not ${chainLabel(chainId)}`);
       const head = Number(BigInt(await rpc<string>(url, "eth_blockNumber", [])));
       return { urls: urls.slice(i), block: o.block ?? head - BLOCKS_BEHIND };
     } catch (e) {
       errors.push(`${url}: ${(e as Error).message}`);
     }
   }
-  throw new Error(`no RPC answered for chain ${rules.proof_chain}:\n${errors.join("\n")}`);
+  throw new Error(`no RPC answered for ${chainLabel(chainId)}:\n${errors.join("\n")}`);
 }
 
 /** Dry-run the script as `attacker` on a fork at `block` and read back its broadcast as an Exploit (D3). */
@@ -186,19 +252,21 @@ async function scriptToExploit(o: TestOptions, rules: Rules, forkUrl: string, bl
 
 export async function testCommand(o: TestOptions): Promise<TestResult> {
   const rules = await loadRules(o);
+  const chainId = proofChain(rules, o.chain);
   const wasm = judgeWasm(o);
-  const { urls, block } = await pickRpc(rules, o);
+  const { urls, block } = await pickRpc(chainId, o);
   const { exploit, attacker } = await scriptToExploit(o, rules, urls[0]!, block);
 
-  // Prove up front what any replay reads: the senders, covered contracts and listed tokens.
+  // Prove up front what any replay reads: the senders, and the covered contracts and listed
+  // tokens on the claim's chain (R3.8).
   const accounts = [
-    ...rules.covered_contracts.filter((c) => c.chain_id === rules.proof_chain).map((c) => c.address),
-    ...rules.listed_tokens.map((t) => t.token).filter((t) => t !== "native"),
+    ...rules.covered_contracts.filter((c) => c.chain_id === chainId).map((c) => c.address),
+    ...rules.listed_tokens.filter((t) => t.chain_id === chainId && t.token !== "native").map((t) => t.token),
   ];
   const errors: string[] = [];
   for (const url of urls) {
     try {
-      const { replay, verdict, stderr } = await collectReplay({ rpc: url, block, rules, exploit, wasm, accounts });
+      const { replay, verdict, stderr } = await collectReplay({ rpc: url, chain: chainId, block, rules, exploit, wasm, accounts });
       const diagnostics = stderr.split("\n").map((l) => l.trim()).filter(Boolean);
       if (!verdict) throw new Error(`the judge gave no verdict:\n${diagnostics.join("\n")}`);
       const job = `${toJson({ replay })}\n`;
@@ -214,6 +282,7 @@ export async function testCommand(o: TestOptions): Promise<TestResult> {
         transactions: exploit.transactions.length,
         proofs: replay.proofs.length,
         saved,
+        judge: judgeUsed(wasm, rules.judge_build_hash),
         diagnostics,
       };
     } catch (e) {
@@ -228,10 +297,9 @@ export async function testCommand(o: TestOptions): Promise<TestResult> {
 
 export interface ReplayResult {
   verdict: Verdict;
-  block: { number: number; hash: string };
+  block: BlockRef;
   job: string;
-  /** The compiled judge that gave the verdict, and whether it is the very build the bounty pins (the one the enclave runs). */
-  judge: { wasm: string; sha256: string; bounty_build: string; same_as_bounty: boolean };
+  judge: JudgeUsed;
   transactions: number;
   proofs: number;
   diagnostics: string[];
@@ -241,16 +309,14 @@ export interface ReplayResult {
 export function replayJob(o: { job: string; judge?: string }): ReplayResult {
   const replay = parseReplay(JSON.parse(readFileSync(o.job, "utf8")).replay);
   const wasm = judgeWasm(o);
-  const sha256 = createHash("sha256").update(readFileSync(wasm)).digest("hex");
   const { verdict, stderr } = runJudge(wasm, replay);
   const diagnostics = stderr.split("\n").map((l) => l.trim()).filter(Boolean);
   if (!verdict) throw new Error(`the judge gave no verdict:\n${diagnostics.join("\n")}`);
-  const bounty_build = replay.rules.judge_build_hash;
   return {
     verdict,
     block: replay.block,
     job: resolve(o.job),
-    judge: { wasm, sha256, bounty_build, same_as_bounty: `0x${sha256}` === bounty_build },
+    judge: judgeUsed(wasm, replay.rules.judge_build_hash),
     transactions: replay.exploit.transactions.length,
     proofs: replay.proofs.length,
     diagnostics,
@@ -262,10 +328,7 @@ export function formatReplayResult(r: ReplayResult): string {
     `verdict: ${r.verdict.outcome} (${r.verdict.reason})`,
     `block:   ${r.block.number} ${r.block.hash} (recorded header and proofs, no RPC)`,
     `exploit: ${r.transactions} transaction(s), ${r.proofs} proven account(s), from ${r.job}`,
-    `judge:   ${r.judge.wasm} (sha256 ${r.judge.sha256})`,
-    r.judge.same_as_bounty
-      ? "         the bounty's pinned build: the program the enclave runs"
-      : `         not the bounty's pinned build ${r.judge.bounty_build} (that build differs only in the contract it answers to; pass it with --judge to run the enclave's exact program)`,
+    ...formatJudge(r.judge),
     ...r.diagnostics.map((d) => `judge:   ${d}`),
   ].join("\n");
 }
@@ -277,6 +340,7 @@ export function formatTestResult(r: TestResult): string {
     `exploit: ${r.transactions} transaction(s) from fresh account ${r.attacker}`,
     `proofs:  ${r.proofs} account(s), from ${r.rpc}`,
     `saved:   ${r.saved}`,
+    ...formatJudge(r.judge),
     ...r.diagnostics.map((d) => `judge:   ${d}`),
   ].join("\n");
 }

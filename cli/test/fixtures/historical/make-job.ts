@@ -95,12 +95,11 @@ async function main() {
       { chain_id: CHAIN_ID, address: PROXY_DEPUSDT },
       { chain_id: CHAIN_ID, address: PROXY_LEVUSDC },
     ],
-    proof_chain: CHAIN_ID,
     recency_limit_secs: 300,
     listed_tokens: [
-      { token: USDT, price: "1" },
-      { token: USDC, price: "1" },
-      { token: "native", price: "0" },
+      { chain_id: CHAIN_ID, token: USDT, price: "1" },
+      { chain_id: CHAIN_ID, token: USDC, price: "1" },
+      { chain_id: CHAIN_ID, token: "native", price: "0" },
     ],
     seed: { native: "1000000000000000000", tokens: [] },
     bounty_amount: "100000000",
@@ -111,7 +110,7 @@ async function main() {
     judge_build_hash: "0xc4222111c3523dae3bd7b3002fb63ddf254231bd9f437c497acf4d5962a1df45",
   });
 
-  const { replay, verdict } = await collectReplay({ rpc: RPC, block: BLOCK, rules, exploit, wasm: WASM });
+  const { replay, verdict } = await collectReplay({ rpc: RPC, chain: CHAIN_ID, block: BLOCK, rules, exploit, wasm: WASM });
   writeFileSync(OUT, `${toJson({ replay })}\n`);
   console.error(`wrote ${OUT}: ${replay.proofs.length} account proofs, verdict ${JSON.stringify(verdict)}`);
   if (verdict?.outcome !== "PAYS") throw new Error(`expected PAYS, got ${JSON.stringify(verdict)}`);

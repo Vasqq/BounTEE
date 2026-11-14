@@ -81,9 +81,9 @@ pub const BASE: u64 = 8453;
 #[allow(dead_code)]
 pub const ARBITRUM_ONE: u64 = 42161;
 
-/// The bounty contract the mainnet build answers to (spec, ADR-0017).
+/// The bounty contract the mainnet build answers to (spec, ADR-0017, ADR-0020).
 #[allow(dead_code)]
-pub const MAINNET_BOUNTY_CONTRACT: &str = "bounty.bountee.near";
+pub const MAINNET_BOUNTY_CONTRACT: &str = "bounty2.bountee.near";
 
 /// The test build pinned to the mainnet bounty contract: its network's chains are Base and
 /// Arbitrum One.

@@ -26,6 +26,7 @@ mod claim;
 mod confirm;
 mod header;
 mod posting;
+mod profile;
 mod proofs;
 mod release;
 mod replay;

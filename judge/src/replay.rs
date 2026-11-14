@@ -13,19 +13,21 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use bountee_formats::{AccountProof, BlockRef, Bytes, Exploit, Reason, Rules, Token, Verdict};
+use bountee_formats::{
+    AccountProof, BlockRef, Bytes, Exploit, ListedToken, Reason, Rules, Token, Verdict,
+};
 use revm::context::result::{EVMError, ExecutionResult, Output};
 use revm::context::{BlockEnv, CfgEnv, Context, ContextTr, JournalTr, TxEnv};
 use revm::database::CacheDB;
 use revm::database_interface::Database;
 use revm::inspector::Inspector;
 use revm::interpreter::{CreateInputs, CreateOutcome, CreateScheme};
-use revm::primitives::hardfork::SpecId;
 use revm::primitives::{Address, TxKind, B256, U256};
 use revm::state::AccountInfo;
 use revm::{ExecuteEvm, InspectCommitEvm, MainBuilder, MainContext};
 
 use crate::header::{self, Header};
+use crate::profile::Profile;
 use crate::proofs::{Proven, ProvenState};
 use crate::score;
 use crate::state::{ProvenDb, Unproven};
@@ -76,6 +78,12 @@ fn run(
     exploit: &Exploit,
     diagnostics: &mut dyn FnMut(&dyn std::fmt::Display),
 ) -> Result<Reason, Ended> {
+    // D1: the block names the claim's proof chain, which must be a covered contract's
+    // chain; checked before anything else.
+    let counted = score::on_proof_chain(rules, block.chain_id.get())?;
+    // D29: the proof chain's profile says how its blocks are read and replayed.
+    let chain = ProofChain::of(block.chain_id.get());
+
     // R2.9: the header must hash to the claim's block hash and carry its number.
     let block_hash: B256 = block
         .hash
@@ -83,7 +91,7 @@ fn run(
         .parse()
         .map_err(|_| Reason::UnprovenState)?;
     let header_bytes = hex(header_rlp.as_str()).ok_or(Reason::UnprovenState)?;
-    let header = header::verified(&header_bytes, block_hash)
+    let header = header::verified(&header_bytes, block_hash, chain.profile)
         .filter(|h| h.number == block.number.get())
         .ok_or(Reason::UnprovenState)?;
 
@@ -133,6 +141,8 @@ fn run(
     };
     let outcome = execute(
         rules,
+        chain,
+        &counted,
         &header,
         &db,
         &senders,
@@ -166,6 +176,8 @@ fn run(
 #[allow(clippy::too_many_arguments)]
 fn execute(
     rules: &Rules,
+    chain: ProofChain,
+    counted: &score::OnProofChain,
     header: &Header,
     db: &ProvenDb,
     senders: &[Address],
@@ -189,8 +201,8 @@ fn execute(
 
     let mut evm = Context::mainnet()
         .with_db(cache)
-        .with_block(block_env(header))
-        .with_cfg(cfg(rules, header))
+        .with_block(block_env(chain, header))
+        .with_cfg(cfg(chain, header))
         .build_mainnet_with_inspector(creations.clone());
 
     let mut nonces: Vec<(Address, u64)> = senders.iter().map(|s| (*s, 0)).collect();
@@ -213,10 +225,12 @@ fn execute(
                     .ok_or(Reason::MalformedExploit)?
                     .into(),
             )
-            .gas_limit(tx.gas.get())
+            // D29: within the chain's per-transaction cap (the CLI asks for the block's
+            // whole gas limit, which on Arbitrum is far above it).
+            .gas_limit(chain.profile.clamp_gas(tx.gas.get()))
             .gas_price(0)
             .nonce(nonce.1)
-            .chain_id(Some(rules.proof_chain.get()))
+            .chain_id(Some(chain.id))
             .build()
             .map_err(|_| Reason::MalformedExploit)?;
         match evm.inspect_tx_commit(env) {
@@ -236,16 +250,32 @@ fn execute(
     drop(evm);
 
     let holdings = creations.holdings.borrow().clone();
-    let covered = score::covered(rules)?;
-    let start_value = value(rules, header, start, &holdings, &covered, diagnostics)?;
-    let end_value = value(rules, header, end, &holdings, &covered, diagnostics)?;
-    Ok(score::verdict(rules, &start_value, &end_value)?)
+    let (listed, covered) = (&counted.listed, &counted.covered);
+    let start_value = value(listed, chain, header, start, &holdings, covered, diagnostics)?;
+    let end_value = value(listed, chain, header, end, &holdings, covered, diagnostics)?;
+    Ok(score::verdict(rules, counted, &start_value, &end_value)?)
+}
+
+/// The proof chain: its ID and how it executes (D29).
+#[derive(Clone, Copy)]
+struct ProofChain {
+    id: u64,
+    profile: &'static Profile,
+}
+
+impl ProofChain {
+    fn of(id: u64) -> Self {
+        ProofChain {
+            id,
+            profile: Profile::of(id),
+        }
+    }
 }
 
 /// The replay runs in the block after the claim's: number + 1, timestamp + 1, the claim
-/// block's beneficiary, gas limit and randomness, and a base fee of 0 (every transaction
-/// pays gas price 0, so fees never move value, R4.9).
-fn block_env(header: &Header) -> BlockEnv {
+/// block's beneficiary and gas limit, the chain's randomness, and a base fee of 0 (every
+/// transaction pays gas price 0, so fees never move value, R4.9).
+fn block_env(chain: ProofChain, header: &Header) -> BlockEnv {
     BlockEnv {
         number: U256::from(header.number + 1),
         beneficiary: header.beneficiary,
@@ -253,34 +283,31 @@ fn block_env(header: &Header) -> BlockEnv {
         gas_limit: header.gas_limit,
         basefee: 0,
         difficulty: U256::ZERO,
-        prevrandao: Some(header.mix_hash),
+        prevrandao: Some(chain.profile.randomness(header)),
         ..Default::default()
     }
 }
 
-/// Prague for a header with `requests_hash`, Cancun otherwise.
-fn cfg(rules: &Rules, header: &Header) -> CfgEnv {
-    let spec = if header.has_requests_hash {
-        SpecId::PRAGUE
-    } else {
-        SpecId::CANCUN
-    };
-    let mut cfg = CfgEnv::new_with_spec(spec);
-    cfg.chain_id = rules.proof_chain.get();
+/// The chain's EVM rules and per-transaction gas cap (D29).
+fn cfg(chain: ProofChain, header: &Header) -> CfgEnv {
+    let mut cfg = CfgEnv::new_with_spec(chain.profile.spec(header));
+    cfg.chain_id = chain.id;
+    cfg.tx_gas_limit_cap = chain.profile.tx_gas_cap();
     cfg
 }
 
-/// Holdings at one point of the replay, per listed token, for the attacker and the covered
-/// contracts.
+/// Holdings at one point of the replay, per listed token on the proof chain, for the
+/// attacker and the covered contracts on it.
 pub struct Values {
     pub attacker: Vec<U256>,
     pub covered: Vec<U256>,
 }
 
-/// Read every listed token's holdings in `db`: native coin by account balance, an ERC-20
-/// by calling its `balanceOf` (never by knowing its storage layout, D11).
+/// Read the proof chain's `listed` tokens' holdings in `db`: native coin by account balance,
+/// an ERC-20 by calling its `balanceOf` (never by knowing its storage layout, D11).
 fn value(
-    rules: &Rules,
+    listed: &[&ListedToken],
+    chain: ProofChain,
     header: &Header,
     mut db: Db,
     attacker: &[Address],
@@ -290,17 +317,17 @@ fn value(
     // The caller of the balanceOf calls; a synthetic account that only this copy has.
     let reader = Address::with_last_byte(0xbb).create(u64::MAX);
     db.insert_account_info(reader, AccountInfo::default());
-    let mut cfg = cfg(rules, header);
+    let mut cfg = cfg(chain, header);
     cfg.disable_nonce_check = true;
     let mut evm = Context::mainnet()
         .with_db(db)
-        .with_block(block_env(header))
+        .with_block(block_env(chain, header))
         .with_cfg(cfg)
         .build_mainnet();
 
     let mut read = |holders: &[Address]| -> Result<Vec<U256>, Ended> {
         let mut per_token = Vec::new();
-        for listed in &rules.listed_tokens {
+        for listed in listed {
             let mut total = U256::ZERO;
             for holder in holders {
                 let amount = match &listed.token {
@@ -320,9 +347,9 @@ fn value(
                             .caller(reader)
                             .kind(TxKind::Call(parse_address(token.as_str())?))
                             .data(data.into())
-                            .gas_limit(header.gas_limit.min(30_000_000))
+                            .gas_limit(chain.profile.clamp_gas(header.gas_limit.min(30_000_000)))
                             .gas_price(0)
-                            .chain_id(Some(rules.proof_chain.get()))
+                            .chain_id(Some(chain.id))
                             .build()
                             .map_err(|_| Reason::MalformedExploit)?;
                         match evm.transact(tx) {

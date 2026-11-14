@@ -1,0 +1,465 @@
+{
+  "transaction": {
+    "hash": "AyyFyhXxqdbjhcKvbjw46f2aE6GWb7sWCjDASM5k7Ay4",
+    "signer_id": "bountee-w53-1108.testnet",
+    "receiver_id": "g67.bountee-r33white-1105.testnet"
+  },
+  "receipts": [
+    {
+      "execution_outcome": {
+        "id": "APXHvVYXuEMWqhQytFQLrymQkN4T6yMLTUocdZmxMhCT",
+        "outcome": {
+          "executor_id": "g67.bountee-r33white-1105.testnet",
+          "logs": [
+            "EVENT_JSON:{\"standard\":\"bountee\",\"version\":\"1.0.0\",\"event\":\"claim_submitted\",\"data\":[{\"claim_id\":1,\"bounty\":{\"protocol\":\"bountee-a54-1108.testnet\",\"name\":\"demo-202611091639\"},\"whitehat\":\"bountee-w53-1108.testnet\"}]}"
+          ],
+          "status": {
+            "SuccessValue": "MQ=="
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "7f2Cax6nJ1bpu7MYgmFz6t5W2Dx5Rc4o2XBhMKhZAVXz",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "4PDcPaJxHS1LCa5eC4yZafMkFPcSoHAdRjU351YjDWxT",
+        "outcome": {
+          "executor_id": "outlayer.testnet",
+          "logs": [
+            "Secrets stored: accessor=WasmHash { hash: \"d61ef3c3482fae1f537cf420be64e68e15f63d88d235da749bd537009962ef95\" }, profile=c1, owner=g67.bountee-r33white-1105.testnet, deposit=20890000000000000000000 yoctoNEAR"
+          ],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "DD2ra4tnoyrgUHQnekQCWx7j8mqmWMo7ZYRqqT2c3SZL",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "H1MgEythtYS1wytsGGi8646Mm3ZbJGm3oQmC9USjDN7p",
+        "outcome": {
+          "executor_id": "g67.bountee-r33white-1105.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "3xm3tp2Bx8AWFFqZXBa4UiYnx2EudXzMtVKXAciJ4snn",
+        "outcome": {
+          "executor_id": "g67.bountee-r33white-1105.testnet",
+          "logs": [],
+          "status": {
+            "SuccessReceiptId": "GUdnYUJdctWdMkQx7Q8gPR7F1TfzYdcxwWvPzcugNZ3s"
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "8dYPzEedEnizGMSxpTYRZe1tZGtWRquRWLSxDJbYrP3u",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "D5pAN9Pz8c9jaNA5zASkFsMcMvz75ykf1FDcxnyqbpNW",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "2ZPBQMB4hwCMCuAdpCNDwaWCUQDXZJ9PSbiAoFzhmzJs",
+        "outcome": {
+          "executor_id": "outlayer.testnet",
+          "logs": [
+            "EVENT_JSON:{\"standard\":\"near-outlayer\",\"version\":\"1.0.0\",\"event\":\"execution_requested\",\"data\":[{\"request_data\":\"{\\\"request_id\\\":14930,\\\"sender_id\\\":\\\"bountee-w53-1108.testnet\\\",\\\"predecessor_id\\\":\\\"g67.bountee-r33white-1105.testnet\\\",\\\"code_source\\\":{\\\"WasmUrl\\\":{\\\"url\\\":\\\"https://test.fastfs.io/g67.bountee-r33white-1105.testnet/outlayer.testnet/d61ef3c3482fae1f537cf420be64e68e15f63d88d235da749bd537009962ef95.wasm\\\",\\\"hash\\\":\\\"d61ef3c3482fae1f537cf420be64e68e15f63d88d235da749bd537009962ef95\\\",\\\"build_target\\\":\\\"wasm32-wasip2\\\"}},\\\"resource_limits\\\":{\\\"max_instructions\\\":100000000000,\\\"max_memory_mb\\\":512,\\\"max_execution_seconds\\\":60},\\\"input_data\\\":\\\"\\\",\\\"input_data_in_state\\\":true,\\\"secrets_ref\\\":{\\\"profile\\\":\\\"c1\\\",\\\"account_id\\\":\\\"g67.bountee-r33white-1105.testnet\\\"},\\\"response_format\\\":\\\"Json\\\",\\\"payment\\\":\\\"206730000000000000000000\\\",\\\"attached_usd\\\":\\\"0\\\",\\\"timestamp\\\":1794242525071651024,\\\"compile_only\\\":false,\\\"force_rebuild\\\":false,\\\"store_on_fastfs\\\":false,\\\"use_bound_identity\\\":false,\\\"project_uuid\\\":null,\\\"project_id\\\":null}\",\"data_id\":[182,92,197,220,49,31,239,193,110,21,250,124,88,234,230,89,74,92,253,1,242,199,79,87,36,210,186,169,84,96,135,208],\"timestamp\":1794242525071651024}]}"
+          ],
+          "status": {
+            "SuccessReceiptId": "3SefPfhXNftiZ9d78nBnBMPbev7KguiZZ5JvE93HmNyQ"
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "CWPAReMqodY3MDrmknjHJFXVKgauXhRS4uvNqs847mYn",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "3SefPfhXNftiZ9d78nBnBMPbev7KguiZZ5JvE93HmNyQ",
+        "outcome": {
+          "executor_id": "outlayer.testnet",
+          "logs": [
+            "[[yNEAR charged: \"1223303800000000000000\"]]",
+            "EVENT_JSON:{\"standard\":\"near-outlayer\",\"version\":\"1.0.0\",\"event\":\"execution_completed\",\"data\":[{\"sender_id\":\"bountee-w53-1108.testnet\",\"code_source\":{\"WasmUrl\":{\"url\":\"https://test.fastfs.io/g67.bountee-r33white-1105.testnet/outlayer.testnet/d61ef3c3482fae1f537cf420be64e68e15f63d88d235da749bd537009962ef95.wasm\",\"hash\":\"d61ef3c3482fae1f537cf420be64e68e15f63d88d235da749bd537009962ef95\",\"build_target\":\"wasm32-wasip2\"}},\"resources_used\":{\"instructions\":38730559,\"time_ms\":2233,\"compile_time_ms\":null},\"success\":true,\"error_message\":null,\"payment_charged\":\"1223303800000000000000\",\"payment_refunded\":\"205506696200000000000000\",\"compilation_note\":\"Cached WASM from 2026-11-09T16:40:38.069422+00:00\",\"timestamp\":1794242532568584348}]}",
+            "Execution completed successfully. Output: Json(51 bytes), Resources: { instructions: 38730559, time_ms: 2233 }, Cost: 1223303800000000000000 yoctoNEAR, Refund: 205506696200000000000000 yoctoNEAR, Cached WASM from 2026-11-09T16:40:38.069422+00:00"
+          ],
+          "status": {
+            "SuccessValue": "eyJvdXRjb21lIjoiUEFZUyIsInJlYXNvbiI6Im1pbmltdW1fdGhlZnRfcmVhY2hlZCJ9"
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "BVPNcuy18Y2BKm4h543cTzGoaoPMocAjSuTMvaQVLay8",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "75YCADP4ezksaK9YfMUd7pmQpGqtXn3RqStYS1qmGbqC",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "GUdnYUJdctWdMkQx7Q8gPR7F1TfzYdcxwWvPzcugNZ3s",
+        "outcome": {
+          "executor_id": "g67.bountee-r33white-1105.testnet",
+          "logs": [
+            "EVENT_JSON:{\"standard\":\"bountee\",\"version\":\"1.0.0\",\"event\":\"claim_judged\",\"data\":[{\"claim_id\":1,\"verdict\":{\"outcome\":\"PAYS\",\"reason\":\"minimum_theft_reached\"}}]}"
+          ],
+          "status": {
+            "SuccessReceiptId": "CmAfGE4yfTfZYgLN9b9AiXBuYf1PySCmudsSBYazBx2Y"
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "5CjCouXmStwq4abibxfg4Tm8P7EFN64xTRAbFyrnHjZB",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "7C8rbzEb4AEYFtuRgvoSwSViPdG4B8dTEZNRqRquM4vi",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "DjBLDAxE7B4i84GYUYPFepzt6VCVTxkh9tF4VGWSfNCc",
+        "outcome": {
+          "executor_id": "v1.signer-prod.testnet",
+          "logs": [
+            "sign: predecessor=AccountId(\"g67.bountee-r33white-1105.testnet\"), request=SignRequestArgs { path: \"bountee-a54-1108.testnet/demo-202611091639\", payload: Ecdsa(BoundedVec { inner: [240, 18, 180, 99, 128, 167, 117, 37, 135, 87, 71, 252, 109, 71, 187, 43, 54, 2, 94, 225, 67, 29, 250, 162, 169, 27, 75, 126, 241, 126, 81, 187], witness: NonEmpty(()) }), domain_id: DomainId(0) }"
+          ],
+          "status": {
+            "SuccessReceiptId": "3ydqAfgMpcMVDnFZaAzUdxLgZH8YnqoPoGm3FpESgvS3"
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "6viPpabZn4xo9QyJ8rxzNySpkrtCTLWdKpchHnnVBbqQ",
+        "outcome": {
+          "executor_id": "v1.signer-prod.testnet",
+          "logs": [
+            "sign: predecessor=AccountId(\"g67.bountee-r33white-1105.testnet\"), request=SignRequestArgs { path: \"bountee-a54-1108.testnet/demo-202611091639\", payload: Ecdsa(BoundedVec { inner: [174, 191, 51, 182, 139, 150, 105, 165, 34, 109, 235, 238, 209, 226, 119, 116, 195, 22, 117, 209, 65, 27, 99, 192, 245, 144, 38, 253, 39, 255, 19, 110], witness: NonEmpty(()) }), domain_id: DomainId(0) }"
+          ],
+          "status": {
+            "SuccessReceiptId": "DyhsGNhETcc75HCenZoGvcYqgQoHWd6ux1vF7s8mYkaD"
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "ELYNAbm2C9bPXgSWk1VgQhyvVMb2tvX7BnknQrMqmwuh",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "DG9rCGHGGiTwkjmMC2Hkw4Jx4wxMKpMBnJk948kXhEAF",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "DyhsGNhETcc75HCenZoGvcYqgQoHWd6ux1vF7s8mYkaD",
+        "outcome": {
+          "executor_id": "v1.signer-prod.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": "eyJzY2hlbWUiOiJTZWNwMjU2azEiLCJiaWdfciI6eyJhZmZpbmVfcG9pbnQiOiIwMzVlOTk3ZTNhYzY3ZDVmZGNlNzEzMDBiN2I0N2E4NmNlMzczMjEyNGJhMTY2YzdkM2EzZmMwYjg4NDlkZTcxYmUifSwicyI6eyJzY2FsYXIiOiI3ODE1MDZjMmNjNGU0MDE1ZTljOTdiZDUzMDdlYmNlYTkwYzMxZTYzNDQ4YTA0OTUzNDc0NjBlZjkzNjYwZTBmIn0sInJlY292ZXJ5X2lkIjowfQ=="
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "JDYtLoEGma1cFFBTHfraWPejvqGrZ5fu7hN21W3DP4nE",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "3ydqAfgMpcMVDnFZaAzUdxLgZH8YnqoPoGm3FpESgvS3",
+        "outcome": {
+          "executor_id": "v1.signer-prod.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": "eyJzY2hlbWUiOiJTZWNwMjU2azEiLCJiaWdfciI6eyJhZmZpbmVfcG9pbnQiOiIwMjM2OGY2MjE1YmJmMDc3N2Y5M2VjODQ1ZTU1YzlmMWYxNDljZjFmNTZjZWFhYjk3YzUzYTg5NjVhNjk0NDU3MzUifSwicyI6eyJzY2FsYXIiOiIxYTcwNGE0NmFlYTg4YmQ4NTI3NDMzOTU3YTliZjJjOWNmM2UzZTU0YTI2YTYxODNlMWE2MmZjMTg3NzQ2M2FlIn0sInJlY292ZXJ5X2lkIjowfQ=="
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "ASLParYVnUa4V8Chc9oPkDz6LXJGnf3X4HsgcebobA1C",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "CmAfGE4yfTfZYgLN9b9AiXBuYf1PySCmudsSBYazBx2Y",
+        "outcome": {
+          "executor_id": "g67.bountee-r33white-1105.testnet",
+          "logs": [
+            "EVENT_JSON:{\"standard\":\"bountee\",\"version\":\"1.0.0\",\"event\":\"pauses_signed\",\"data\":[{\"bounty\":{\"protocol\":\"bountee-a54-1108.testnet\",\"name\":\"demo-202611091639\"},\"claim_id\":1,\"pauses\":[{\"chain_id\":84532,\"contract\":\"0x586c5742fa199a4027ad49bbe89d89b67ddd4e06\",\"tx_hash\":\"0xbac5c15e5e8d81cabc1bafbe22c24fd176d216f12bc3c726bd4fc026bbf893e8\"},{\"chain_id\":421614,\"contract\":\"0x7d2efce36c5aa6dad084e44280c795c6f7aafc53\",\"tx_hash\":\"0x7b8ec5830f7428ca7f4fdce97bb9f14dbaadbaec4952a57ca12bed30575db84e\"}]}]}"
+          ],
+          "status": {
+            "SuccessReceiptId": "4hEK6fKFPRY4PvxdMbkY1QDF8JH32kgGRp8ctFxcK9g3"
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "Ghxvk7xFUxhtr21QBvVtwE4haE5c81ff3v6ehLB6YB8k",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "41kytdzZfCZuJDZGPtBhTcaWH5upB6Ck593ND3aU8z26",
+        "outcome": {
+          "executor_id": "ft.bountee-spike4.testnet",
+          "logs": [
+            "The account is already registered, refunding the deposit"
+          ],
+          "status": {
+            "SuccessValue": "eyJ0b3RhbCI6IjEyNTAwMDAwMDAwMDAwMDAwMDAwMDAiLCJhdmFpbGFibGUiOiIwIn0="
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "5dcctNUNtwhXa6m9bqhionRkeyW9taR1ZjndvLqCMwaw",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "AtbiFikvyGkQfqvpD6Ezg7NuBetAhQG5BDhLWr8Fw7BC",
+        "outcome": {
+          "executor_id": "g67.bountee-r33white-1105.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "4hEK6fKFPRY4PvxdMbkY1QDF8JH32kgGRp8ctFxcK9g3",
+        "outcome": {
+          "executor_id": "g67.bountee-r33white-1105.testnet",
+          "logs": [],
+          "status": {
+            "SuccessReceiptId": "E3jLbzp3K3cFGmfUbC98pzjsuQH8KJyQT8nxHa17oCgx"
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "HhErqqQXB1r9pchCnZ276k8FSLtRmjw952aoT9NXAy36",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "DqDj7iDnKrmmwAD9panq5SoEC7ZFfBfJTQCz1MGU92Cy",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "5ion9fnVJacoRwf5aMh6Lrf1JgdLAz4fxTFPbK7FGY6q",
+        "outcome": {
+          "executor_id": "ft.bountee-spike4.testnet",
+          "logs": [
+            "EVENT_JSON:{\"standard\":\"nep141\",\"version\":\"1.0.0\",\"event\":\"ft_transfer\",\"data\":[{\"old_owner_id\":\"g67.bountee-r33white-1105.testnet\",\"new_owner_id\":\"bountee-w53-1108.testnet\",\"amount\":\"100000000\",\"memo\":\"BounTEE payout, claim 1\"}]}"
+          ],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "8MPoE843sDZ2AyEtZ9suqgFxBML1hA5k2PLug25uLHr9",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "E3jLbzp3K3cFGmfUbC98pzjsuQH8KJyQT8nxHa17oCgx",
+        "outcome": {
+          "executor_id": "g67.bountee-r33white-1105.testnet",
+          "logs": [
+            "EVENT_JSON:{\"standard\":\"bountee\",\"version\":\"1.0.0\",\"event\":\"bounty_paid\",\"data\":[{\"bounty\":{\"protocol\":\"bountee-a54-1108.testnet\",\"name\":\"demo-202611091639\"},\"claim_id\":1,\"amount\":\"100000000\"}]}"
+          ],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    },
+    {
+      "execution_outcome": {
+        "id": "FiiekT1n3VeFw9RJiaJp87eTuf7nGtfeXUApkbmcMXEV",
+        "outcome": {
+          "executor_id": "bountee-w53-1108.testnet",
+          "logs": [],
+          "status": {
+            "SuccessValue": ""
+          }
+        }
+      }
+    }
+  ]
+}

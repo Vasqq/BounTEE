@@ -3,36 +3,38 @@
 // Seams this ticket uses (written before the first test, per the /tdd agreement):
 //
 //   T — `node scripts/check-readme-steps.ts`, spawned inside the OS sandbox that denies all
-//     networking (the #9 offline harness), against the committed README.md. A step is a
-//     ```console block: `$ <command>` lines, each followed by the lines its output must show.
+//     networking (the #9 offline harness), against the committed README.md. A step is a command
+//     in a ```sh check block (what a reader copies), and the ```text block after it holds the
+//     lines its output must show, in order.
 //       Catches: a README step whose command fails or whose output no longer shows what the
 //       README says (a verdict that changed, a fixture that moved, a renamed flag); a step the
 //       checker skips without saying so (the steps it reports are counted against the README's
 //       own); a checker that passes without comparing output (the wrong-expectation control);
 //       an offline step that secretly needs the network, keys or funds.
-//       Misses: the steps that need the network (`console online` blocks, run by the checker
+//       Misses: the steps that need the network (`sh check online` blocks, run by the checker
 //       without --offline) and those still waiting for mainnet data (reported pending, and
 //       refused under --strict); whether the README's prose, threat model and evidence links
-//       are true (R13.1, R15.5, R15.7, R4.12 and ADR-0017 are inspections, not tests).
+//       are true (R13.1, R15.5, R15.7, R4.12 and ADR-0017 are inspections, not tests). Links and
+//       placeholders are #83's (readme-links.test.ts).
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
+import { judgeWasm } from "../src/test.ts";
 import { offline } from "./offline.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
-const target = readFileSync(`${repo}judge/wasm-target`, "utf8").trim();
 const CHECKER = `${repo}scripts/check-readme-steps.ts`;
 const README = `${repo}README.md`;
 
-/** The README's steps, read here independently of the checker: one per `$ ` line in a console block. */
+/** The README's steps, read here independently of the checker: one per line of a ```sh check block. */
 function stepsIn(markdown: string): { command: string; online: boolean }[] {
   const steps: { command: string; online: boolean }[] = [];
-  for (const [, info, body] of markdown.matchAll(/^```(console[^\n]*)\n([\s\S]*?)^```/gm)) {
+  for (const [, info, body] of markdown.matchAll(/^```(sh check[^\n]*)\n([\s\S]*?)^```/gm)) {
     for (const line of body!.split("\n")) {
-      if (line.startsWith("$ ")) steps.push({ command: line.slice(2).trim(), online: /\bonline\b/.test(info!) });
+      if (line.trim()) steps.push({ command: line.trim(), online: /\bonline\b/.test(info!) });
     }
   }
   return steps;
@@ -41,13 +43,9 @@ function stepsIn(markdown: string): { command: string; online: boolean }[] {
 beforeAll(() => {
   // The judge and its scenario tests are built before networking is cut, as a Verifier's
   // checkout would have them after the README's setup.
-  for (const args of [
-    ["build", "--release", "-p", "bountee-judge", "--target", target],
-    ["test", "-p", "bountee-judge", "--test", "seam_j_scenarios", "--no-run"],
-  ]) {
-    const res = spawnSync("cargo", args, { cwd: repo, encoding: "utf8" });
-    if (res.status !== 0) throw new Error(res.stderr);
-  }
+  judgeWasm();
+  const res = spawnSync("cargo", ["test", "-p", "bountee-judge", "--test", "seam_j_scenarios", "--no-run"], { cwd: repo, encoding: "utf8" });
+  if (res.status !== 0) throw new Error(res.stderr);
 }, 600_000);
 
 test("R15.4: the checker runs every offline README step with no network and each shows its expected output", () => {
@@ -82,7 +80,7 @@ test("R15.4 control: a step whose output differs from the README's fails the che
   writeFileSync(
     wrong,
     readFileSync(README, "utf8").replace(
-      /(\$ bountee test --job demo\/fixtures\/cheat\.json\n)verdict: ZERO/,
+      /(bountee test --job demo\/fixtures\/cheat\.json\n```\n\nYou should see:\n\n```text\nverdict: PAYS \(minimum_theft_reached\)\n)verdict: ZERO/,
       "$1verdict: PAYS",
     ),
   );
@@ -106,11 +104,11 @@ test("D21: no README step files a claim, posts a bounty or signs anything", () =
 test("R15.4 ADR-0017: --strict fails while a step waits for mainnet data", () => {
   const dir = mkdtempSync(join(tmpdir(), "bountee-readme-"));
   const pending = join(dir, "README.md");
-  writeFileSync(pending, "```console online\n$ bountee verify <MAINNET: demo bounty id> --network mainnet\npass contract_code\n```\n");
+  writeFileSync(pending, "```sh check online\nbountee verify <!-- PENDING: demo bounty id --> --network mainnet\n```\n\n```text\npass contract_code\n```\n");
   const lax = offline(process.execPath, [CHECKER, "--readme", pending, "--json"]);
   expect(lax.code, lax.stderr).toBe(0);
   expect(JSON.parse(lax.stdout).steps).toStrictEqual([
-    { command: "bountee verify <MAINNET: demo bounty id> --network mainnet", status: "pending" },
+    { command: "bountee verify <!-- PENDING: demo bounty id --> --network mainnet", status: "pending" },
   ]);
   const strict = offline(process.execPath, [CHECKER, "--readme", pending, "--strict"]);
   expect(strict.code).toBe(1);

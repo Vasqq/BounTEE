@@ -6,10 +6,17 @@
 //   -> a cheat claimed through the tool: ZERO, nothing moves (R4.11, D2)
 //   -> a job that can't confirm its block: claim pending in its place, no verdict (R2.6)
 //   -> the real demo exploit claimed through the tool: PAYS, paid exactly once, vault paused
-//      (R3.10, D2, R7.4)
+//      (R3.10, D2, R7.4); replayed live after the pause, it fails (R7.5)
 //   -> its sealed exploit copied and sent straight to OutLayer: refused (R5.2)
 //
+// Seams (#53): T only. The demo vault is a PositionVault (ADR-0019), read back through its own
+// views (`paused()`, `totalShares()`) and its USDC balance. Catches the claim path, the pause
+// landing and the paused vault refusing the exploit, on the new vault; misses mainnet (#35).
+// A testnet run is a rehearsal, never evidence (requirements.md, ADR-0017).
+//
 // Runs only with BOUNTEE_DAY3_RUN=1 (it spends testnet NEAR and Base Sepolia ETH). Needs
+// SEALED_EXPLOIT, the absolute path of the sealed exploit script (never in this repo); without
+// it every test stops with "sealed exploit not present" before deploying or spending. Needs
 // $BOUNTEE_DAY3 (default ~/.bountee-testnet/day3-deployment.json) from `testnet/deploy-system.ts`, the
 // Protocol's and attacker's keys in ~/.near-credentials/testnet, and the Base Sepolia
 // deployer in ~/.bountee-testnet/base-sepolia-deployer.env. WHITEHAT=<account> uses an
@@ -29,6 +36,7 @@ import { ensureClaimBalance } from "../src/claim-flow.ts";
 import { Near, events, milliNear, tgas } from "../src/near.ts";
 import { defaultRpc } from "../src/chains.ts";
 import { withNumber } from "./testnet/header.ts";
+import { sealedExploit } from "./testnet/sealed-exploit.ts";
 
 const RUN = process.env.BOUNTEE_DAY3_RUN === "1";
 const home = homedir();
@@ -37,6 +45,7 @@ const repo = fileURLToPath(new URL("../../", import.meta.url));
 const freshInstance = fileURLToPath(new URL("./testnet/fresh-instance.ts", import.meta.url));
 const copiedExploit = fileURLToPath(new URL("./testnet/copied-exploit.ts", import.meta.url));
 const RPC = defaultRpc(84532)!;
+const SEED = 1_000_000n * 10n ** 6n;
 const ATTACKER = process.env.ATTACKER ?? "bts1-mallory-1104.testnet";
 const evidenceFile = join(home, ".bountee-testnet", "day3-evidence.json");
 const evidence: Record<string, unknown> = {};
@@ -71,9 +80,12 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
   let whitehat = process.env.WHITEHAT ?? "";
   const ft = async (who: string) => BigInt(await near.view<string>(usdc, "ft_balance_of", { account_id: who }));
   const vaultUsdc = () => uint(cast("call", instance.evm_usdc, "balanceOf(address)(uint256)", instance.vault, "--rpc-url", RPC));
-  const claimArgs = (script: string) => ["claim", join(repo, "demo/script", script), "--bounty", instance.bounty, "--contract", contract, "--as", whitehat, "--json"];
+  const totalShares = () => uint(cast("call", instance.vault, "totalShares()(uint256)", "--rpc-url", RPC));
+  const honestUser = join(repo, "demo/script/HonestUser.s.sol");
+  const claimArgs = (script: string) => ["claim", script, "--bounty", instance.bounty, "--contract", contract, "--as", whitehat, "--json"];
 
   test("D21: a script deploys a fresh demo instance (vault, pause-role grant, pause gas) and posts its bounty", async () => {
+    sealedExploit();
     // D18 first: the Whitehat the run claims as, so the preflight can check its balance.
     if (!whitehat) {
       const init = await bountee(["init", "--json"]);
@@ -100,18 +112,21 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
     expect(cast("call", instance.vault, "pauser()(address)", "--rpc-url", RPC).toLowerCase()).toBe(instance.pause_role);
     expect(cast("call", instance.vault, "paused()(bool)", "--rpc-url", RPC)).toBe("false");
     expect(BigInt(cast("balance", instance.pause_role, "--rpc-url", RPC))).toBeGreaterThanOrEqual(200_000n * 10n ** 9n);
-    expect(vaultUsdc()).toBe(1_000_000n * 10n ** 6n);
+    // Seeded by the deployer's deposit: the vault's USDC backs every share, 1:1.
+    expect(vaultUsdc()).toBe(SEED);
+    expect(totalShares()).toBe(SEED);
     const bounty = await near.view(contract, "bounty", { id: { protocol: instance.protocol, name: instance.name } });
     expect(bounty.state).toBe("live");
     expect(bounty.rules.covered_contracts).toStrictEqual([{ chain_id: 84532, address: instance.vault }]);
     expect((await near.view(contract, "pause_role", { id: bounty.id })).address).toBe(instance.pause_role);
   }, 600_000);
 
-  test("R4.11, D2: a cheat (a fresh account's deposit-then-withdraw) claimed through the tool scores ZERO and moves nothing", async () => {
-    const before = { whitehat: await ft(whitehat), contract: await ft(contract), vault: vaultUsdc() };
-    // 5,000 test USDC minted, deposited and withdrawn: the account gains more than the
-    // minimum theft, but nothing is taken from the covered vault.
-    const r = await bountee(claimArgs("HonestUser.s.sol"), { VAULT: instance.vault, AMOUNT: "5000000000" });
+  test("R4.11, D2: a cheat (a fresh account's deposit then redeem) claimed through the tool scores ZERO and moves nothing", async () => {
+    sealedExploit();
+    const before = { whitehat: await ft(whitehat), contract: await ft(contract), vault: vaultUsdc(), shares: totalShares() };
+    // 5,000 test USDC minted, deposited and redeemed: the account moves more than the minimum
+    // theft through the vault, but nothing is taken from it.
+    const r = await bountee(claimArgs(honestUser), { VAULT: instance.vault, AMOUNT: "5000000000" });
     expect(r.code, r.stderr || r.stdout).toBe(0);
     const out = JSON.parse(r.stdout);
     record("R4.11 cheat claim", { claim_id: out.claim_id, tx: out.tx_hash });
@@ -123,18 +138,21 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
     expect(await ft(whitehat)).toBe(before.whitehat);
     expect(await ft(contract)).toBe(before.contract);
     expect(vaultUsdc()).toBe(before.vault);
+    expect(totalShares()).toBe(before.shares);
+    expect(cast("call", instance.vault, "paused()(bool)", "--rpc-url", RPC)).toBe("false");
     expect(events(await near.txStatus(out.tx_hash, whitehat)).map((e) => e.event)).not.toContain("bounty_paid");
   }, 600_000);
 
   test("R2.6: a job that can't confirm its block keeps the claim pending in its place, with its submission time and no verdict", async () => {
+    sealedExploit();
     // A claim whose header hashes correctly and is recent, but names a block Base Sepolia
     // hasn't made yet: no pinned RPC can confirm it, so the job ends without a verdict.
-    const tested = await bountee(["test", join(repo, "demo/script/HonestUser.s.sol"), "--bounty", instance.bounty, "--contract", contract, "--json"], { VAULT: instance.vault });
+    const tested = await bountee(["test", honestUser, "--bounty", instance.bounty, "--contract", contract, "--json"], { VAULT: instance.vault });
     expect(tested.code, tested.stderr).toBe(0);
     const job = JSON.parse(readFileSync(JSON.parse(tested.stdout).saved, "utf8")).replay;
     const head = Number(cast("block-number", "--rpc-url", RPC));
     const header = withNumber(job.header, head + 1_000_000);
-    const block = { number: head + 1_000_000, hash: `0x${Buffer.from(keccak_256(Buffer.from(header.slice(2), "hex"))).toString("hex")}` };
+    const block = { chain_id: job.block.chain_id, number: head + 1_000_000, hash: `0x${Buffer.from(keccak_256(Buffer.from(header.slice(2), "hex"))).toString("hex")}` };
     const { seal } = await import("../src/seal.ts");
     const { KEYSTORE_API } = await import("../src/endpoints.ts");
     const sealed = await seal({ api: KEYSTORE_API.testnet, judgeHash: deployment.judge.hash.startsWith("0x") ? deployment.judge.hash : `0x${deployment.judge.hash}`, bountyContract: contract, whitehat, exploit: job.exploit });
@@ -165,9 +183,10 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
 
   let paysClaim: { claim_id: number; tx_hash: string; sealed_exploit: string } | undefined;
 
-  test("R3.10, D2, R7.4: the real demo exploit claimed through the tool is paid exactly once, and the vault reads paused", async () => {
+  test("R3.10, D2, R7.4, R7.5: the real demo exploit claimed through the tool is paid exactly once, the vault reads paused, and the exploit replayed live fails", async () => {
+    const exploit = sealedExploit();
     const before = { whitehat: await ft(whitehat), contract: await ft(contract) };
-    const r = await bountee([...claimArgs("Exploit.s.sol"), "--no-verify", "--timeout", "600"], { VAULT: instance.vault });
+    const r = await bountee([...claimArgs(exploit), "--no-verify", "--timeout", "600"], { VAULT: instance.vault });
     expect(r.code, r.stderr || r.stdout).toBe(0);
     const out = JSON.parse(r.stdout);
     paysClaim = out;
@@ -203,9 +222,16 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
     expect(receipt.from.toLowerCase()).toBe(instance.pause_role);
     expect(cast("call", instance.vault, "paused()(bool)", "--rpc-url", RPC)).toBe("true");
 
+    // R7.5: the exploit replayed live, on the chain as it is now, fails on the paused vault.
+    const replayed = await bountee(["test", exploit, "--bounty", instance.bounty, "--contract", contract, "--json"], { VAULT: instance.vault });
+    record("R7.5 replay after the pause", { code: replayed.code, error: replayed.stderr.slice(-600) });
+    expect(replayed.code).not.toBe(0);
+    // PositionVault's EnforcedPause(), by name or by selector.
+    expect(replayed.stderr).toMatch(/EnforcedPause|0xd93c0665/);
+
     // Exactly once: the tool won't claim a won bounty, and the contract refuses the same
     // claim filed again directly; nothing more is paid.
-    const again = await bountee(claimArgs("Exploit.s.sol"), { VAULT: instance.vault });
+    const again = await bountee(claimArgs(exploit), { VAULT: instance.vault });
     expect(again.code).not.toBe(0);
     expect(again.stderr).toMatch(/has been won/);
     const status = await near.txStatus(out.tx_hash, whitehat);
@@ -227,6 +253,7 @@ describe.runIf(RUN)("Day-3 checkpoint on NEAR testnet and Base Sepolia", () => {
   }, 5_400_000);
 
   test("R5.2: the PAYS claim's sealed exploit, copied and sent straight to OutLayer, is refused", async () => {
+    sealedExploit();
     expect(paysClaim).toBeDefined();
     // The same driver #35 runs on mainnet (testnet/copied-exploit.ts), signed by the attacker.
     const r = await run(process.execPath, [copiedExploit], {

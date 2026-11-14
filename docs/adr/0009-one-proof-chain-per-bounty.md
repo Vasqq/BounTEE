@@ -1,3 +1,5 @@
 # One proof chain per bounty
 
 A Protocol's covered contracts run on several EVM chains, with the same code but possibly different balances and settings, and the replay needs one frozen copy of state. Each bounty names one proof chain: the snapshot comes from that chain, the minimum theft is measured there, and a winning exploit pauses every covered contract on every chain. Posting shows whether the covered contracts' code matches across chains. A snapshot per chain would catch bugs that exist only in one chain's configuration, but it multiplies snapshots, posting steps and tests, and raises questions (minimum theft per chain; whether a one-chain bug pauses the others) that the hackathon doesn't need answered. Configuration-specific bugs are future work. (Since ADR-0014, the snapshot is the proof chain's recent state at each claim's block, and the posting-time code-match check is dropped.)
+
+Superseded by ADR-0020: a claim can be proven on any covered chain.

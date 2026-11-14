@@ -1,10 +1,9 @@
 {
   "covered_contracts": [{ "chain_id": 84532, "address": "0x036cbd53842c5426634e7929541ec2318f3dcf7e" }],
-  "proof_chain": 84532,
   "recency_limit_secs": 300,
   "listed_tokens": [
-    { "token": "0x036cbd53842c5426634e7929541ec2318f3dcf7e", "price": "1" },
-    { "token": "native", "price": "0" }
+    { "chain_id": 84532, "token": "0x036cbd53842c5426634e7929541ec2318f3dcf7e", "price": "1" },
+    { "chain_id": 84532, "token": "native", "price": "0" }
   ],
   "seed": { "native": "1000000000000000000", "tokens": [] },
   "bounty_amount": "1000000",

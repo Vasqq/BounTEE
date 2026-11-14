@@ -36,7 +36,9 @@ export interface CoveredContract {
 /** `"native"` or an ERC-20 address. */
 export type Token = string;
 
+/** A listed token: its chain, the token on it, and its posting price (ADR-0020). */
 export interface ListedToken {
+  chain_id: number;
   token: Token;
   price: string;
 }
@@ -54,7 +56,6 @@ export interface Seed {
 /** A bounty's rules, fixed at posting (R1.1). */
 export interface Rules {
   covered_contracts: CoveredContract[];
-  proof_chain: number;
   recency_limit_secs: number;
   listed_tokens: ListedToken[];
   seed: Seed;
@@ -66,7 +67,9 @@ export interface Rules {
   judge_build_hash: string;
 }
 
+/** A block on its chain: the claim's proof chain, any covered chain (D1, ADR-0020). */
 export interface BlockRef {
+  chain_id: number;
   number: number;
   hash: string;
 }
@@ -109,6 +112,7 @@ export const REASONS = [
   { reason: "unproven_state", outcome: "INVALID" },
   { reason: "block_not_confirmed", outcome: "INVALID" },
   { reason: "stale_block", outcome: "INVALID" },
+  { reason: "chain_not_covered", outcome: "INVALID" },
 ] as const;
 
 export type Reason = (typeof REASONS)[number]["reason"];
@@ -126,9 +130,8 @@ export const parseCoveredContract = object<CoveredContract>({ chain_id: safeU64,
 
 export const parseRules: (v: unknown) => Rules = object<Rules>({
   covered_contracts: array(parseCoveredContract),
-  proof_chain: safeU64,
   recency_limit_secs: u32,
-  listed_tokens: array(object<ListedToken>({ token, price: uint })),
+  listed_tokens: array(object<ListedToken>({ chain_id: safeU64, token, price: uint })),
   seed: object<Seed>({ native: uint, tokens: array(object<TokenAmount>({ token: evmAddress, amount: uint })) }),
   bounty_amount: uint,
   minimum_theft: uint,
@@ -138,7 +141,7 @@ export const parseRules: (v: unknown) => Rules = object<Rules>({
   judge_build_hash: b256,
 });
 
-export const parseBlockRef = object<BlockRef>({ number: safeU64, hash: b256 });
+export const parseBlockRef = object<BlockRef>({ chain_id: safeU64, number: safeU64, hash: b256 });
 
 export const parseAccountProof = object<AccountProof>({
   address: evmAddress,
